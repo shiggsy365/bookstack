@@ -1,0 +1,20 @@
+##### - User ID - #####
+PUID = 1001
+PGID = 1001
+
+##### - Install, Library and Ingest Folders - #####
+ACW_CONFIG = /opt/docker/apps/autocaliweb
+ACW_INGEST = /mnt/calibre/ingest
+ACW_LIBRARY = /mnt/books
+
+##### - Ports to run and host AutoCaliWeb and Ephemera - #####
+ACW_PORT = 8083
+EPH_PORT = 8286
+AUTOCAL_HOSTNAME =
+EPHEMERA_HOSTNAME =
+
+##### - Link to A Archive - #####
+AA_URL = 
+
+##### - Time Zone - #####
+TZ = Europe/London
