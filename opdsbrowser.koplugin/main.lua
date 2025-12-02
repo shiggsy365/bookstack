@@ -755,7 +755,6 @@ function OPDSBrowser:urlEncode(str)
 end
 
 function OPDSBrowser:downloadBook(book)
-    -- Ensure download directory exists
     local lfs = require("libs/libkoreader-lfs")
     local dir_exists = lfs.attributes(self.download_dir, "mode") == "directory"
     if not dir_exists then
@@ -768,35 +767,23 @@ function OPDSBrowser:downloadBook(book)
             return
         end
     end
-    
-    -- Extract filename from URL or use title
     local filename = book.download_url:match("([^/]+)$")
     if not filename or filename == "" or not filename:match("%.") then
         filename = book.title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. ".epub"
     end
-    
     local filepath = self.download_dir .. "/" .. filename
-    
     logger.info("OPDS Browser: Downloading to:", filepath)
-    
-    -- Construct full download URL
     local download_url = self.opds_url .. book.download_url
     logger.info("OPDS Browser: Download URL:", download_url)
-    
-    -- Wrap entire download in pcall to catch crashes
-    local success, result, error_msg = pcall(function()
-        -- Open file for writing
+    local success, result = pcall(function()
         local file, err = io.open(filepath, "wb")
         if not file then
             logger.err("OPDS Browser: Failed to open file:", err)
             return false, "Failed to create file: " .. (err or "unknown")
         end
-        
         local BLOCK_TIMEOUT = 5
         local TOTAL_TIMEOUT = 60
-        
         socketutil:set_timeout(BLOCK_TIMEOUT, TOTAL_TIMEOUT)
-        
         local request_params = {
             url = download_url,
             method = "GET",
@@ -807,21 +794,16 @@ function OPDSBrowser:downloadBook(book)
             user = self.opds_username ~= "" and self.opds_username or nil,
             password = self.opds_password ~= "" and self.opds_password or nil,
         }
-        
         local parsed_url = url.parse(download_url)
         local requester = http
-        
         if parsed_url.scheme == "https" then
             requester = https
             request_params.verify = "none"
             request_params.protocol = "tlsv1_2"
         end
-        
-        local code, headers,status = socket.skip(1, requester.request(request_params))
+        local code, headers, status = socket.skip(1, requester.request(request_params))
         socketutil:reset_timeout()
-        
-        -- ltn12 sink closes the file automatically, don't close it again
-        
+        file:close()
         if code == 200 then
             logger.info("OPDS Browser: Download successful")
             return true, filepath
@@ -831,18 +813,17 @@ function OPDSBrowser:downloadBook(book)
             return false, "HTTP Code: " .. tostring(code)
         end
     end)
-    
-    if success then
-        if result == true then
-            -- Success - error_msg is actually filepath
+        if success and result then
+        if type(result) == "string" then
+            -- Success - result is filepath
             UIManager:show(InfoMessage:new{
                 text = T(_("Downloaded: %1"), filename),
                 timeout = 3,
             })
         else
-            -- Failed - error_msg contains error
+            -- Failed - result is error message
             UIManager:show(InfoMessage:new{
-                text = T(_("Download failed: %1"), error_msg or "unknown error"),
+                text = T(_("Download failed: %1"), result),
                 timeout = 3,
             })
         end
@@ -855,6 +836,11 @@ function OPDSBrowser:downloadBook(book)
         })
     end
 end
+        
+        
+        
+        
+        
 
 function OPDSBrowser:requestBook()
     local input_dialog
