@@ -12,7 +12,7 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local logger = require("logger")
 local util = require("util")
 local _ = require("gettext")
-local T = require("ffi/util").template
+local T = require("ffi/util"). template
 
 -- HTTP libraries - using same approach as working plugin
 local http = require("socket.http")
@@ -28,9 +28,9 @@ local OPDSBrowser = WidgetContainer:extend{
 }
 
 function OPDSBrowser:init()
-    self.ui.menu:registerToMainMenu(self)
+    self.ui. menu:registerToMainMenu(self)
     self.settings_file = DataStorage:getSettingsDir() .. "/opdsbrowser.lua"
-    self.settings = LuaSettings:open(self.settings_file)
+    self.settings = LuaSettings:open(self. settings_file)
     
     -- Load settings with defaults
     self.opds_url = self.settings:readSetting("opds_url") or ""
@@ -75,6 +75,15 @@ function OPDSBrowser:addToMainMenu(menu_items)
                 text = _("Request Book (Ephemera)"),
                 callback = function()
                     self:requestBook()
+                end,
+                enabled_func = function()
+                    return self.ephemera_url ~= ""
+                end,
+            },
+            {
+                text = _("Download Queue (Ephemera)"),
+                callback = function()
+                    self:showDownloadQueue()
                 end,
                 enabled_func = function()
                     return self.ephemera_url ~= ""
@@ -127,7 +136,7 @@ function OPDSBrowser:showSettings()
                     text = _("Cancel"),
                     id = "close",
                     callback = function()
-                        self.settings_dialog:onClose()
+                        self. settings_dialog:onClose()
                         UIManager:close(self.settings_dialog)
                     end
                 },
@@ -146,7 +155,7 @@ function OPDSBrowser:showSettings()
                             if not new_opds_url:match("^https?://") then
                                 UIManager:show(InfoMessage:new{
                                     text = _("Invalid OPDS URL!\n\nURL must start with http:// or https://\n\nExample: http://192.168.1.100:8080/opds"),
-                                    timeout = 5,
+                                    timeout = 3,
                                 })
                                 return
                             end
@@ -157,7 +166,7 @@ function OPDSBrowser:showSettings()
                             if not new_ephemera_url:match("^https?://") then
                                 UIManager:show(InfoMessage:new{
                                     text = _("Invalid Ephemera URL!\n\nURL must start with http:// or https://\n\nExample: http://192.168.1.100:8286"),
-                                    timeout = 5,
+                                    timeout = 3,
                                 })
                                 return
                             end
@@ -169,10 +178,10 @@ function OPDSBrowser:showSettings()
                         self.ephemera_url = new_ephemera_url
                         self.download_dir = new_download_dir
                         
-                        self.settings:saveSetting("opds_url", self.opds_url)
+                        self. settings:saveSetting("opds_url", self.opds_url)
                         self.settings:saveSetting("opds_username", self.opds_username)
-                        self.settings:saveSetting("opds_password", self.opds_password)
-                        self.settings:saveSetting("ephemera_url", self.ephemera_url)
+                        self.settings:saveSetting("opds_password", self. opds_password)
+                        self.settings:saveSetting("ephemera_url", self. ephemera_url)
                         self.settings:saveSetting("download_dir", self.download_dir)
                         self.settings:flush()
                         
@@ -199,7 +208,7 @@ function OPDSBrowser:makeAuthHeader()
     if self.opds_username ~= "" and self.opds_password ~= "" then
         local mime = require("mime")
         local credentials = mime.b64(self.opds_username .. ":" .. self.opds_password)
-        return "Basic " .. credentials
+        return "Basic " ..  credentials
     end
     return nil
 end
@@ -207,7 +216,7 @@ end
 function OPDSBrowser:httpRequest(url_str, method, body, content_type)
     -- Validate URL format
     if not url_str or url_str == "" then
-        logger.err("OPDS Browser: Empty URL provided")
+        logger. err("OPDS Browser: Empty URL provided")
         return nil, 1, "Empty URL"
     end
     
@@ -278,14 +287,14 @@ function OPDSBrowser:httpRequest(url_str, method, body, content_type)
         logger.info("OPDS Browser: Using HTTPS with TLS 1.2")
     end
     
-    -- Make the request using socket.skip like the working plugin
+    -- Make the request using socket. skip like the working plugin
     local code, headers, status = socket.skip(1, requester.request(request_params))
     socketutil:reset_timeout()
     
     local response_body = table.concat(sink)
     
     if code == 200 then
-        logger.info("OPDS Browser: Success! Response length:", #response_body)
+        logger.info("OPDS Browser: Success!  Response length:", #response_body)
         return response_body, 200, headers
     elseif code == nil then
         logger.warn("OPDS Browser: Request failed:", headers)
@@ -318,8 +327,8 @@ function OPDSBrowser:parseOPDSFeed(xml_data)
         -- Extract author - Calibre-Web format
         local author_block = entry:match("<author>(.-)</author>")
         if author_block then
-            book.author = author_block:match("<n>(.-)</n>") or 
-                         author_block:match("<n>(.-)</n>") or 
+            book.author = author_block:match("<name>(.-)</name>") or 
+                         author_block:match("<name>(.-)</name>") or 
                          "Unknown Author"
         else
             book.author = "Unknown Author"
@@ -388,7 +397,7 @@ function OPDSBrowser:parseOPDSFeed(xml_data)
     
     -- If we found no books, log more details for debugging
     if #entries == 0 then
-        logger.warn("OPDS Browser: No books parsed. Checking for feed structure...")
+        logger.warn("OPDS Browser: No books parsed.  Checking for feed structure...")
         if xml_data:match("<feed") then
             logger.info("OPDS Browser: Feed tag found - this is an OPDS feed")
         else
@@ -426,7 +435,7 @@ function OPDSBrowser:showBookList(books, title)
         end
         
         table.insert(items, {
-            text = book.title .. series_info,
+            text = book.title ..  series_info,
             subtitle = book.author,
             callback = function()
                 self:showBookDetails(book)
@@ -463,7 +472,7 @@ function OPDSBrowser:showBookDetails(book)
     end
     
     local details = T(_("Title: %1\n\nAuthor: %2"), book.title, book.author) .. 
-                   series_text ..
+                   series_text .. 
                    "\n\n" .. book.summary
     
     local buttons = {
@@ -496,7 +505,7 @@ function OPDSBrowser:showBookDetails(book)
 end
 
 function OPDSBrowser:browseOPDS()
-    local url = self.opds_url .. "/opds/new"
+    local url = self.opds_url ..  "/opds/new"
     local response, code, error_msg = self:httpRequest(url, "GET")
     
     if response and code == 200 then
@@ -506,13 +515,13 @@ function OPDSBrowser:browseOPDS()
         else
             UIManager:show(InfoMessage:new{
                 text = _("No books found in catalog.\n\nCheck if your OPDS server has books available."),
-                timeout = 5,
+                timeout = 3,
             })
         end
     else
         local error_text
         if not code then
-            error_text = T(_("Failed to connect to OPDS server.\n\nError: %1\n\nTroubleshooting:\n• Check URL format (must start with http:// or https://)\n• Verify server is running\n• Ensure Wi-Fi is enabled in KOReader\n• Test URL in a web browser first"), 
+            error_text = T(_("Failed to connect to OPDS server.\n\nError: %1\n\nTroubleshooting:\n• Check URL format (must start with http:// or https://)\n• Verify server is running\n• Ensure network connectivity"),
                 error_msg or "Connection failed")
         elseif code == 401 then
             error_text = _("Authentication required.\n\nPlease enter your username and password in Settings.")
@@ -526,7 +535,7 @@ function OPDSBrowser:browseOPDS()
         
         UIManager:show(InfoMessage:new{
             text = error_text,
-            timeout = 8,
+            timeout = 3,
         })
     end
 end
@@ -541,13 +550,14 @@ function OPDSBrowser:browseAuthors()
             self:showAuthorList(authors)
         else
             UIManager:show(InfoMessage:new{
-                text = _("No authors found."),
-                timeout = 5,
+                text = _("No authors found. "),
+                timeout = 3,
             })
         end
     else
         UIManager:show(InfoMessage:new{
-            text = T(_("Failed to load authors. Code: %1"), code or "unknown"),
+            text = T(_("Failed to load authors.  Code: %1"), code or "unknown"),
+            timeout = 3,
         })
     end
 end
@@ -613,7 +623,7 @@ function OPDSBrowser:parseAuthorsFromOPDS(xml_data)
     logger.info("OPDS Browser: Found", entry_count, "entries, parsed", #authors, "authors")
     
     if #authors == 0 and entry_count > 0 then
-        logger.warn("OPDS Browser: Entries found but no valid authors. Sample entry:")
+        logger.warn("OPDS Browser: Entries found but no valid authors.  Sample entry:")
         local first_entry = xml_data:gmatch("<entry>(.-)</entry>")()
         if first_entry then
             logger.info(first_entry:sub(1, 500))
@@ -663,12 +673,13 @@ function OPDSBrowser:browseBooksByAuthor(author_name, author_url)
         else
             UIManager:show(InfoMessage:new{
                 text = _("No books found for this author."),
-                timeout = 5,
+                timeout = 3,
             })
         end
     else
         UIManager:show(InfoMessage:new{
             text = T(_("Failed to load books. Code: %1"), code or "unknown"),
+            timeout = 3,
         })
     end
 end
@@ -710,10 +721,11 @@ end
 function OPDSBrowser:performSearch(search_term)
     UIManager:show(InfoMessage:new{
         text = _("Searching..."),
+        timeout = 3,
     })
     
     -- OPDS search URL typically follows the pattern: /opds/search?q=term
-    local url = self.opds_url .. "/search?q=" .. self:urlEncode(search_term)
+    local url = self.opds_url ..  "/search?q=" .. self:urlEncode(search_term)
     local response, code = self:httpRequest(url, "GET")
     
     if response and code == 200 then
@@ -723,17 +735,19 @@ function OPDSBrowser:performSearch(search_term)
         else
             UIManager:show(InfoMessage:new{
                 text = _("No books found"),
+                timeout = 3,
             })
         end
     else
         UIManager:show(InfoMessage:new{
             text = T(_("Search failed. Code: %1"), code or "unknown"),
+            timeout = 3,
         })
     end
 end
 
 function OPDSBrowser:urlEncode(str)
-    str = string.gsub(str, "([^%w%-%.%_%~])",
+    str = string.gsub(str, "([^%w%-%. %_%~])",
         function(c)
             return string.format("%%%02X", string.byte(c))
         end)
@@ -770,7 +784,7 @@ function OPDSBrowser:downloadBook(book)
     logger.info("OPDS Browser: Download URL:", download_url)
     
     -- Wrap entire download in pcall to catch crashes
-    local success, result = pcall(function()
+    local success, result, error_msg = pcall(function()
         -- Open file for writing
         local file, err = io.open(filepath, "wb")
         if not file then
@@ -803,10 +817,10 @@ function OPDSBrowser:downloadBook(book)
             request_params.protocol = "tlsv1_2"
         end
         
-        local code, headers, status = socket.skip(1, requester.request(request_params))
+        local code, headers,status = socket.skip(1, requester.request(request_params))
         socketutil:reset_timeout()
         
-        file:close()
+        -- ltn12 sink closes the file automatically, don't close it again
         
         if code == 200 then
             logger.info("OPDS Browser: Download successful")
@@ -818,17 +832,17 @@ function OPDSBrowser:downloadBook(book)
         end
     end)
     
-    if success and result then
-        if type(result) == "string" then
-            -- Success - result is filepath
+    if success then
+        if result == true then
+            -- Success - error_msg is actually filepath
             UIManager:show(InfoMessage:new{
                 text = T(_("Downloaded: %1"), filename),
                 timeout = 3,
             })
         else
-            -- Failed - result is error message
+            -- Failed - error_msg contains error
             UIManager:show(InfoMessage:new{
-                text = T(_("Download failed: %1"), result),
+                text = T(_("Download failed: %1"), error_msg or "unknown error"),
                 timeout = 3,
             })
         end
@@ -890,13 +904,16 @@ end
 function OPDSBrowser:searchEphemera(title, author)
     UIManager:show(InfoMessage:new{
         text = _("Searching Ephemera..."),
+        timeout = 3,
     })
     
-    -- Build search query
-    local query = self:urlEncode(title)
+    -- Build search query - combine title and author first, then encode
+    local search_string = title
     if author and author ~= "" then
-        query = query .. " " .. self:urlEncode(author)
+        search_string = search_string .. " " .. author
     end
+    
+    local query = self:urlEncode(search_string)
     
     local url = self.ephemera_url .. "/api/search?q=" .. query
     local response, code = self:httpRequest(url, "GET")
@@ -910,11 +927,13 @@ function OPDSBrowser:searchEphemera(title, author)
         else
             UIManager:show(InfoMessage:new{
                 text = _("Failed to parse search results"),
+                timeout = 3,
             })
         end
     else
         UIManager:show(InfoMessage:new{
             text = T(_("Ephemera search failed. Code: %1"), code or "unknown"),
+            timeout = 3,
         })
     end
 end
@@ -926,6 +945,7 @@ function OPDSBrowser:showEphemeraResults(results)
     if #results == 0 then
         UIManager:show(InfoMessage:new{
             text = _("No books found in Ephemera"),
+            timeout = 3,
         })
         return
     end
@@ -959,38 +979,229 @@ end
 
 function OPDSBrowser:requestEphemeraBook(book)
     UIManager:show(InfoMessage:new{
-        text = _("Requesting book..."),
+        text = _("Requesting download..."),
+        timeout = 3,
     })
+    
+    if not book.md5 or book.md5 == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Error: Book MD5 not available"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    local url = self.ephemera_url .. "/api/download/" ..  book.md5
+    logger.info("OPDS Browser: Queueing download at:", url)
     
     local json = require("json")
     local request_body = json.encode({
-        md5 = book.md5,
         title = book.title,
-        author = book.author,
     })
     
-    local url = self.ephemera_url .. "/api/requests"
     local response, code = self:httpRequest(url, "POST", request_body, "application/json")
     
+    logger.info("OPDS Browser: Ephemera response code:", code)
+    logger.info("OPDS Browser: Ephemera response body:", response or "nil")
+    
     if code == 200 or code == 201 then
-        UIManager:show(InfoMessage:new{
-            text = _("Book requested successfully! You will be notified when it's available."),
-            timeout = 5,
-        })
+        local success, result = pcall(json.decode, response)
+        
+        if success and result then
+            local message = ""
+            if result.status == "queued" then
+                message = T(_("Book queued for download!\n\nPosition: %1\n\nCheck 'Download Queue (Ephemera)' for progress."), result.position or "unknown")
+            elseif result.status == "already_downloaded" then
+                message = _("Book already downloaded!\n\nAvailable in your Ephemera library.")
+            elseif result.status == "already_in_queue" then
+                message = T(_("Book already in queue!\n\nPosition: %1\n\nCheck 'Download Queue (Ephemera)' for progress."), result.position or "unknown")
+            else
+                message = T(_("Status: %1\n\nCheck 'Download Queue (Ephemera)' for details."), result.status or "unknown")
+            end
+            
+            UIManager:show(InfoMessage:new{
+                text = message,
+                timeout = 3,
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = _("Book queued successfully!\n\nCheck 'Download Queue (Ephemera)' for progress."),
+                timeout = 3,
+            })
+        end
+        
         if self.ephemera_menu then
             UIManager:close(self.ephemera_menu)
         end
     else
+        local error_msg = T(_("Download request failed. Code: %1"), code or "unknown")
+        if response then
+            local success, error_data = pcall(json.decode, response)
+            if success and error_data then
+                if error_data.message then
+                    error_msg = error_msg .. "\n" .. error_data.message
+                elseif error_data.error then
+                    error_msg = error_msg .. "\n" .. error_data.error
+                end
+            end
+        end
         UIManager:show(InfoMessage:new{
-            text = T(_("Request failed. Code: %1"), code or "unknown"),
+            text = error_msg,
+            timeout = 3,
         })
     end
 end
 
+function OPDSBrowser:showDownloadQueue()
+    UIManager:show(InfoMessage:new{
+        text = _("Loading queue..."),
+        timeout = 3,
+    })
+    
+    local url = self.ephemera_url .. "/api/queue"
+    local response, code = self:httpRequest(url, "GET")
+    
+    if code == 200 and response then
+        local json = require("json")
+        local success, queue = pcall(json.decode, response)
+        
+        if success and queue then
+            self:displayDownloadQueue(queue)
+        else
+            UIManager:show(InfoMessage:new{
+                text = _("Failed to parse queue data"),
+                timeout = 3,
+            })
+        end
+    else
+        UIManager:show(InfoMessage:new{
+            text = T(_("Failed to load queue.  Code: %1"), code or "unknown"),
+            timeout = 3,
+        })
+    end
+end
+
+function OPDSBrowser:displayDownloadQueue(queue)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+    
+    -- Collect all items from all statuses
+    local items = {}
+    local has_incomplete = false
+    
+    -- Helper to add items from a status category
+    local function addItems(category, status_label, icon)
+        if category then
+            for md5, item in pairs(category) do
+                local title = item.title or "Unknown"
+                local status_text = status_label
+                
+                -- Add progress info for downloading items
+                if item.status == "downloading" and item.progress then
+                    status_text = status_text .. string.format(" (%d%%)", math.floor(item.progress))
+                    has_incomplete = true
+                elseif item.status == "queued" then
+                    has_incomplete = true
+                elseif item.status == "delayed" then
+                    has_incomplete = true
+                end
+                
+                -- Add error info
+                if item.error then
+                    status_text = status_text .. " - " .. item.error
+                end
+                
+                table.insert(items, {
+                    text = icon .. " " .. title,
+                    subtitle = status_text,
+                    md5 = md5,
+                    status = item.status,
+                    item = item,
+                })
+            end
+        end
+    end
+    
+    -- Add items in order of priority
+    addItems(queue.downloading, "Downloading", "⬇")
+    addItems(queue.queued, "Queued", "⏳")
+    addItems(queue.delayed, "Delayed", "⏸")
+    addItems(queue.available, "Available", "✓")
+    addItems(queue.done, "Done", "✓")
+    addItems(queue.error, "Error", "✗")
+    addItems(queue.cancelled, "Cancelled", "⊘")
+    
+    if #items == 0 then
+        UIManager:show(InfoMessage:new{
+            text = _("Download queue is empty"),
+            timeout = 3,
+        })
+        return
+    end
+    
+    self.queue_menu = Menu:new{
+        title = _("Download Queue (Ephemera)"),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+    }
+    
+    UIManager:show(self.queue_menu)
+    
+    -- Set up auto-refresh if there are incomplete downloads
+    if has_incomplete then
+        self:startQueueRefresh()
+    else
+        self:stopQueueRefresh()
+    end
+end
+
+function OPDSBrowser:startQueueRefresh()
+    -- Stop any existing refresh
+    self:stopQueueRefresh()
+    
+    -- Set up periodic refresh every 5 seconds
+    self.queue_refresh_action = function()
+        if self.queue_menu then
+            -- Silently refresh the queue
+            local url = self.ephemera_url .. "/api/queue"
+            local response, code = self:httpRequest(url, "GET")
+            
+            if code == 200 and response then
+                local json = require("json")
+                local success, queue = pcall(json.decode, response)
+                
+                if success and queue then
+                    -- Close old menu and show updated one
+                    UIManager:close(self.queue_menu)
+                    self:displayDownloadQueue(queue)
+                end
+            end
+        else
+            -- Menu was closed, stop refreshing
+            self:stopQueueRefresh()
+        end
+    end
+    
+    UIManager:scheduleIn(5, self.queue_refresh_action)
+end
+
+function OPDSBrowser:stopQueueRefresh()
+    if self.queue_refresh_action then
+        UIManager:unschedule(self.queue_refresh_action)
+        self.queue_refresh_action = nil
+    end
+end
+
 function OPDSBrowser:onCloseDocument()
+    self:stopQueueRefresh()
 end
 
 function OPDSBrowser:onSuspend()
+    self:stopQueueRefresh()
 end
 
 return OPDSBrowser
