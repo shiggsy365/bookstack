@@ -114,5 +114,3 @@ Credits and upstream projects
 License
 - This repository uses the same license as the included upstream components unless otherwise noted. Please review individual component licenses and this repo's LICENSE file (if present) before production use.
 
-- Add example curl commands to validate endpoints.
-- Create a short troubleshooting / FAQ doc for common KOReader plugin issues.
