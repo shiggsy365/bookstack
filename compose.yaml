@@ -1,1 +1,92 @@
+services:
+  autocaliweb:
+    image: gelbphoenix/autocaliweb:latest
+    container_name: autocaliweb
+    ports:
+      - "${ACW_PORT}:${ACW_PORT}"
+    environment:
+      - PUID:${PUID}
+      - PGID:${PGID}
+    volumes:
+      - ${ACW_CONFIG}:/config
+      - ${ACW_INGEST}:/acw-book-ingest
+      - ${ACW_LIBRARY}:/calibre-library
+    stop_signal: SIGINT
+    stop_grace_period: 15s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.calibre.rule=Host(`${AUTOCAL_HOSTNAME?}`)"
+      - "traefik.http.routers.calibre.tls=true"
+      - "traefik.http.services.calibre.loadbalancer.server.port=${ACW_PORT}"
+      - "traefik.http.routers.calibre.tls.certresolver=letsencrypt"
+    restart: unless-stopped
+    profiles:
+      - required
+      - all
 
+  ephemera:
+    image: ghcr.io/orwellianepilogue/ephemera:latest
+    container_name: ephemera
+    restart: unless-stopped
+    ports:
+      - "${EPH_PORT}:${EPH_PORT}"
+    environment:
+      AA_BASE_URL: ${AA_URL}
+      FLARESOLVERR_URL: http://flaresolverr:8191
+   #   LG_BASE_URL: #https://gen.com
+   #   AA_API_KEY:
+      PUID: ${PUID}
+      PGID: ${PGID}
+    volumes:
+      - ${ACW_CONFIG}/ephemera/data:/app/data
+      - ${ACW_CONFIG}/ephemera/downloads:/app/downloads
+      - ${ACW_INGEST}:/app/ingest
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:8286/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.ephemera.rule=Host(`${EPHEMERA_HOSTNAME}`)"
+      - "traefik.http.middlewares.ephemera.headers.customrequestheaders.X-Scheme=https"
+      - "traefik.http.routers.ephemera.tls=true"
+      - "traefik.http.services.ephemera.loadbalancer.server.port=${EPH_PORT}"
+      - "traefik.http.routers.ephemera.tls.certresolver=letsencrypt"
+    profiles:
+      - required
+      - all
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=${TZ}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8191/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+
+      
