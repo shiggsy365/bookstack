@@ -71,10 +71,6 @@ function OPDSBrowser:init()
     self.opds_password = self.settings:readSetting("opds_password") or ""
     self.ephemera_url = self.settings:readSetting("ephemera_url") or ""
     self.download_dir = self.settings:readSetting("download_dir") or DataStorage:getDataDir() .. "/mnt/us/books"
-
-    -- Last-download probe state used to detect server lagging responses
-    self._last_download_head = nil
-    self._last_download_url = nil
 end
 
 function OPDSBrowser:addToMainMenu(menu_items)
@@ -82,8 +78,6 @@ function OPDSBrowser:addToMainMenu(menu_items)
         text = _("Cloud Book Library"),
         sub_item_table = {
             { text = _("Browse by Author"), callback = function() self:browseAuthors() end, enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Browse New Books"), callback = function() self:browseOPDS() end, enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Search Cloud Library"), callback = function() self:searchOPDS() end, enabled_func = function() return self.opds_url ~= "" end },
             { text = _("Request Book (Ephemera)"), callback = function() self:requestBook() end, enabled_func = function() return self.ephemera_url ~= "" end },
             { text = _("Download Queue (Ephemera)"), callback = function() self:showDownloadQueue() end, enabled_func = function() return self.ephemera_url ~= "" end },
             { text = _("Settings"), callback = function() self:showSettings() end },
@@ -344,22 +338,6 @@ function OPDSBrowser:showBookDetails(book)
     UIManager:show(self.book_details)
 end
 
-function OPDSBrowser:browseOPDS()
-    local full_url = self.opds_url .. "/opds/new"
-    local ok, response_or_err = self:httpGet(full_url)
-    if not ok then
-        UIManager:show(InfoMessage:new{ text = T(_("Failed to connect to OPDS server: %1"), response_or_err), timeout = 3 })
-        return
-    end
-
-    local books = self:parseOPDSFeed(response_or_err)
-    if #books > 0 then
-        self:showBookList(books, _("New Books"))
-    else
-        UIManager:show(InfoMessage:new{ text = _("No books found in catalog."), timeout = 3 })
-    end
-end
-
 function OPDSBrowser:browseAuthors()
     local full_url = self.opds_url .. "/opds/author/letter/00"
     local ok, response_or_err = self:httpGet(full_url)
@@ -470,56 +448,7 @@ function OPDSBrowser:browseBooksByAuthor(author_name, author_url)
     end
 end
 
-function OPDSBrowser:searchOPDS()
-    local input_dialog = InputDialog:new{
-        title = _("Search OPDS"),
-        input = "",
-        input_hint = _("Enter search term"),
-        buttons = {
-            {
-                { text = _("Cancel"), id = "close", callback = function() UIManager:close(input_dialog) end },
-                { text = _("Search"), is_enter_default = true, callback = function()
-                    local search_term = input_dialog:getInputText()
-                    UIManager:close(input_dialog)
-                    if search_term and search_term ~= "" then self:performSearch(search_term) end
-                end },
-            },
-        },
-    }
-    UIManager:show(input_dialog)
-    input_dialog:onShowKeyboard()
-end
-
-function OPDSBrowser:performSearch(search_term)
-    UIManager:show(InfoMessage:new{ text = _("Searching..."), timeout = 3 })
-    local full_url = self.opds_url .. "/search?q=" .. url.escape(search_term)
-    local ok, response_or_err = self:httpGet(full_url)
-    if not ok then
-        UIManager:show(InfoMessage:new{ text = T(_("Search failed: %1"), response_or_err), timeout = 3 })
-        return
-    end
-
-    local books = self:parseOPDSFeed(response_or_err)
-    if #books > 0 then
-        self:showBookList(books, T(_("Search Results: %1"), search_term))
-    else
-        UIManager:show(InfoMessage:new{ text = _("No books found"), timeout = 3 })
-    end
-end
-
-function OPDSBrowser:urlEncode(str)
-    str = string.gsub(str, "([^%w%-%. %_%~])",
-        function(c)
-            return string.format("%%%02X", string.byte(c))
-        end)
-    return str
-end
-
--- The downloadBook from V14 (keeps streaming to tempfile, probe retry, atomic rename)
 function OPDSBrowser:downloadBook(book)
-    local MAX_RETRIES = 3
-    local PROBE_SIZE = 1024
-
     -- Ensure download directory exists
     local dir_exists = lfs.attributes(self.download_dir, "mode") == "directory"
     if not dir_exists then
@@ -530,15 +459,29 @@ function OPDSBrowser:downloadBook(book)
         end
     end
 
-    -- Extract filename
+    -- Extract filename from URL or generate from title
     local filename = book.download_url:match("([^/]+)$")
     if not filename or filename == "" or not filename:match("%.") then
         filename = book.title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. ".epub"
     end
 
     local filepath = self.download_dir .. "/" .. filename
-    local download_url = self.opds_url .. book.download_url
-    logger.info("OPDS Browser: Full download URL:", download_url)
+    
+    -- Check if download_url is already absolute
+    local download_url
+    if book.download_url:match("^https?://") then
+        download_url = book.download_url
+    else
+        -- Ensure there's a leading slash if the URL is relative
+        local relative_url = book.download_url
+        if not relative_url:match("^/") then
+            relative_url = "/" .. relative_url
+        end
+        download_url = self.opds_url .. relative_url
+    end
+    
+    logger.info("OPDS Browser: Downloading:", book.title)
+    logger.info("OPDS Browser: URL:", download_url)
 
     -- Credentials (may be nil)
     local user = (self.opds_username and self.opds_username ~= "") and self.opds_username or nil
@@ -546,145 +489,37 @@ function OPDSBrowser:downloadBook(book)
 
     UIManager:show(InfoMessage:new{ text = _("Downloading..."), timeout = 3 })
 
-    for attempt = 1, MAX_RETRIES do
-        -- Unique temp file per attempt
-        local temp_suffix = tostring(os.time()) .. "-" .. tostring(math.random(1000000))
-        local tempfile = filepath .. ".part." .. temp_suffix
-
-        logger.info("OPDS Browser: Downloading to (temp):", tempfile)
-        logger.info("OPDS Browser: Book download_url from feed:", tostring(book.download_url))
-
-        -- Open temp file for streaming
-        local file, err = io.open(tempfile, "wb")
-        if not file then
-            logger.err("OPDS Browser: Failed to open temp file:", err)
-            UIManager:show(InfoMessage:new{ text = T(_("Failed to create file: %1"), err or "unknown"), timeout = 3 })
-            return
-        end
-
-        local ok, err_msg = HttpClient:request_to_file(download_url, file, user, pass)
-
-        -- Ensure the file handle is flushed/closed (pcall to avoid errors)
-        pcall(function() file:flush() end)
-        pcall(function() file:close() end)
-
-        if not ok then
-            pcall(os.remove, tempfile)
-            logger.warn("OPDS Browser: Download failed (attempt " .. tostring(attempt) .. "):", tostring(err_msg))
-            if attempt >= MAX_RETRIES then
-                UIManager:show(InfoMessage:new{ text = T(_("Download failed: %1"), tostring(err_msg)), timeout = 3 })
-                return
-            else
-                socket.sleep(0.5)
-                -- retry next iteration
-            end
-        else
-            -- Probe first bytes of tempfile to detect "lagging" duplicate of last download
-            local probe = ""
-            local probe_ok, probe_err = pcall(function()
-                local fh = io.open(tempfile, "rb")
-                if fh then
-                    probe = fh:read(PROBE_SIZE) or ""
-                    fh:close()
-                end
-            end)
-
-            if self._last_download_head and self._last_download_url and self._last_download_url ~= download_url then
-                if probe == self._last_download_head then
-                    -- Detected lag: server returned same payload as previous request
-                    logger.warn("OPDS Browser: Detected lagging response (attempt " .. tostring(attempt) .. ").")
-                    pcall(os.remove, tempfile)
-                    if attempt >= MAX_RETRIES then
-                        UIManager:show(InfoMessage:new{ text = _("Server returned previous book's content repeatedly. Try again later."), timeout = 4 })
-                        return
-                    else
-                        socket.sleep(0.5)
-                        -- retry next iteration
-                    end
-                else
-                    -- Successful and appears distinct: finalise
-                    self._last_download_head = probe
-                    self._last_download_url = download_url
-
-                    -- Try to remove any existing final file before rename
-                    pcall(os.remove, filepath)
-
-                    local renamed_ok, rename_err = os.rename(tempfile, filepath)
-                    if not renamed_ok then
-                        logger.warn("OPDS Browser: os.rename failed:", tostring(rename_err))
-                        -- fallback: copy tempfile -> filepath
-                        local copy_ok, copy_err = pcall(function()
-                            local src = io.open(tempfile, "rb")
-                            if not src then error("open src failed") end
-                            local dst = io.open(filepath, "wb")
-                            if not dst then src:close(); error("open dst failed") end
-                            while true do
-                                local chunk = src:read(8192)
-                                if not chunk then break end
-                                dst:write(chunk)
-                            end
-                            src:close()
-                            dst:close()
-                            pcall(os.remove, tempfile)
-                        end)
-                        if not copy_ok then
-                            logger.err("OPDS Browser: Fallback copy failed:", tostring(copy_err))
-                            UIManager:show(InfoMessage:new{ text = T(_("Downloaded but failed to finalise file: %1"), tostring(copy_err)), timeout = 4 })
-                            return
-                        end
-                    end
-
-                    logger.info("OPDS Browser: Download successful:", filepath)
-                    UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1"), filename), timeout = 3 })
-                    return
-                end
-            else
-                -- No previous probe to compare with; accept this download
-                local fh = nil
-                pcall(function()
-                    fh = io.open(tempfile, "rb")
-                    if fh then
-                        self._last_download_head = fh:read(PROBE_SIZE) or ""
-                        fh:close()
-                    end
-                    self._last_download_url = download_url
-                end)
-
-                -- Finalise
-                pcall(os.remove, filepath)
-                local renamed_ok, rename_err = os.rename(tempfile, filepath)
-                if not renamed_ok then
-                    logger.warn("OPDS Browser: os.rename failed:", tostring(rename_err))
-                    local copy_ok, copy_err = pcall(function()
-                        local src = io.open(tempfile, "rb")
-                        if not src then error("open src failed") end
-                        local dst = io.open(filepath, "wb")
-                        if not dst then src:close(); error("open dst failed") end
-                        while true do
-                            local chunk = src:read(8192)
-                            if not chunk then break end
-                            dst:write(chunk)
-                        end
-                        src:close()
-                        dst:close()
-                        pcall(os.remove, tempfile)
-                    end)
-                    if not copy_ok then
-                        logger.err("OPDS Browser: Fallback copy failed:", tostring(copy_err))
-                        UIManager:show(InfoMessage:new{ text = T(_("Downloaded but failed to finalise file: %1"), tostring(copy_err)), timeout = 4 })
-                        return
-                    end
-                end
-
-                logger.info("OPDS Browser: Download successful:", filepath)
-                UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1"), filename), timeout = 3 })
-                return
-            end
-        end
+    -- Use HttpClient which works properly
+    local ok, response_or_err = HttpClient:request(download_url, "GET", nil, nil, user, pass)
+    
+    if not ok then
+        logger.err("OPDS Browser: Download failed:", response_or_err)
+        UIManager:show(InfoMessage:new{ text = T(_("Download failed: %1"), tostring(response_or_err)), timeout = 3 })
+        return
     end
-
-    -- If we reach here, all retries exhausted
-    UIManager:show(InfoMessage:new{ text = _("Download failed after multiple attempts"), timeout = 3 })
+    
+    local data = response_or_err
+    logger.info("OPDS Browser: Downloaded", #data, "bytes")
+    
+    if #data < 100 then
+        logger.warn("OPDS Browser: Downloaded file too small")
+        UIManager:show(InfoMessage:new{ text = _("Downloaded file appears invalid (too small)"), timeout = 3 })
+        return
+    end
+    
+    -- Write to file
+    local file, err = io.open(filepath, "wb")
+    if not file then
+        logger.err("OPDS Browser: Failed to open file for writing:", err)
+        UIManager:show(InfoMessage:new{ text = T(_("Failed to create file: %1"), err or "unknown"), timeout = 3 })
+        return
+    end
+    
+    file:write(data)
+    file:close()
+    
+    logger.info("OPDS Browser: Download successful:", filepath)
+    UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1"), book.title), timeout = 3 })
 end
 
 function OPDSBrowser:requestBook()
