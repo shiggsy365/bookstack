@@ -13,6 +13,8 @@ local logger = require("logger")
 local socket = require("socket")
 local _ = require("gettext")
 local T = require("ffi/util").template
+local DocSettings = require("docsettings")
+local ReadHistory = require("readhistory")
 
 local HttpClient = require("http_client")
 local lfs = require("libs/libkoreader-lfs")
@@ -519,7 +521,32 @@ function OPDSBrowser:downloadBook(book)
     file:close()
     
     logger.info("OPDS Browser: Download successful:", filepath)
-    UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1"), book.title), timeout = 3 })
+
+-- Invalidate cache and trigger metadata refresh
+local doc_settings = DocSettings:open(filepath)
+if doc_settings then
+    doc_settings:flush()
+end
+
+-- Clear any cached metadata
+pcall(function()
+    local DocSettings = require("docsettings")
+    DocSettings:open(filepath):purge()
+end)
+
+-- Optionally add to read history to trigger indexing
+if ReadHistory then
+    pcall(function()
+        ReadHistory:addItem(filepath)
+    end)
+end
+
+UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1\n\nRefreshing metadata..."), book.title), timeout = 3 })
+
+-- Schedule a small delay before notifying file manager to rescan
+UIManager:scheduleIn(1, function()
+    UIManager:broadcastEvent(require("ui/event").Event:new("FileManagerRefresh"))
+end)
 end
 
 function OPDSBrowser:requestBook()
