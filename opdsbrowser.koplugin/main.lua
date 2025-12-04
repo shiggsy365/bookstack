@@ -87,6 +87,8 @@ function OPDSBrowser:addToMainMenu(menu_items)
         text = _("Cloud Book Library"),
         sub_item_table = {
             { text = _("Library - Browse by Author"), callback = function() self:browseAuthors() end, enabled_func = function() return self.opds_url ~= "" end },
+            { text = _("Library - Recently Added"), callback = function() self:browseRecentlyAdded() end, enabled_func = function() return self.opds_url ~= "" end },
+            { text = _("Library - Random Choice"), callback = function() self:getRandomBook() end, enabled_func = function() return self.opds_url ~= "" end },
             { text = _("Library - Search"), callback = function() self:searchLibrary() end, enabled_func = function() return self.opds_url ~= "" end },
             { text = "────────────────────", enabled_func = function() return false end },
             { text = _("Ephemera - Request New Book"), callback = function() self:requestBook() end, enabled_func = function() return self.ephemera_url ~= "" end },
@@ -97,6 +99,45 @@ function OPDSBrowser:addToMainMenu(menu_items)
             { text = _("Plugin - Settings"), callback = function() self:showSettings() end },
         },
     }
+end
+
+function OPDSBrowser:browseRecentlyAdded()
+    UIManager:show(InfoMessage:new{ text = _("Loading recently added books..."), timeout = 2 })
+    
+    local full_url = self.opds_url .. "/recent"
+    local all_xml = self:fetchAllPages(full_url, 50)
+    
+    if not all_xml then
+        UIManager:show(InfoMessage:new{ text = _("Failed to load recent books"), timeout = 3 })
+        return
+    end
+
+    local books = self:parseBookloreOPDSFeed(all_xml)
+    if #books > 0 then
+        self:showBookList(books, _("Recently Added"))
+    else
+        UIManager:show(InfoMessage:new{ text = _("No recent books found."), timeout = 3 })
+    end
+end
+
+function OPDSBrowser:getRandomBook()
+    UIManager:show(InfoMessage:new{ text = _("Getting random book..."), timeout = 2 })
+    
+    local full_url = self.opds_url .. "/surprise"
+    local ok, response_or_err = self:httpGet(full_url)
+    
+    if not ok then
+        UIManager:show(InfoMessage:new{ text = _("Failed to get random book"), timeout = 3 })
+        return
+    end
+
+    local books = self:parseBookloreOPDSFeed(response_or_err)
+    if #books > 0 then
+        -- Show the single random book
+        self:showBookDetails(books[1])
+    else
+        UIManager:show(InfoMessage:new{ text = _("No book found."), timeout = 3 })
+    end
 end
 
 function OPDSBrowser:getLastPageNumber(xml_data)
@@ -114,13 +155,20 @@ end
 function OPDSBrowser:fetchAllPages(base_url, size)
     size = size or 50
     
+    -- Determine separator - use & if base_url already has query params, otherwise ?
+    local separator = base_url:match("%?") and "&" or "?"
+    
     -- First, get page 1 to determine total pages
-    local page1_url = base_url .. "?page=1&size=" .. size
+    local page1_url = base_url .. separator .. "page=1&size=" .. size
+    logger.info("Booklore: Fetching first page:", page1_url)
+    
     local ok, response_or_err = self:httpGet(page1_url)
     if not ok then
-        logger.err("Failed to fetch first page:", response_or_err)
+        logger.err("Booklore: Failed to fetch first page:", response_or_err)
         return nil
     end
+    
+    logger.info("Booklore: First page response length:", #response_or_err)
     
     local last_page = self:getLastPageNumber(response_or_err)
     logger.info("Booklore: Found", last_page, "pages to fetch")
@@ -130,7 +178,7 @@ function OPDSBrowser:fetchAllPages(base_url, size)
     -- Fetch remaining pages
     if last_page > 1 then
         for page = 2, last_page do
-            local page_url = base_url .. "?page=" .. page .. "&size=" .. size
+            local page_url = base_url .. separator .. "page=" .. page .. "&size=" .. size
             logger.info("Booklore: Fetching page", page, "of", last_page)
             
             ok, response_or_err = self:httpGet(page_url)
@@ -138,7 +186,7 @@ function OPDSBrowser:fetchAllPages(base_url, size)
                 -- Append entries from this page
                 all_xml = all_xml .. response_or_err
             else
-                logger.warn("Failed to fetch page", page, ":", response_or_err)
+                logger.warn("Booklore: Failed to fetch page", page, ":", response_or_err)
             end
         end
     end
@@ -651,7 +699,12 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
     UIManager:show(InfoMessage:new{ text = _("Loading books..."), timeout = 2 })
     
     local query = url.escape(author_name)
+    -- Construct full URL - opds_url already includes /api/v1/opds
     local full_url = self.opds_url .. "/catalog?q=" .. query
+    
+    logger.info("Booklore: Fetching books for author:", author_name)
+    logger.info("Booklore: URL:", full_url)
+    
     local all_xml = self:fetchAllPages(full_url, 50)
     
     if not all_xml then
@@ -659,7 +712,12 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
         return
     end
 
+    logger.info("Booklore: Received XML length:", #all_xml)
+    logger.info("Booklore: First 500 chars:", all_xml:sub(1, 500))
+
     local books = self:parseBookloreOPDSFeed(all_xml)
+    logger.info("Booklore: Parsed", #books, "books")
+    
     if #books == 0 then
         UIManager:show(InfoMessage:new{ text = _("No books found for this author."), timeout = 3 })
         return
@@ -836,11 +894,21 @@ function OPDSBrowser:downloadBook(book)
         end
     end
 
-    -- Determine file extension based on media type or URL
+    -- Extract book ID from book.id
+    -- Format is: urn:booklore:book:178
+    local book_id = book.id:match("book:(%d+)$")
+    
+    if not book_id or book_id == "" then
+        logger.err("OPDS Browser: No book ID found in:", book.id)
+        UIManager:show(InfoMessage:new{ text = _("Cannot download: Book ID not found"), timeout = 3 })
+        return
+    end
+
+    -- Determine file extension
     local extension = ".epub"
     if book.media_type and book.media_type:match("kepub") then
         extension = ".kepub.epub"
-    elseif book.download_url:lower():match("kepub") then
+    elseif book.download_url and book.download_url:lower():match("kepub") then
         extension = ".kepub.epub"
     end
 
@@ -848,20 +916,11 @@ function OPDSBrowser:downloadBook(book)
     local filename = book.title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. extension
     local filepath = self.download_dir .. "/" .. filename
     
-    -- Check if download_url is already absolute
-    local download_url
-    if book.download_url:match("^https?://") then
-        download_url = book.download_url
-    else
-        -- Ensure there's a leading slash if the URL is relative
-        local relative_url = book.download_url
-        if not relative_url:match("^/") then
-            relative_url = "/" .. relative_url
-        end
-        download_url = self.opds_url .. relative_url
-    end
+    -- Construct download URL: /api/v1/opds/178/download
+    local download_url = self.opds_url .. "/" .. book_id .. "/download"
     
     logger.info("OPDS Browser: Downloading:", book.title)
+    logger.info("OPDS Browser: Book ID:", book_id)
     logger.info("OPDS Browser: URL:", download_url)
     logger.info("OPDS Browser: Format:", extension)
 
@@ -1519,7 +1578,7 @@ function OPDSBrowser:getHardcoverSeriesData(author_name)
         end
     end
 
-    logger.info("Hardcover: Found series info for", table.getn and table.getn(series_lookup) or "unknown", "books")
+    logger.info("Hardcover: Found series info for books")
 
     -- Cache the result
     self.library_cache[cache_key] = series_lookup
@@ -1617,19 +1676,21 @@ function OPDSBrowser:getAuthorBooksFromLibrary(author)
         return self.library_cache[cache_key]
     end
     
-    -- Search the library for this author
-    local search_query = url.escape(author)
-    local full_url = self.opds_url .. "/opds/search?query=" .. search_query
+    -- Search the library for this author using Booklore endpoint
+    local query = url.escape(author)
+    local full_url = self.opds_url .. "/catalog?q=" .. query
     
     logger.info("Fetching all books by author from library:", author)
-    local ok, response_or_err = self:httpGet(full_url)
-    if not ok then
-        logger.warn("Library check failed:", response_or_err)
+    logger.info("Library check URL:", full_url)
+    
+    local all_xml = self:fetchAllPages(full_url, 50)
+    if not all_xml then
+        logger.warn("Library check failed for author:", author)
         self.library_cache[cache_key] = {}
         return {}
     end
     
-    local books = self:parseOPDSFeed(response_or_err)
+    local books = self:parseBookloreOPDSFeed(all_xml)
     logger.info("Found", #books, "books in library for author:", author)
     
     -- Create a lookup table of normalized titles for quick comparison
