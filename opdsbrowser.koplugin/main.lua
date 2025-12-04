@@ -546,19 +546,23 @@ function OPDSBrowser:browseBooksByAuthor(author_name, author_url)
         return
     end
 
-    -- Fetch series data from Hardcover
+    -- Fetch series data from Hardcover as fallback
     local loading_msg = InfoMessage:new{ text = _("Loading series information...") }
     UIManager:show(loading_msg)
     
     local series_lookup = self:getHardcoverSeriesData(author_name)
     
-    -- Apply series data to books
+    -- Apply series data to books only if OPDS series is missing
     for _, book in ipairs(books) do
-        local normalized_title = book.title:lower():gsub("[^%w]", "")
-        if series_lookup[normalized_title] then
-            book.series = series_lookup[normalized_title].name
-            book.series_index = series_lookup[normalized_title].details
-            logger.info("Applied series to", book.title, ":", book.series, book.series_index)
+        if (not book.series or book.series == "") and series_lookup then
+            local normalized_title = book.title:lower():gsub("[^%w]", "")
+            if series_lookup[normalized_title] then
+                book.series = series_lookup[normalized_title].name
+                book.series_index = series_lookup[normalized_title].details
+                logger.info("Applied Hardcover series to", book.title, ":", book.series, book.series_index)
+            end
+        else
+            logger.info("Using OPDS series for", book.title, ":", book.series, book.series_index)
         end
     end
 
