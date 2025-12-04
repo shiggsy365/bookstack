@@ -320,10 +320,10 @@ function OPDSBrowser:showBookList(books, title)
         local display_text = book.title
         
         -- Add series info if available
-        if book.series ~= "" then
+        if book.series and book.series ~= "" then
             display_text = display_text .. " - " .. book.series
-            if book.series_index ~= "" then
-                display_text = display_text .. " #" .. book.series_index
+            if book.series_index and book.series_index ~= "" then
+                display_text = display_text .. " #" .. tostring(book.series_index)
             end
         end
         
