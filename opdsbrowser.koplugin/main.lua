@@ -148,6 +148,10 @@ end
 
 function OPDSBrowser:showSettings()
     local MultiInputDialog = require("ui/widget/multiinputdialog")
+    
+    -- Check if hardcover token exists
+    local hardcover_status = self.hardcover_token ~= "" and "✓ Configured" or "✗ Not configured"
+    
     self.settings_dialog = MultiInputDialog:new{
         title = _("Book Download Settings"),
         fields = {
@@ -156,7 +160,6 @@ function OPDSBrowser:showSettings()
             { text = self.opds_password, hint = _("OPDS Password (optional)"), input_type = "string" },
             { text = self.ephemera_url, hint = _("Ephemera URL (e.g., http://example.com:8286)"), input_type = "string" },
             { text = self.download_dir, hint = _("Download Directory"), input_type = "string" },
-            { text = self.hardcover_token, hint = _("Hardcover Bearer Token (e.g., Bearer ABC...)"), input_type = "string" },
         },
         buttons = {
             {
@@ -171,7 +174,6 @@ function OPDSBrowser:showSettings()
                     local new_opds_password = fields[3] or ""
                     local new_ephemera_url = (fields[4] or ""):gsub("/$", ""):gsub("%s+", "")
                     local new_download_dir = fields[5] or self.download_dir
-                    local new_hardcover_token = fields[6] or ""
 
                     if new_opds_url ~= "" and not new_opds_url:match("^https?://") then
                         UIManager:show(InfoMessage:new{ text = _("Invalid OPDS URL!\n\nURL must start with http:// or https://"), timeout = 3 })
@@ -188,14 +190,12 @@ function OPDSBrowser:showSettings()
                     self.opds_password = new_opds_password
                     self.ephemera_url = new_ephemera_url
                     self.download_dir = new_download_dir
-                    self.hardcover_token = new_hardcover_token
 
                     self.settings:saveSetting("opds_url", self.opds_url)
                     self.settings:saveSetting("opds_username", self.opds_username)
                     self.settings:saveSetting("opds_password", self.opds_password)
                     self.settings:saveSetting("ephemera_url", self.ephemera_url)
                     self.settings:saveSetting("download_dir", self.download_dir)
-                    self.settings:saveSetting("hardcover_token", self.hardcover_token)
                     self.settings:flush()
 
                     UIManager:show(InfoMessage:new{ text = _("Settings saved successfully!"), timeout = 3 })
@@ -203,6 +203,7 @@ function OPDSBrowser:showSettings()
                 end },
             },
         },
+        extra_text = T(_("Hardcover API: %1\n\nTo configure Hardcover, edit:\nkoreader/settings/opdsbrowser.lua"), hardcover_status),
     }
     UIManager:show(self.settings_dialog)
     self.settings_dialog:onShowKeyboard()
