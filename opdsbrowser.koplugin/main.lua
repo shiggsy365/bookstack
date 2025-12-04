@@ -74,6 +74,12 @@ function OPDSBrowser:init()
     self.opds_password = self.settings:readSetting("opds_password") or ""
     self.ephemera_url = self.settings:readSetting("ephemera_url") or ""
     self.download_dir = self.settings:readSetting("download_dir") or DataStorage:getDataDir() .. "/mnt/us/books"
+    self.hardcover_token = self.settings:readSetting("hardcover_token") or ""
+    
+    -- Initialize library cache
+    self.library_cache = {}
+    self.library_cache_timestamp = 0
+    self.library_cache_ttl = 300 -- 5 minutes cache lifetime
 end
 
 function OPDSBrowser:addToMainMenu(menu_items)
@@ -85,6 +91,7 @@ function OPDSBrowser:addToMainMenu(menu_items)
             { text = _("Library - Browse New Titles"), callback = function() self:browseNewTitles() end, enabled_func = function() return self.opds_url ~= "" end },
             { text = _("Library - Search"), callback = function() self:searchLibrary() end, enabled_func = function() return self.opds_url ~= "" end },
             { text = "────────────────────", enabled_func = function() return false end },
+            { text = _("Hardcover - Search Author"), callback = function() self:hardcoverSearchAuthor() end, enabled_func = function() return self.hardcover_token ~= "" end },
             { text = _("Ephemera - Request New Book"), callback = function() self:requestBook() end, enabled_func = function() return self.ephemera_url ~= "" end },
             { text = _("Ephemera - View Download Queue"), callback = function() self:showDownloadQueue() end, enabled_func = function() return self.ephemera_url ~= "" end },
             { text = "────────────────────", enabled_func = function() return false end },
@@ -103,6 +110,7 @@ function OPDSBrowser:showSettings()
             { text = self.opds_password, hint = _("OPDS Password (optional)"), input_type = "string" },
             { text = self.ephemera_url, hint = _("Ephemera URL (e.g., http://example.com:8286)"), input_type = "string" },
             { text = self.download_dir, hint = _("Download Directory"), input_type = "string" },
+            { text = self.hardcover_token, hint = _("Hardcover Bearer Token (e.g., Bearer ABC...)"), input_type = "string" },
         },
         buttons = {
             {
@@ -117,6 +125,7 @@ function OPDSBrowser:showSettings()
                     local new_opds_password = fields[3] or ""
                     local new_ephemera_url = (fields[4] or ""):gsub("/$", ""):gsub("%s+", "")
                     local new_download_dir = fields[5] or self.download_dir
+                    local new_hardcover_token = fields[6] or ""
 
                     if new_opds_url ~= "" and not new_opds_url:match("^https?://") then
                         UIManager:show(InfoMessage:new{ text = _("Invalid OPDS URL!\n\nURL must start with http:// or https://"), timeout = 3 })
@@ -133,12 +142,14 @@ function OPDSBrowser:showSettings()
                     self.opds_password = new_opds_password
                     self.ephemera_url = new_ephemera_url
                     self.download_dir = new_download_dir
+                    self.hardcover_token = new_hardcover_token
 
                     self.settings:saveSetting("opds_url", self.opds_url)
                     self.settings:saveSetting("opds_username", self.opds_username)
                     self.settings:saveSetting("opds_password", self.opds_password)
                     self.settings:saveSetting("ephemera_url", self.ephemera_url)
                     self.settings:saveSetting("download_dir", self.download_dir)
+                    self.settings:saveSetting("hardcover_token", self.hardcover_token)
                     self.settings:flush()
 
                     UIManager:show(InfoMessage:new{ text = _("Settings saved successfully!"), timeout = 3 })
@@ -832,5 +843,528 @@ end
 function OPDSBrowser:onSuspend()
     self:stopQueueRefresh()
 end
+
+function OPDSBrowser:hardcoverSearchAuthor()
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Search Author on Hardcover"),
+        input = "",
+        input_hint = _("Enter author name"),
+        input_type = "text",
+        buttons = {
+            {
+                { text = _("Cancel"), id = "close", callback = function() UIManager:close(input_dialog) end },
+                { text = _("Search"), is_enter_default = true, callback = function()
+                    local author_name = input_dialog:getInputText()
+                    UIManager:close(input_dialog)
+                    if author_name and author_name ~= "" then
+                        self:performHardcoverAuthorSearch(author_name)
+                    end
+                end },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
+
+function OPDSBrowser:performHardcoverAuthorSearch(author_name)
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
+    UIManager:show(InfoMessage:new{ text = _("Searching Hardcover..."), timeout = 2 })
+
+    local query = {
+        query = string.format([[
+            query BooksbyAuthor {
+                search(query: "%s", query_type: "Author") {
+                    results
+                }
+            }
+        ]], author_name:gsub('"', '\\"'))
+    }
+
+    local body = json.encode(query)
+    logger.info("Hardcover: Searching for author:", author_name)
+
+    -- Use raw socket.http for custom headers
+    local http = require("socket.http")
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    
+    local response_body = {}
+    
+    local res, code, response_headers = https.request{
+        url = "https://api.hardcover.app/v1/graphql",
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = self.hardcover_token,
+            ["Content-Length"] = tostring(#body)
+        },
+        source = ltn12.source.string(body),
+        sink = ltn12.sink.table(response_body)
+    }
+
+    if not res or code ~= 200 then
+        logger.err("Hardcover: Request failed with code:", code)
+        UIManager:show(InfoMessage:new{ text = T(_("Hardcover search failed: HTTP %1"), code or "error"), timeout = 3 })
+        return
+    end
+
+    local response_text = table.concat(response_body)
+    logger.info("Hardcover: Response length:", #response_text)
+
+    local success, data = pcall(json.decode, response_text)
+    if success and data and data.data and data.data.search and data.data.search.results then
+        self:showHardcoverAuthorResults(data.data.search.results)
+    else
+        logger.err("Hardcover: Failed to parse response")
+        if success and data then
+            logger.err("Hardcover: Response structure:", json.encode(data))
+        end
+        UIManager:show(InfoMessage:new{ text = _("Failed to parse Hardcover results"), timeout = 3 })
+    end
+end
+
+function OPDSBrowser:showHardcoverAuthorResults(results)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    if not results.hits or #results.hits == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No authors found on Hardcover"), timeout = 3 })
+        return
+    end
+
+    local items = {}
+    for _, hit in ipairs(results.hits) do
+        local author = hit.document
+        local display_text = author.name or "Unknown Author"
+        
+        -- Add "Known for" with first book if available
+        if author.books and #author.books > 0 then
+            display_text = display_text .. " - Known for " .. author.books[1]
+        end
+
+        table.insert(items, {
+            text = display_text,
+            callback = function() 
+                self:hardcoverGetAuthorBooks(author.id, author.name)
+            end,
+        })
+    end
+
+    self.hardcover_menu = Menu:new{
+        title = _("Hardcover Authors"),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+    }
+
+    UIManager:show(self.hardcover_menu)
+end
+
+function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
+    UIManager:show(InfoMessage:new{ text = _("Loading books..."), timeout = 2 })
+
+    local query = {
+        query = string.format([[
+            query BooksByAuthor {
+                books(
+                    where: {contributions: {author: {id: {_eq: "%s"}}}}
+                    order_by: {users_count: desc}
+                ) {
+                    id
+                    title
+                    pages
+                    book_series {
+                        series {
+                            id
+                            slug
+                        }
+                        details
+                    }
+                    release_date
+                    description
+                    rating
+                    ratings_count
+                    contributions(where: {author_id: {_eq: "%s"}}) {
+                        author {
+                            name
+                        }
+                    }
+                }
+            }
+        ]], author_id, author_id)
+    }
+
+    local body = json.encode(query)
+    logger.info("Hardcover: Loading books for author ID:", author_id)
+
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    
+    local response_body = {}
+    
+    local res, code, response_headers = https.request{
+        url = "https://api.hardcover.app/v1/graphql",
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = self.hardcover_token,
+            ["Content-Length"] = tostring(#body)
+        },
+        source = ltn12.source.string(body),
+        sink = ltn12.sink.table(response_body)
+    }
+
+    if not res or code ~= 200 then
+        logger.err("Hardcover: Request failed with code:", code)
+        UIManager:show(InfoMessage:new{ text = T(_("Failed to load books: HTTP %1"), code or "error"), timeout = 3 })
+        return
+    end
+
+    local response_text = table.concat(response_body)
+    logger.info("Hardcover: Response length:", #response_text)
+
+    local success, data = pcall(json.decode, response_text)
+    if success and data and data.data and data.data.books then
+        self:showHardcoverBookList(data.data.books, author_name)
+    else
+        logger.err("Hardcover: Failed to parse books response")
+        UIManager:show(InfoMessage:new{ text = _("Failed to parse books"), timeout = 3 })
+    end
+end
+
+function OPDSBrowser:showHardcoverBookList(books, author_name)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    if #books == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No books found for this author"), timeout = 3 })
+        return
+    end
+
+    -- Store books for reference
+    self.hardcover_books_data = books
+    self.hardcover_books_author = author_name
+    self.hardcover_books_checked = {} -- Track which books have been checked
+
+    local items = {}
+    for i, book in ipairs(books) do
+        local display_text = book.title or "Unknown Title"
+        
+        -- Extract author name for comparison
+        local book_author = author_name
+        if book.contributions and #book.contributions > 0 and book.contributions[1].author then
+            book_author = book.contributions[1].author.name
+        end
+        
+        -- Store author with book for later checking
+        book._display_author = book_author
+
+        table.insert(items, {
+            text = display_text,
+            book_index = i,
+            callback = function() 
+                self:showHardcoverBookDetails(book, author_name)
+            end,
+        })
+    end
+
+    self.hardcover_books_menu = Menu:new{
+        title = T(_("Books by %1"), author_name),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+        onMenuHold = function() return true end,
+    }
+
+    -- Hook into the menu's page change to check visible books
+    local original_onNextPage = self.hardcover_books_menu.onNextPage
+    self.hardcover_books_menu.onNextPage = function(menu)
+        if original_onNextPage then
+            original_onNextPage(menu)
+        end
+        self:checkVisibleHardcoverBooks()
+        return true
+    end
+
+    local original_onPrevPage = self.hardcover_books_menu.onPrevPage
+    self.hardcover_books_menu.onPrevPage = function(menu)
+        if original_onPrevPage then
+            original_onPrevPage(menu)
+        end
+        self:checkVisibleHardcoverBooks()
+        return true
+    end
+
+    UIManager:show(self.hardcover_books_menu)
+    
+    -- Check visible books on initial display
+    UIManager:scheduleIn(0.1, function()
+        self:checkVisibleHardcoverBooks()
+    end)
+end
+
+function OPDSBrowser:checkVisibleHardcoverBooks()
+    if not self.hardcover_books_menu or not self.hardcover_books_data then
+        logger.warn("checkVisibleHardcoverBooks: Menu or data not available")
+        return
+    end
+
+    local menu = self.hardcover_books_menu
+    local perpage = menu.perpage or 10
+    local page = menu.page or 1
+    
+    -- Calculate visible range
+    local start_idx = (page - 1) * perpage + 1
+    local end_idx = math.min(start_idx + perpage - 1, #self.hardcover_books_data)
+    
+    logger.info("Checking library for books", start_idx, "to", end_idx, "on page", page)
+    
+    -- Get author's books from library once (will use cache if available)
+    local author_books_lookup = self:getAuthorBooksFromLibrary(self.hardcover_books_author)
+    logger.info("Author lookup table has", table.getn or function(t) local n=0; for _ in pairs(t) do n=n+1 end return n end, "entries")
+    
+    -- Track how many checks we're doing
+    local checks_scheduled = 0
+    
+    -- Check each visible book asynchronously
+    for i = start_idx, end_idx do
+        if not self.hardcover_books_checked[i] then
+            local book = self.hardcover_books_data[i]
+            local book_author = book._display_author or self.hardcover_books_author
+            
+            logger.info("Scheduling check for book", i, ":", book.title)
+            checks_scheduled = checks_scheduled + 1
+            
+            -- Schedule async check (still async to avoid blocking UI)
+            UIManager:scheduleIn(0.01 * (i - start_idx), function()
+                logger.info("Checking library for:", book.title, "by", book_author)
+                local in_library = self:checkBookExistsInLibrary(book.title, book_author, author_books_lookup)
+                
+                logger.info("Book", book.title, "in library:", in_library)
+                
+                if in_library then
+                    -- Update the menu item text
+                    local item_idx = i
+                    if menu.item_table and menu.item_table[item_idx] then
+                        local original_text = book.title or "Unknown Title"
+                        local new_text = "✓ " .. original_text .. " (In Library)"
+                        logger.info("Updating menu item", item_idx, "from", menu.item_table[item_idx].text, "to", new_text)
+                        menu.item_table[item_idx].text = new_text
+                        
+                        -- Force menu refresh - try multiple methods
+                        if menu.updateItems then
+                            menu:updateItems()
+                        end
+                        if menu.show_page then
+                            menu:show_page(menu.page)
+                        end
+                        UIManager:setDirty(menu, "ui")
+                    else
+                        logger.warn("Could not find menu item", item_idx)
+                    end
+                end
+                
+                -- Mark as checked
+                self.hardcover_books_checked[i] = true
+            end)
+        else
+            logger.info("Book", i, "already checked, skipping")
+        end
+    end
+    
+    logger.info("Scheduled", checks_scheduled, "library checks")
+end
+
+function OPDSBrowser:getAuthorBooksFromLibrary(author)
+    -- Check if the library path exists
+    if not self.opds_url or self.opds_url == "" then
+        return {}
+    end
+    
+    -- Create a normalized cache key for the author
+    local cache_key = "author:" .. author:lower():gsub("[^%w]", "")
+    
+    -- Check cache first
+    local current_time = os.time()
+    if self.library_cache[cache_key] ~= nil and 
+       (current_time - self.library_cache_timestamp) < self.library_cache_ttl then
+        logger.info("Library check: Cache hit for author", author)
+        return self.library_cache[cache_key]
+    end
+    
+    -- Search the library for this author
+    local search_query = url.escape(author)
+    local full_url = self.opds_url .. "/opds/search?query=" .. search_query
+    
+    logger.info("Fetching all books by author from library:", author)
+    local ok, response_or_err = self:httpGet(full_url)
+    if not ok then
+        logger.warn("Library check failed:", response_or_err)
+        self.library_cache[cache_key] = {}
+        return {}
+    end
+    
+    local books = self:parseOPDSFeed(response_or_err)
+    logger.info("Found", #books, "books in library for author:", author)
+    
+    -- Create a lookup table of normalized titles for quick comparison
+    local title_lookup = {}
+    for _, book in ipairs(books) do
+        local normalized_title = book.title:lower():gsub("[^%w]", "")
+        title_lookup[normalized_title] = true
+        logger.info("Library book:", book.title, "->", normalized_title)
+    end
+    
+    -- Cache the result
+    self.library_cache[cache_key] = title_lookup
+    self.library_cache_timestamp = current_time
+    
+    return title_lookup
+end
+
+function OPDSBrowser:checkBookExistsInLibrary(title, author, author_books_lookup)
+    -- If we have a pre-fetched lookup table, use it
+    if author_books_lookup then
+        local normalized_title = title:lower():gsub("[^%w]", "")
+        local found = author_books_lookup[normalized_title] == true
+        logger.info("Checking", title, "->", normalized_title, "Found:", found)
+        return found
+    end
+    
+    -- Fallback: get author books (will use cache if available)
+    local lookup = self:getAuthorBooksFromLibrary(author)
+    local normalized_title = title:lower():gsub("[^%w]", "")
+    return lookup[normalized_title] == true
+end
+
+function OPDSBrowser:showHardcoverBookDetails(book, author_name)
+    local TextViewer = require("ui/widget/textviewer")
+    
+    -- Extract author name from contributions
+    local book_author = author_name
+    if book.contributions and #book.contributions > 0 and book.contributions[1].author then
+        book_author = book.contributions[1].author.name
+    end
+    
+    -- Build details text
+    local details = T(_("Title: %1\n\nAuthor: %2"), book.title or "Unknown", book_author)
+    
+    -- Add rating if available
+    if book.rating and book.rating > 0 then
+        local rating_text = string.format("%.2f", book.rating)
+        if book.ratings_count and book.ratings_count > 0 then
+            rating_text = rating_text .. " (" .. book.ratings_count .. " ratings)"
+        end
+        details = details .. "\n\n" .. T(_("Rating: %1"), rating_text)
+    end
+    
+    -- Add series info if available
+    if book.book_series and #book.book_series > 0 then
+        local series_info = book.book_series[1]
+        if series_info.series then
+            local series_text = series_info.series.slug or "Unknown Series"
+            if series_info.details then
+                series_text = series_text .. " - " .. series_info.details
+            end
+            details = details .. "\n\n" .. T(_("Series: %1"), series_text)
+        end
+    end
+    
+    -- Add description
+    if book.description and book.description ~= "" then
+        local clean_description = strip_html(book.description)
+        details = details .. "\n\n" .. clean_description
+    end
+    
+    -- Add release date if available
+    if book.release_date then
+        details = details .. "\n\n" .. T(_("Released: %1"), book.release_date)
+    end
+    
+    -- Add pages if available
+    if book.pages and book.pages > 0 then
+        details = details .. "\n" .. T(_("Pages: %1"), book.pages)
+    end
+
+    local buttons = {
+        {
+            { text = _("Search Ephemera"), callback = function()
+                UIManager:close(self.hardcover_book_details)
+                self:searchEphemeraFromHardcover(book.title, book_author)
+            end },
+        },
+        {
+            { text = _("Close"), callback = function() 
+                UIManager:close(self.hardcover_book_details) 
+            end },
+        },
+    }
+
+    self.hardcover_book_details = TextViewer:new{
+        title = book.title,
+        text = details,
+        buttons_table = buttons
+    }
+    
+    UIManager:show(self.hardcover_book_details)
+end
+
+function OPDSBrowser:searchEphemeraFromHardcover(title, author)
+    if not self.ephemera_url or self.ephemera_url == "" then
+        UIManager:show(InfoMessage:new{ text = _("Ephemera URL not configured"), timeout = 3 })
+        return
+    end
+    
+    UIManager:show(InfoMessage:new{ text = _("Searching Ephemera..."), timeout = 3 })
+    
+    local search_string = title
+    if author and author ~= "" then 
+        search_string = search_string .. " " .. author 
+    end
+    
+    local query = url.escape(search_string)
+    local full_url = self.ephemera_url .. "/api/search?q=" .. query
+
+    local ok, response_or_err = self:httpGet(full_url)
+    if not ok then
+        UIManager:show(InfoMessage:new{ text = T(_("Ephemera search failed: %1"), response_or_err), timeout = 3 })
+        return
+    end
+
+    local success, data = pcall(json.decode, response_or_err)
+    if success and data and data.results then
+        self:showEphemeraResults(data.results)
+    else
+        UIManager:show(InfoMessage:new{ text = _("Failed to parse search results"), timeout = 3 })
+    end
+end
+
+
+
 
 return OPDSBrowser
