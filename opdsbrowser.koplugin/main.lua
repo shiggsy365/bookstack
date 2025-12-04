@@ -216,8 +216,7 @@ function OPDSBrowser:parseOPDSFeed(xml_data)
         -- prefer <content> (xhtml) then <summary>
         local raw_summary = entry:match('<content[^>]*>(.-)</content>') or entry:match('<summary[^>]*>(.-)</summary>') or ""
 
-        -- Extract SERIES from content BEFORE cleaning HTML.
-        -- Capture the full SERIES line up to the first <br> (handles <br>, <br/>, <br />).
+        -- Extract SERIES from content BEFORE cleaning HTML (Method 1).
         do
             local un = html_unescape(raw_summary)
             -- collapse CR/LF to spaces so patterns work
@@ -244,6 +243,27 @@ function OPDSBrowser:parseOPDSFeed(xml_data)
                 -- fallback to dc/category tags if no inline SERIES line
                 book.series = entry:match('category term="([^"]*)" label="[Ss]eries"') or entry:match('<dc:series>(.-)</dc:series>') or ""
                 book.series_index = entry:match('<calibre:series_index>(.-)</calibre:series_index>') or ""
+            end
+        end
+
+        -- Method 2: Check if title contains series info like "Title |Series Name #2|"
+        if (not book.series or book.series == "") then
+            local title_without_series, series_part = book.title:match("^(.-)%s*|([^|]+)|%s*$")
+            if title_without_series and series_part then
+                -- Extract series name and number from the series_part
+                local series_name, series_num = series_part:match("^(.-)%s*#(%d+)$")
+                if series_name and series_num then
+                    book.series = series_name:gsub("^%s+", ""):gsub("%s+$", "")
+                    book.series_index = series_num
+                    book.title = title_without_series:gsub("^%s+", ""):gsub("%s+$", "")
+                    logger.info("OPDS Browser: Extracted series from title:", book.series, "#", book.series_index)
+                else
+                    -- No number, just use the whole series part as series name
+                    book.series = series_part:gsub("^%s+", ""):gsub("%s+$", "")
+                    book.series_index = ""
+                    book.title = title_without_series:gsub("^%s+", ""):gsub("%s+$", "")
+                    logger.info("OPDS Browser: Extracted series from title (no number):", book.series)
+                end
             end
         end
 
