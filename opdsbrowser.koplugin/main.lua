@@ -87,17 +87,63 @@ function OPDSBrowser:addToMainMenu(menu_items)
         text = _("Cloud Book Library"),
         sub_item_table = {
             { text = _("Library - Browse by Author"), callback = function() self:browseAuthors() end, enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Library - Browse by Title"), callback = function() self:browseTitles() end, enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Library - Browse New Titles"), callback = function() self:browseNewTitles() end, enabled_func = function() return self.opds_url ~= "" end },
             { text = _("Library - Search"), callback = function() self:searchLibrary() end, enabled_func = function() return self.opds_url ~= "" end },
             { text = "────────────────────", enabled_func = function() return false end },
-            { text = _("Hardcover - Search Author"), callback = function() self:hardcoverSearchAuthor() end, enabled_func = function() return self.hardcover_token ~= "" end },
             { text = _("Ephemera - Request New Book"), callback = function() self:requestBook() end, enabled_func = function() return self.ephemera_url ~= "" end },
             { text = _("Ephemera - View Download Queue"), callback = function() self:showDownloadQueue() end, enabled_func = function() return self.ephemera_url ~= "" end },
+            { text = "────────────────────", enabled_func = function() return false end },
+            { text = _("Hardcover - Search Author"), callback = function() self:hardcoverSearchAuthor() end, enabled_func = function() return self.hardcover_token ~= "" end },
             { text = "────────────────────", enabled_func = function() return false end },
             { text = _("Plugin - Settings"), callback = function() self:showSettings() end },
         },
     }
+end
+
+function OPDSBrowser:getLastPageNumber(xml_data)
+    -- Extract last page from link rel="last" href
+    local last_link = xml_data:match('<link rel="last" href="([^"]+)"')
+    if last_link then
+        local page_num = last_link:match('page=(%d+)')
+        if page_num then
+            return tonumber(page_num)
+        end
+    end
+    return 1
+end
+
+function OPDSBrowser:fetchAllPages(base_url, size)
+    size = size or 50
+    
+    -- First, get page 1 to determine total pages
+    local page1_url = base_url .. "?page=1&size=" .. size
+    local ok, response_or_err = self:httpGet(page1_url)
+    if not ok then
+        logger.err("Failed to fetch first page:", response_or_err)
+        return nil
+    end
+    
+    local last_page = self:getLastPageNumber(response_or_err)
+    logger.info("Booklore: Found", last_page, "pages to fetch")
+    
+    local all_xml = response_or_err
+    
+    -- Fetch remaining pages
+    if last_page > 1 then
+        for page = 2, last_page do
+            local page_url = base_url .. "?page=" .. page .. "&size=" .. size
+            logger.info("Booklore: Fetching page", page, "of", last_page)
+            
+            ok, response_or_err = self:httpGet(page_url)
+            if ok then
+                -- Append entries from this page
+                all_xml = all_xml .. response_or_err
+            else
+                logger.warn("Failed to fetch page", page, ":", response_or_err)
+            end
+        end
+    end
+    
+    return all_xml
 end
 
 function OPDSBrowser:showSettings()
@@ -381,19 +427,46 @@ function OPDSBrowser:showBookDetails(book)
 end
 
 function OPDSBrowser:browseAuthors()
-    local full_url = self.opds_url .. "/opds/author/letter/00"
-    local ok, response_or_err = self:httpGet(full_url)
-    if not ok then
-        UIManager:show(InfoMessage:new{ text = T(_("Failed to load authors: %1"), response_or_err), timeout = 3 })
+    UIManager:show(InfoMessage:new{ text = _("Loading authors..."), timeout = 2 })
+    
+    local full_url = self.opds_url .. "/catalog"
+    local all_xml = self:fetchAllPages(full_url, 50)
+    
+    if not all_xml then
+        UIManager:show(InfoMessage:new{ text = _("Failed to load authors"), timeout = 3 })
         return
     end
 
-    local authors = self:parseAuthorsFromOPDS(response_or_err)
+    local authors = self:parseAuthorsFromBooklore(all_xml)
     if #authors > 0 then
         self:showAuthorList(authors)
     else
         UIManager:show(InfoMessage:new{ text = _("No authors found."), timeout = 3 })
     end
+end
+
+function OPDSBrowser:parseAuthorsFromBooklore(xml_data)
+    local author_set = {}
+    logger.info("Booklore: Parsing authors from XML")
+
+    for entry in xml_data:gmatch("<entry>(.-)</entry>") do
+        local author_name = entry:match("<author><name>(.-)</name></author>")
+        if author_name then
+            author_name = html_unescape(author_name)
+            author_set[author_name] = true
+        end
+    end
+
+    -- Convert set to sorted array
+    local authors = {}
+    for name, _ in pairs(author_set) do
+        table.insert(authors, { name = name })
+    end
+    
+    table.sort(authors, function(a, b) return a.name < b.name end)
+    
+    logger.info("Booklore: Found", #authors, "unique authors")
+    return authors
 end
 
 function OPDSBrowser:browseTitles()
@@ -450,6 +523,27 @@ function OPDSBrowser:searchLibrary()
     }
     UIManager:show(input_dialog)
     input_dialog:onShowKeyboard()
+end
+
+function OPDSBrowser:performLibrarySearch(search_term)
+    UIManager:show(InfoMessage:new{ text = _("Searching library..."), timeout = 2 })
+    
+    local query = url.escape(search_term)
+    local full_url = self.opds_url .. "/catalog?q=" .. query
+    
+    local all_xml = self:fetchAllPages(full_url, 50)
+    
+    if not all_xml then
+        UIManager:show(InfoMessage:new{ text = _("Search failed"), timeout = 3 })
+        return
+    end
+
+    local books = self:parseBookloreOPDSFeed(all_xml)
+    if #books > 0 then
+        self:showBookList(books, T(_("Search Results: %1"), search_term))
+    else
+        UIManager:show(InfoMessage:new{ text = _("No books found matching your search."), timeout = 3 })
+    end
 end
 
 function OPDSBrowser:performLibrarySearch(search_term)
@@ -535,7 +629,7 @@ function OPDSBrowser:showAuthorList(authors)
     for _, author in ipairs(authors) do
         table.insert(items, {
             text = author.name,
-            callback = function() self:browseBooksByAuthor(author.name, author.url) end,
+            callback = function() self:browseBooksByAuthorBooklore(author.name) end,
         })
     end
 
@@ -550,6 +644,106 @@ function OPDSBrowser:showAuthorList(authors)
     }
 
     UIManager:show(self.author_menu)
+end
+
+function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
+    UIManager:show(InfoMessage:new{ text = _("Loading books..."), timeout = 2 })
+    
+    local query = url.escape(author_name)
+    local full_url = self.opds_url .. "/catalog?q=" .. query
+    local all_xml = self:fetchAllPages(full_url, 50)
+    
+    if not all_xml then
+        UIManager:show(InfoMessage:new{ text = _("Failed to load books"), timeout = 3 })
+        return
+    end
+
+    local books = self:parseBookloreOPDSFeed(all_xml)
+    if #books == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No books found for this author."), timeout = 3 })
+        return
+    end
+
+    -- Sort books: series first, then standalone by title
+    table.sort(books, function(a, b)
+        local a_has_series = a.series and a.series ~= ""
+        local b_has_series = b.series and b.series ~= ""
+        
+        if a_has_series and b_has_series then
+            if a.series ~= b.series then
+                return a.series < b.series
+            end
+            local a_idx = tonumber(a.series_index) or 0
+            local b_idx = tonumber(b.series_index) or 0
+            if a_idx ~= b_idx then
+                return a_idx < b_idx
+            end
+            return a.title < b.title
+        end
+        
+        if a_has_series then return true end
+        if b_has_series then return false end
+        
+        return a.title < b.title
+    end)
+
+    self:showBookList(books, T(_("Books by %1"), author_name))
+end
+
+function OPDSBrowser:parseBookloreOPDSFeed(xml_data)
+    local entries = {}
+    logger.info("Booklore: Parsing OPDS feed")
+
+    for entry in xml_data:gmatch("<entry>(.-)</entry>") do
+        local book = {}
+
+        book.title = entry:match("<title>(.-)</title>") or "Unknown Title"
+        book.title = html_unescape(book.title)
+
+        local author_name = entry:match("<author><name>(.-)</name></author>")
+        book.author = author_name and html_unescape(author_name) or "Unknown Author"
+
+        local raw_summary = entry:match('<summary>(.-)</summary>') or ""
+        raw_summary = html_unescape(raw_summary)
+
+        -- Extract series from summary BEFORE cleaning HTML
+        book.series = ""
+        book.series_index = ""
+        
+        local series_match = raw_summary:match("|([^|]+)|")
+        if series_match then
+            local series_name, series_num = series_match:match("^(.-)%s*#(%d+)$")
+            if series_name and series_num then
+                book.series = series_name:gsub("^%s+", ""):gsub("%s+$", "")
+                book.series_index = series_num
+                logger.info("Booklore: Extracted series:", book.series, "#", book.series_index)
+            else
+                book.series = series_match:gsub("^%s+", ""):gsub("%s+$", "")
+                logger.info("Booklore: Extracted series (no number):", book.series)
+            end
+        end
+
+        -- Clean summary
+        book.summary = strip_html(raw_summary)
+
+        book.id = entry:match('<id>(.-)</id>') or ""
+
+        -- Extract download link
+        local download_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/acquisition"')
+        if download_link then
+            book.download_url = download_link
+            book.media_type = "application/epub+zip"
+        end
+
+        if book.download_url then
+            table.insert(entries, book)
+        else
+            logger.warn("Booklore: Skipping entry without download URL:", book.title)
+        end
+    end
+
+    logger.info("Booklore: Parsed", #entries, "books")
+    return entries
 end
 
 function OPDSBrowser:browseBooksByAuthor(author_name, author_url)
