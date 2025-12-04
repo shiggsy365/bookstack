@@ -244,24 +244,52 @@ function OPDSBrowser:parseOPDSFeed(xml_data)
 
         book.id = entry:match('<id>(.-)</id>') or ""
 
+        -- Capture both EPUB and KEPUB download links
+        local epub_url = nil
+        local kepub_url = nil
+        
         for link in entry:gmatch('<link[^>]*rel="http://opds%-spec%.org/acquisition[^"]*"[^>]*>') do
             local href = link:match('href="([^"]*)"')
             local media_type = link:match('type="([^"]*)"')
-            if href and not book.download_url then
-                book.download_url = href
-                book.media_type = media_type or "application/epub+zip"
+            
+            if href then
+                if media_type and media_type:match("epub%+zip") then
+                    -- Check if it's a kepub by looking at the title attribute or href
+                    local title_attr = link:match('title="([^"]*)"') or ""
+                    if title_attr:lower():match("kepub") or href:lower():match("kepub") then
+                        kepub_url = href
+                        logger.info("OPDS Browser: Found KEPUB link:", href)
+                    else
+                        epub_url = href
+                        logger.info("OPDS Browser: Found EPUB link:", href)
+                    end
+                end
             end
         end
 
-        if not book.download_url then
+        -- If no acquisition links found, try alternate method
+        if not epub_url and not kepub_url then
             for link in entry:gmatch('<link[^>]*type="application/epub%+zip"[^>]*>') do
                 local href = link:match('href="([^"]*)"')
+                local title_attr = link:match('title="([^"]*)"') or ""
                 if href then
-                    book.download_url = href
-                    book.media_type = "application/epub+zip"
-                    break
+                    if title_attr:lower():match("kepub") or href:lower():match("kepub") then
+                        kepub_url = href
+                    else
+                        epub_url = href
+                    end
                 end
             end
+        end
+
+        -- Prefer EPUB, fallback to KEPUB
+        if epub_url then
+            book.download_url = epub_url
+            book.media_type = "application/epub+zip"
+            book.kepub_url = kepub_url  -- Store kepub as backup
+        elseif kepub_url then
+            book.download_url = kepub_url
+            book.media_type = "application/kepub+zip"
         end
 
         for link in entry:gmatch('<link[^>]*rel="http://opds%-spec%.org/image"[^>]*>') do
@@ -613,12 +641,16 @@ function OPDSBrowser:downloadBook(book)
         end
     end
 
-    -- Extract filename from URL or generate from title
-    local filename = book.download_url:match("([^/]+)$")
-    if not filename or filename == "" or not filename:match("%.") then
-        filename = book.title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. ".epub"
+    -- Determine file extension based on media type or URL
+    local extension = ".epub"
+    if book.media_type and book.media_type:match("kepub") then
+        extension = ".kepub.epub"
+    elseif book.download_url:lower():match("kepub") then
+        extension = ".kepub.epub"
     end
 
+    -- Generate filename from title
+    local filename = book.title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. extension
     local filepath = self.download_dir .. "/" .. filename
     
     -- Check if download_url is already absolute
@@ -636,6 +668,7 @@ function OPDSBrowser:downloadBook(book)
     
     logger.info("OPDS Browser: Downloading:", book.title)
     logger.info("OPDS Browser: URL:", download_url)
+    logger.info("OPDS Browser: Format:", extension)
 
     -- Credentials (may be nil)
     local user = (self.opds_username and self.opds_username ~= "") and self.opds_username or nil
@@ -643,16 +676,38 @@ function OPDSBrowser:downloadBook(book)
 
     UIManager:show(InfoMessage:new{ text = _("Downloading..."), timeout = 3 })
 
-    -- Use HttpClient which works properly
-    local ok, response_or_err = HttpClient:request(download_url, "GET", nil, nil, user, pass)
+    -- Use low-level HTTPS with cache-busting headers
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    local mime = require("mime")
     
-    if not ok then
-        logger.err("OPDS Browser: Download failed:", response_or_err)
-        UIManager:show(InfoMessage:new{ text = T(_("Download failed: %1"), tostring(response_or_err)), timeout = 3 })
+    local response_body = {}
+    local headers = {
+        ["Cache-Control"] = "no-cache, no-store, must-revalidate",
+        ["Pragma"] = "no-cache",
+        ["Expires"] = "0"
+    }
+    
+    -- Add Basic Auth if credentials provided
+    if user and pass then
+        local credentials = mime.b64(user .. ":" .. pass)
+        headers["Authorization"] = "Basic " .. credentials
+    end
+    
+    local res, code, response_headers = https.request{
+        url = download_url,
+        method = "GET",
+        headers = headers,
+        sink = ltn12.sink.table(response_body)
+    }
+    
+    if not res or code ~= 200 then
+        logger.err("OPDS Browser: Download failed with code:", code)
+        UIManager:show(InfoMessage:new{ text = T(_("Download failed: HTTP %1"), code or "error"), timeout = 3 })
         return
     end
     
-    local data = response_or_err
+    local data = table.concat(response_body)
     logger.info("OPDS Browser: Downloaded", #data, "bytes")
     
     if #data < 100 then
@@ -670,32 +725,25 @@ function OPDSBrowser:downloadBook(book)
     end
     
     file:write(data)
-file:close()
+    file:close()
+    
+    logger.info("OPDS Browser: Download successful:", filepath)
 
-logger.info("OPDS Browser: Download successful:", filepath)
+    -- Clear cached metadata
+    pcall(function()
+        local DocSettings = require("docsettings")
+        DocSettings:open(filepath):purge()
+    end)
 
--- Invalidate cache and trigger metadata refresh
-pcall(function()
-    local DocSettings = require("docsettings")
-    DocSettings:open(filepath):purge()
-end)
+    UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1"), book.title), timeout = 3 })
 
--- Optionally add to read history to trigger indexing
-pcall(function()
-    local ReadHistory = require("readhistory")
-    ReadHistory:addItem(filepath)
-end)
-
-UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1\n\nRefreshing metadata..."), book.title), timeout = 3 })
-
-UIManager:scheduleIn(0.5, function()
-    -- Get the file manager instance
-    local FileManager = require("apps/filemanager/filemanager")
-    if FileManager.instance then
-        FileManager.instance:onRefresh()
-    end
-end)
-
+    -- Refresh the file manager view
+    UIManager:scheduleIn(0.5, function()
+        local FileManager = require("apps/filemanager/filemanager")
+        if FileManager.instance then
+            FileManager.instance:onRefresh()
+        end
+    end)
 end
 
 
