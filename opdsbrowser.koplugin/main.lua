@@ -80,10 +80,15 @@ function OPDSBrowser:addToMainMenu(menu_items)
     menu_items.opdsbrowser = {
         text = _("Cloud Book Library"),
         sub_item_table = {
-            { text = _("Browse by Author"), callback = function() self:browseAuthors() end, enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Request Book (Ephemera)"), callback = function() self:requestBook() end, enabled_func = function() return self.ephemera_url ~= "" end },
-            { text = _("Download Queue (Ephemera)"), callback = function() self:showDownloadQueue() end, enabled_func = function() return self.ephemera_url ~= "" end },
-            { text = _("Settings"), callback = function() self:showSettings() end },
+            { text = _("Library - Browse by Author"), callback = function() self:browseAuthors() end, enabled_func = function() return self.opds_url ~= "" end },
+            { text = _("Library - Browse by Title"), callback = function() self:browseTitles() end, enabled_func = function() return self.opds_url ~= "" end },
+            { text = _("Library - Browse New Titles"), callback = function() self:browseNewTitles() end, enabled_func = function() return self.opds_url ~= "" end },
+            { text = _("Library - Search"), callback = function() self:searchLibrary() end, enabled_func = function() return self.opds_url ~= "" end },
+            { text = "────────────────────", enabled_func = function() return false end },
+            { text = _("Ephemera - Request New Book"), callback = function() self:requestBook() end, enabled_func = function() return self.ephemera_url ~= "" end },
+            { text = _("Ephemera - View Download Queue"), callback = function() self:showDownloadQueue() end, enabled_func = function() return self.ephemera_url ~= "" end },
+            { text = "────────────────────", enabled_func = function() return false end },
+            { text = _("Plugin - Settings"), callback = function() self:showSettings() end },
         },
     }
 end
@@ -281,18 +286,21 @@ function OPDSBrowser:showBookList(books, title)
 
     local items = {}
     for _, book in ipairs(books) do
-        local series_info = ""
+        local display_text = book.title
+        
+        -- Add series info if available
         if book.series ~= "" then
-            series_info = " (" .. book.series
+            display_text = display_text .. " - " .. book.series
             if book.series_index ~= "" then
-                series_info = series_info .. " #" .. book.series_index
+                display_text = display_text .. " #" .. book.series_index
             end
-            series_info = series_info .. ")"
         end
+        
+        -- Add author
+        display_text = display_text .. " - " .. book.author
 
         table.insert(items, {
-            text = book.title .. series_info,
-            subtitle = book.author,
+            text = display_text,
             callback = function() self:showBookDetails(book) end,
         })
     end
@@ -356,6 +364,84 @@ function OPDSBrowser:browseAuthors()
         UIManager:show(InfoMessage:new{ text = _("No authors found."), timeout = 3 })
     end
 end
+
+function OPDSBrowser:browseTitles()
+    local full_url = self.opds_url .. "/opds/books/letter/00"
+    local ok, response_or_err = self:httpGet(full_url)
+    if not ok then
+        UIManager:show(InfoMessage:new{ text = T(_("Failed to load titles: %1"), response_or_err), timeout = 3 })
+        return
+    end
+
+    local books = self:parseOPDSFeed(response_or_err)
+    if #books > 0 then
+        self:showBookList(books, _("Browse by Title"))
+    else
+        UIManager:show(InfoMessage:new{ text = _("No titles found."), timeout = 3 })
+    end
+end
+
+function OPDSBrowser:browseNewTitles()
+    local full_url = self.opds_url .. "/opds/new"
+    local ok, response_or_err = self:httpGet(full_url)
+    if not ok then
+        UIManager:show(InfoMessage:new{ text = T(_("Failed to load new titles: %1"), response_or_err), timeout = 3 })
+        return
+    end
+
+    local books = self:parseOPDSFeed(response_or_err)
+    if #books > 0 then
+        self:showBookList(books, _("New Titles"))
+    else
+        UIManager:show(InfoMessage:new{ text = _("No new titles found."), timeout = 3 })
+    end
+end
+
+function OPDSBrowser:searchLibrary()
+    local input_dialog
+    input_dialog = InputDialog:new{
+        title = _("Search Library"),
+        input = "",
+        input_hint = _("Enter title, author, or keywords"),
+        input_type = "text",
+        buttons = {
+            {
+                { text = _("Cancel"), id = "close", callback = function() UIManager:close(input_dialog) end },
+                { text = _("Search"), is_enter_default = true, callback = function()
+                    local search_term = input_dialog:getInputText()
+                    UIManager:close(input_dialog)
+                    if search_term and search_term ~= "" then
+                        self:performLibrarySearch(search_term)
+                    end
+                end },
+            },
+        },
+    }
+    UIManager:show(input_dialog)
+    input_dialog:onShowKeyboard()
+end
+
+function OPDSBrowser:performLibrarySearch(search_term)
+    UIManager:show(InfoMessage:new{ text = _("Searching library..."), timeout = 2 })
+    
+    local query = url.escape(search_term)
+    local full_url = self.opds_url .. "/opds/search?query=" .. query
+    
+    local ok, response_or_err = self:httpGet(full_url)
+    if not ok then
+        UIManager:show(InfoMessage:new{ text = T(_("Search failed: %1"), response_or_err), timeout = 3 })
+        return
+    end
+
+    local books = self:parseOPDSFeed(response_or_err)
+    if #books > 0 then
+        self:showBookList(books, T(_("Search Results: %1"), search_term))
+    else
+        UIManager:show(InfoMessage:new{ text = _("No books found matching your search."), timeout = 3 })
+    end
+end
+
+
 
 function OPDSBrowser:parseAuthorsFromOPDS(xml_data)
     local authors = {}
@@ -537,10 +623,14 @@ end)
 
 UIManager:show(InfoMessage:new{ text = T(_("Downloaded: %1\n\nRefreshing metadata..."), book.title), timeout = 3 })
 
--- Schedule a small delay before notifying file manager to rescan
-UIManager:scheduleIn(1, function()
-    UIManager:broadcastEvent(UIEvent:new("FileManagerRefresh"))
+UIManager:scheduleIn(0.5, function()
+    -- Get the file manager instance
+    local FileManager = require("apps/filemanager/filemanager")
+    if FileManager.instance then
+        FileManager.instance:onRefresh()
+    end
 end)
+
 end
 
 
