@@ -338,7 +338,7 @@ function OPDSBrowser:showBookDetails(book)
     if book.series ~= "" then
         series_text = "\n\n" .. T(_("Series: %1"), book.series)
         if book.series_index ~= "" then
-            series_text = series_text .. " #" .. book.series_index
+            series_text = series_text .. " - " .. book.series_index
         end
     end
 
@@ -541,11 +541,69 @@ function OPDSBrowser:browseBooksByAuthor(author_name, author_url)
     end
 
     local books = self:parseOPDSFeed(response_or_err)
-    if #books > 0 then
-        self:showBookList(books, T(_("Books by %1"), author_name))
-    else
+    if #books == 0 then
         UIManager:show(InfoMessage:new{ text = _("No books found for this author."), timeout = 3 })
+        return
     end
+
+    -- Fetch series data from Hardcover
+    local loading_msg = InfoMessage:new{ text = _("Loading series information...") }
+    UIManager:show(loading_msg)
+    
+    local series_lookup = self:getHardcoverSeriesData(author_name)
+    
+    -- Apply series data to books
+    for _, book in ipairs(books) do
+        local normalized_title = book.title:lower():gsub("[^%w]", "")
+        if series_lookup[normalized_title] then
+            book.series = series_lookup[normalized_title].name
+            book.series_index = series_lookup[normalized_title].details
+            logger.info("Applied series to", book.title, ":", book.series, book.series_index)
+        end
+    end
+
+    -- Sort books: series first (with numeric index sorting), then standalone by title
+    table.sort(books, function(a, b)
+        local a_has_series = a.series and a.series ~= ""
+        local b_has_series = b.series and b.series ~= ""
+        
+        -- Both have series
+        if a_has_series and b_has_series then
+            -- Different series: sort by series name
+            if a.series ~= b.series then
+                return a.series < b.series
+            end
+            -- Same series: sort by series index
+            local a_idx = tonumber(a.series_index) or 0
+            local b_idx = tonumber(b.series_index) or 0
+            if a_idx ~= b_idx then
+                return a_idx < b_idx
+            end
+            -- Same index or no numeric index: sort by title
+            return a.title < b.title
+        end
+        
+        -- Only a has series: a comes first
+        if a_has_series then
+            return true
+        end
+        
+        -- Only b has series: b comes first
+        if b_has_series then
+            return false
+        end
+        
+        -- Neither has series: sort by title
+        return a.title < b.title
+    end)
+
+    -- Close the loading message before showing the book list
+    UIManager:close(loading_msg)
+    
+    -- Force a screen refresh
+    UIManager:setDirty("all", "full")
+    
+    self:showBookList(books, T(_("Books by %1"), author_name))
 end
 
 function OPDSBrowser:downloadBook(book)
@@ -1126,6 +1184,109 @@ function OPDSBrowser:showHardcoverBookList(books, author_name)
     UIManager:scheduleIn(0.1, function()
         self:checkVisibleHardcoverBooks()
     end)
+end
+
+function OPDSBrowser:getHardcoverSeriesData(author_name)
+    -- Check if Hardcover is configured
+    if not self.hardcover_token or self.hardcover_token == "" then
+        logger.info("Hardcover not configured, skipping series lookup")
+        return {}
+    end
+
+    -- Create a normalized cache key for the author
+    local cache_key = "hc_series:" .. author_name:lower():gsub("[^%w]", "")
+    
+    -- Check cache first
+    local current_time = os.time()
+    if self.library_cache[cache_key] ~= nil and 
+       (current_time - self.library_cache_timestamp) < self.library_cache_ttl then
+        logger.info("Hardcover series: Cache hit for author", author_name)
+        return self.library_cache[cache_key]
+    end
+
+    if not NetworkMgr:isOnline() then
+        logger.warn("Network unavailable for Hardcover series lookup")
+        return {}
+    end
+
+    local query = {
+        query = string.format([[
+            query BooksByAuthorSeries {
+                books(
+                    where: {contributions: {author: {name: {_eq: "%s"}}}}
+                    order_by: {users_count: desc}
+                ) {
+                    title
+                    book_series {
+                        series {
+                            id
+                            slug
+                        }
+                        details
+                    }
+                }
+            }
+        ]], author_name:gsub('"', '\\"'))
+    }
+
+    local body = json.encode(query)
+    logger.info("Hardcover: Fetching series data for author:", author_name)
+
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    
+    local response_body = {}
+    
+    local res, code, response_headers = https.request{
+        url = "https://api.hardcover.app/v1/graphql",
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = self.hardcover_token,
+            ["Content-Length"] = tostring(#body)
+        },
+        source = ltn12.source.string(body),
+        sink = ltn12.sink.table(response_body)
+    }
+
+    if not res or code ~= 200 then
+        logger.err("Hardcover series: Request failed with code:", code)
+        self.library_cache[cache_key] = {}
+        return {}
+    end
+
+    local response_text = table.concat(response_body)
+    local success, data = pcall(json.decode, response_text)
+    
+    if not success or not data or not data.data or not data.data.books then
+        logger.err("Hardcover series: Failed to parse response")
+        self.library_cache[cache_key] = {}
+        return {}
+    end
+
+    -- Build lookup table: normalized_title -> series info
+    local series_lookup = {}
+    for _, book in ipairs(data.data.books) do
+        local normalized_title = book.title:lower():gsub("[^%w]", "")
+        if book.book_series and #book.book_series > 0 then
+            local series_info = book.book_series[1]
+            if series_info.series then
+                series_lookup[normalized_title] = {
+                    name = series_info.series.slug or "Unknown Series",
+                    details = series_info.details or ""
+                }
+                logger.info("Hardcover series:", book.title, "->", series_lookup[normalized_title].name, series_lookup[normalized_title].details)
+            end
+        end
+    end
+
+    logger.info("Hardcover: Found series info for", table.getn and table.getn(series_lookup) or "unknown", "books")
+
+    -- Cache the result
+    self.library_cache[cache_key] = series_lookup
+    self.library_cache_timestamp = current_time
+    
+    return series_lookup
 end
 
 function OPDSBrowser:checkVisibleHardcoverBooks()
