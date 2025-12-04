@@ -1,6 +1,6 @@
 services:
   autocaliweb:
-    image: gelbphoenix/autocaliweb:latest
+    image: crocodilestick/calibre-web-automated:latest
     container_name: autocaliweb
     ports:
       - "${ACW_PORT}:${ACW_PORT}"
@@ -9,7 +9,7 @@ services:
       - PGID:${PGID}
     volumes:
       - ${ACW_CONFIG}:/config
-      - ${ACW_INGEST}:/acw-book-ingest
+      - ${ACW_INGEST}:/cwa-book-ingest
       - ${ACW_LIBRARY}:/calibre-library
     stop_signal: SIGINT
     stop_grace_period: 15s
