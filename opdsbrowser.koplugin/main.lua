@@ -216,55 +216,27 @@ function OPDSBrowser:parseOPDSFeed(xml_data)
         -- prefer <content> (xhtml) then <summary>
         local raw_summary = entry:match('<content[^>]*>(.-)</content>') or entry:match('<summary[^>]*>(.-)</summary>') or ""
 
-        -- Extract SERIES from content BEFORE cleaning HTML (Method 1).
-        do
-            local un = html_unescape(raw_summary)
-            -- collapse CR/LF to spaces so patterns work
-            un = un:gsub("\r", " "):gsub("\n", " ")
-            -- try to capture up to a <br ...> tag
-            local s = un:match("[Ss][Ee][Rr][Ii][Ee][Ss]:%s*(.-)%s*<%s*br[^>]*>")
-            if not s then
-                -- fallback: capture up to a literal '</br>' or end, or up to next '<'
-                s = un:match("[Ss][Ee][Rr][Ii][Ee][Ss]:%s*(.-)%s*</%s*br%s*>") or un:match("[Ss][Ee][Rr][Ii][Ee][Ss]:%s*([^<%r\n]+)")
-            end
-            if s then
-                -- Clean the extracted series fragment (strip remaining tags/entities)
-                s = strip_html(s)
-                -- Try to split name and index like "Name [5]"
-                local name, idx = s:match("^(.-)%s*%[([%d%-]+)%]$")
-                if name and name ~= "" then
-                    book.series = name
-                    book.series_index = idx or ""
-                else
-                    book.series = s
-                    book.series_index = ""
-                end
+        -- Method 1 (Priority 1): Check if title contains series info like "Title |Series Name #2|"
+        local title_without_series, series_part = book.title:match("^(.-)%s*|([^|]+)|%s*$")
+        if title_without_series and series_part then
+            -- Extract series name and number from the series_part
+            local series_name, series_num = series_part:match("^(.-)%s*#(%d+)$")
+            if series_name and series_num then
+                book.series = series_name:gsub("^%s+", ""):gsub("%s+$", "")
+                book.series_index = series_num
+                book.title = title_without_series:gsub("^%s+", ""):gsub("%s+$", "")
+                logger.info("OPDS Browser: Extracted series from title:", book.series, "#", book.series_index)
             else
-                -- fallback to dc/category tags if no inline SERIES line
-                book.series = entry:match('category term="([^"]*)" label="[Ss]eries"') or entry:match('<dc:series>(.-)</dc:series>') or ""
-                book.series_index = entry:match('<calibre:series_index>(.-)</calibre:series_index>') or ""
+                -- No number, just use the whole series part as series name
+                book.series = series_part:gsub("^%s+", ""):gsub("%s+$", "")
+                book.series_index = ""
+                book.title = title_without_series:gsub("^%s+", ""):gsub("%s+$", "")
+                logger.info("OPDS Browser: Extracted series from title (no number):", book.series)
             end
-        end
-
-        -- Method 2: Check if title contains series info like "Title |Series Name #2|"
-        if (not book.series or book.series == "") then
-            local title_without_series, series_part = book.title:match("^(.-)%s*|([^|]+)|%s*$")
-            if title_without_series and series_part then
-                -- Extract series name and number from the series_part
-                local series_name, series_num = series_part:match("^(.-)%s*#(%d+)$")
-                if series_name and series_num then
-                    book.series = series_name:gsub("^%s+", ""):gsub("%s+$", "")
-                    book.series_index = series_num
-                    book.title = title_without_series:gsub("^%s+", ""):gsub("%s+$", "")
-                    logger.info("OPDS Browser: Extracted series from title:", book.series, "#", book.series_index)
-                else
-                    -- No number, just use the whole series part as series name
-                    book.series = series_part:gsub("^%s+", ""):gsub("%s+$", "")
-                    book.series_index = ""
-                    book.title = title_without_series:gsub("^%s+", ""):gsub("%s+$", "")
-                    logger.info("OPDS Browser: Extracted series from title (no number):", book.series)
-                end
-            end
+        else
+            -- No series in title, initialize empty
+            book.series = ""
+            book.series_index = ""
         end
 
         -- Clean summary text for display (remove HTML markup)
@@ -566,13 +538,13 @@ function OPDSBrowser:browseBooksByAuthor(author_name, author_url)
         return
     end
 
-    -- Fetch series data from Hardcover as fallback
+    -- Fetch series data from Hardcover as fallback (Method 2 / Priority 2)
     local loading_msg = InfoMessage:new{ text = _("Loading series information...") }
     UIManager:show(loading_msg)
     
     local series_lookup = self:getHardcoverSeriesData(author_name)
     
-    -- Apply series data to books only if OPDS series is missing
+    -- Apply series data to books only if title parsing didn't find series
     for _, book in ipairs(books) do
         if (not book.series or book.series == "") and series_lookup then
             local normalized_title = book.title:lower():gsub("[^%w]", "")
@@ -582,7 +554,7 @@ function OPDSBrowser:browseBooksByAuthor(author_name, author_url)
                 logger.info("Applied Hardcover series to", book.title, ":", book.series, book.series_index)
             end
         else
-            logger.info("Using OPDS series for", book.title, ":", book.series, book.series_index)
+            logger.info("Using title-based or existing series for", book.title, ":", book.series, book.series_index)
         end
     end
 
