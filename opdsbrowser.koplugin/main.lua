@@ -1729,7 +1729,8 @@ function OPDSBrowser:showHardcoverBookDetails(book, author_name)
         local series_info = book.book_series[1]
         if series_info.series then
             local series_text = series_info.series.slug or "Unknown Series"
-            if series_info.details then
+            -- Check if details is a string before concatenating
+            if series_info.details and type(series_info.details) == "string" then
                 series_text = series_text .. " - " .. series_info.details
             end
             details = details .. "\n\n" .. T(_("Series: %1"), series_text)
