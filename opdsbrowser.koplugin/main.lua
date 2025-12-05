@@ -595,26 +595,6 @@ function OPDSBrowser:performLibrarySearch(search_term)
     end
 end
 
-function OPDSBrowser:performLibrarySearch(search_term)
-    UIManager:show(InfoMessage:new{ text = _("Searching library..."), timeout = 2 })
-    
-    local query = url.escape(search_term)
-    local full_url = self.opds_url .. "/opds/search?query=" .. query
-    
-    local ok, response_or_err = self:httpGet(full_url)
-    if not ok then
-        UIManager:show(InfoMessage:new{ text = T(_("Search failed: %1"), response_or_err), timeout = 3 })
-        return
-    end
-
-    local books = self:parseOPDSFeed(response_or_err)
-    if #books > 0 then
-        self:showBookList(books, T(_("Search Results: %1"), search_term))
-    else
-        UIManager:show(InfoMessage:new{ text = _("No books found matching your search."), timeout = 3 })
-    end
-end
-
 
 
 function OPDSBrowser:parseAuthorsFromOPDS(xml_data)
