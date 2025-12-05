@@ -23,6 +23,7 @@ Thanks to the original projects:
 - [Install and run (docker-compose)](#install-and-run-docker-compose)
 - [KOReader plugin install & configuration](#koreader-plugin-install--configuration)
 - [Usage](#usage)
+- [Series Information Handling](#series-information-handling)
 - [Hardcover Integration](#hardcover-integration)
 - [Troubleshooting](#troubleshooting)
 - [Security and networking notes](#security-and-networking-notes)
@@ -34,6 +35,7 @@ Thanks to the original projects:
 - KOReader plugin to browse and download books from your Booklore library
 - KOReader plugin to search/request books via Ephemera from your device
 - OPDS integration with enhanced metadata and usability when browsing on KOReader
+- Flexible series information extraction with multiple sources
 - Hardcover.app integration for:
   - Enhanced book discovery with author search
   - Accurate series information and ordering
@@ -110,6 +112,7 @@ Use hostnames or IPs reachable from your KOReader device (for example the LAN IP
    - Enter OPDS username and password if configured
    - Enter your Ephemera URL (e.g., `http://example.com:8286`)
    - Enter your preferred download directory
+   - Configure series handling (see [Series Information Handling](#series-information-handling))
    - (Optional) For Hardcover integration, edit `/koreader/settings/opdsbrowser.lua` and add your Bearer Token
 
 5. Use the plugin UI on device to browse your library, search Hardcover, and request books via Ephemera.
@@ -133,8 +136,8 @@ Use hostnames or IPs reachable from your KOReader device (for example the LAN IP
 - **Random Choice**: Get a random book suggestion from your library
 - **Search**: Search your library by title, author, or keywords
 
-When browsing books by author, the plugin automatically:
-- Extracts series information from book metadata
+When browsing books, the plugin automatically:
+- Extracts series information based on your configuration
 - Sorts books by series first, then standalone titles
 - Shows series name and number in the book list
 - Displays complete metadata including series info in book details
@@ -160,13 +163,116 @@ The Hardcover integration intelligently caches data to minimize API calls and pr
 - Metadata is refreshed automatically after download
 - File manager view updates to show newly downloaded books
 
+## Series Information Handling
+
+The plugin offers flexible series information extraction to accommodate different library configurations and preferences.
+
+### Configuration
+
+In the plugin settings, you'll find an option: **"Use Publisher as Series? (YES/NO)"**
+
+This setting determines how the plugin extracts series information from your OPDS feed.
+
+### Option 1: Publisher Field (Recommended for Booklore)
+
+**Setting:** `YES`
+
+When enabled, the plugin extracts series information from the `<dc:publisher>` field in your OPDS feed.
+
+**Example OPDS Entry:**
+```xml
+<dc:publisher>Reacher 24</dc:publisher>
+```
+
+**Extracted Information:**
+- Series Name: "Reacher"
+- Series Number: "24"
+
+**How It Works:**
+- The plugin looks for the publisher field in format: `Series Name Number`
+- Extracts the series name and index number automatically
+- Falls back to using the entire publisher field as series name if no number is found
+
+**Use Cases:**
+- When your Booklore instance stores series information in the publisher field
+- When you want consistent, predictable series handling
+- When your library metadata follows this convention
+
+### Option 2: Hardcover API (Dynamic Series Data)
+
+**Setting:** `NO`
+
+When disabled, the plugin uses Hardcover.app's API to fetch series information.
+
+**How It Works:**
+1. When browsing books by author, the plugin queries Hardcover for that author's bibliography
+2. Matches books by title between your library and Hardcover's database
+3. Extracts accurate series information including name and book number
+4. Results are cached for 5 minutes to minimize API calls
+
+**Advantages:**
+- Always up-to-date series information from Hardcover's curated database
+- Works even if your library metadata lacks series information
+- Provides consistent series naming across your entire library
+
+**Requirements:**
+- Hardcover API token must be configured (see [Getting a Hardcover API Token](#getting-a-hardcover-api-token))
+- Network connectivity to api.hardcover.app
+- Books must exist in Hardcover's database for matching
+
+### Fallback Behavior
+
+The plugin also supports extracting series from book summaries with the format `|Series Name #Number|` in the OPDS summary field. This acts as a fallback when:
+- Publisher field is empty (when using publisher mode)
+- Hardcover API doesn't have series information (when using Hardcover mode)
+
+### Book Sorting
+
+Regardless of which method you use, books are always sorted intelligently:
+1. **Series books first** - Grouped by series name
+2. **Within each series** - Ordered by book number (numerically)
+3. **Standalone books last** - Sorted alphabetically by title
+
+**Example Display:**
+```
+Jack Reacher Series:
+- Killing Floor - Reacher - Lee Child
+- Die Trying - Reacher #2 - Lee Child
+- Tripwire - Reacher #3 - Lee Child
+
+Standalone:
+- The Affair - Lee Child
+```
+
+### Which Option Should I Choose?
+
+**Choose Publisher Field (YES) if:**
+- Your Booklore instance stores series in the publisher field
+- You want the fastest performance (no API calls needed)
+- You don't have a Hardcover API token
+- Your library metadata is well-maintained
+
+**Choose Hardcover API (NO) if:**
+- Your library lacks consistent series metadata
+- You want the most accurate and comprehensive series information
+- You have a Hardcover API token configured
+- You're willing to trade a small performance cost for better data quality
+
+### Changing the Setting
+
+1. Open KOReader menu → Cloud Book Library → Plugin - Settings
+2. Find the field "Use Publisher as Series? (YES/NO)"
+3. Enter `YES` to use publisher field, or `NO` to use Hardcover
+4. Save settings
+5. The change takes effect immediately for all future book browsing
+
 ## Hardcover Integration
 The plugin includes deep integration with Hardcover.app for enhanced book discovery and metadata:
 
 - **Author Search**: Search Hardcover's database of authors and see their most popular works
 - **Book Discovery**: Browse complete bibliographies with accurate series information
 - **Library Checking**: Automatically checks which books you already own in your Booklore library
-- **Series Information**: Uses Hardcover as a fallback when series data is missing from your library
+- **Series Information**: Can be used as primary or fallback source for series data (see [Series Information Handling](#series-information-handling))
 - **Ratings & Reviews**: See community ratings and detailed descriptions
 - **Ephemera Integration**: Request missing books directly from Hardcover book details
 
@@ -193,6 +299,12 @@ All Hardcover data is intelligently cached for 5 minutes to minimize API calls w
   - Check network connectivity to api.hardcover.app
   - Review KOReader logs for Hardcover API errors
   - Edit the settings file directly: `/koreader/settings/opdsbrowser.lua`
+
+- If series information isn't displaying correctly:
+  - Check your "Use Publisher as Series" setting in plugin settings
+  - Verify your OPDS feed includes the expected fields (publisher or summary)
+  - If using Hardcover mode, ensure your API token is configured
+  - Check KOReader logs for series extraction messages
 
 - If library ownership flags aren't showing:
   - Ensure your Booklore OPDS URL is configured correctly
