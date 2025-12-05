@@ -745,20 +745,35 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
     else
         logger.info("Booklore: Publisher series enabled, skipping Hardcover")
     end
-
-    -- Sort books: series first (with numeric index sorting), then standalone by title
--- Sort books: series first, then standalone by title
-	table.sort(books, function(a, b)
-    local a_has_series = a.series and a.series ~= ""
-    local b_has_series = b.series and b.series ~= ""
+-- Add this right before the table.sort call
+for i, book in ipairs(books) do
+    logger.info("Book", i, ":", book.title)
+    logger.info("  series:", type(book.series), book.series)
+    logger.info("  series_index:", type(book.series_index), tostring(book.series_index))
+end
+-- Sort books: series first (with numeric index sorting), then standalone by title
+table.sort(books, function(a, b)
+    local a_has_series = a.series and type(a.series) == "string" and a.series ~= ""
+    local b_has_series = b.series and type(b.series) == "string" and b.series ~= ""
     
     if a_has_series and b_has_series then
         if a.series ~= b.series then
             return a.series < b.series
         end
-        -- Safely convert series_index to numbers
-        local a_idx = tonumber(a.series_index) or 0
-        local b_idx = tonumber(b.series_index) or 0
+        -- Safely get series index
+        local a_idx = 0
+        local b_idx = 0
+        if a.series_index and type(a.series_index) == "string" then
+            a_idx = tonumber(a.series_index) or 0
+        elseif a.series_index and type(a.series_index) == "number" then
+            a_idx = a.series_index
+        end
+        if b.series_index and type(b.series_index) == "string" then
+            b_idx = tonumber(b.series_index) or 0
+        elseif b.series_index and type(b.series_index) == "number" then
+            b_idx = b.series_index
+        end
+        
         if a_idx ~= b_idx then
             return a_idx < b_idx
         end
@@ -769,8 +784,7 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
     if b_has_series then return false end
     
     return a.title < b.title
-	end)
-
+end)
     self:showBookList(books, T(_("Books by %1"), author_name))
 end
 
@@ -1103,14 +1117,50 @@ function OPDSBrowser:showEphemeraResults(results)
         return
     end
 
-    local items = {}
+    -- Filter to only include EPUB results
+    local epub_results = {}
     for _, book in ipairs(results) do
+        -- Check if the book has extension field and it's epub
+        local is_epub = false
+        if book.extension and type(book.extension) == "string" then
+            is_epub = book.extension:lower() == "epub"
+        elseif book.format and type(book.format) == "string" then
+            is_epub = book.format:lower() == "epub"
+        elseif book.type and type(book.type) == "string" then
+            is_epub = book.type:lower() == "epub"
+        else
+            -- If no format field, assume epub (fallback for older Ephemera versions)
+            is_epub = true
+        end
+        
+        if is_epub then
+            table.insert(epub_results, book)
+        else
+            logger.info("Ephemera: Filtering out non-EPUB book:", book.title or "Unknown", "Format:", book.extension or book.format or book.type or "unknown")
+        end
+    end
+
+    if #epub_results == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No EPUB books found in Ephemera results"), timeout = 3 })
+        return
+    end
+
+    local items = {}
+    for _, book in ipairs(epub_results) do
         local title = book.title or "Unknown Title"
         local author = book.author or "Unknown Author"
         table.insert(items, { text = title, subtitle = author, callback = function() self:requestEphemeraBook(book) end })
     end
 
-    self.ephemera_menu = Menu:new{ title = _("Ephemera Search Results"), item_table = items, is_borderless = true, is_popout = false, title_bar_fm_style = true, width = Screen:getWidth(), height = Screen:getHeight() }
+    self.ephemera_menu = Menu:new{ 
+        title = T(_("Ephemera Search Results (%1 EPUB)"), #epub_results), 
+        item_table = items, 
+        is_borderless = true, 
+        is_popout = false, 
+        title_bar_fm_style = true, 
+        width = Screen:getWidth(), 
+        height = Screen:getHeight() 
+    }
     UIManager:show(self.ephemera_menu)
 end
 
@@ -1795,21 +1845,28 @@ function OPDSBrowser:showHardcoverBookDetails(book, author_name)
     local details = T(_("Title: %1\n\nAuthor: %2"), book.title or "Unknown", book_author)
     
     -- Add rating if available
-    if book.rating and book.rating > 0 then
+    if book.rating and type(book.rating) == "number" and book.rating > 0 then
         local rating_text = string.format("%.2f", book.rating)
-        if book.ratings_count and book.ratings_count > 0 then
-            rating_text = rating_text .. " (" .. book.ratings_count .. " ratings)"
+        if book.ratings_count and type(book.ratings_count) == "number" and book.ratings_count > 0 then
+            rating_text = rating_text .. " (" .. tostring(book.ratings_count) .. " ratings)"
         end
         details = details .. "\n\n" .. T(_("Rating: %1"), rating_text)
     end
     
     -- Add series info if available
-    if book.book_series and #book.book_series > 0 then
+    if book.book_series and type(book.book_series) == "table" and #book.book_series > 0 then
         local series_info = book.book_series[1]
-        if series_info.series then
-            local series_text = series_info.series.slug or "Unknown Series"
-            -- Check if details is a string before concatenating
-            if series_info.details and type(series_info.details) == "string" then
+        if series_info and type(series_info) == "table" and series_info.series then
+            local series_text = ""
+            if series_info.series.slug and type(series_info.series.slug) == "string" then
+                series_text = series_info.series.slug
+            elseif series_info.series.name and type(series_info.series.name) == "string" then
+                series_text = series_info.series.name
+            else
+                series_text = "Unknown Series"
+            end
+            
+            if series_info.details and type(series_info.details) == "string" and series_info.details ~= "" then
                 series_text = series_text .. " - " .. series_info.details
             end
             details = details .. "\n\n" .. T(_("Series: %1"), series_text)
@@ -1817,19 +1874,19 @@ function OPDSBrowser:showHardcoverBookDetails(book, author_name)
     end
     
     -- Add description
-    if book.description and book.description ~= "" then
+    if book.description and type(book.description) == "string" and book.description ~= "" then
         local clean_description = strip_html(book.description)
         details = details .. "\n\n" .. clean_description
     end
     
     -- Add release date if available
-    if book.release_date then
+    if book.release_date and type(book.release_date) == "string" then
         details = details .. "\n\n" .. T(_("Released: %1"), book.release_date)
     end
     
     -- Add pages if available
-    if book.pages and book.pages > 0 then
-        details = details .. "\n" .. T(_("Pages: %1"), book.pages)
+    if book.pages and type(book.pages) == "number" and book.pages > 0 then
+        details = details .. "\n" .. T(_("Pages: %1"), tostring(book.pages))
     end
 
     local buttons = {
