@@ -1,33 +1,54 @@
 services:
-  autocaliweb:
-    image: crocodilestick/calibre-web-automated:latest
-    container_name: autocaliweb
-    ports:
-      - "${ACW_PORT}:${ACW_PORT}"
+  booklore:
+    image: booklore/booklore:latest
+    container_name: booklore
     environment:
-      - PUID:${PUID}
-      - PGID:${PGID}
+      - USER_ID=${PUID}
+      - GROUP_ID=${PGID}
+      - TZ=${TZ}
+      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_USERNAME=${DB_USER}
+      - DATABASE_PASSWORD=${DB_PASSWORD}
+      - BOOKLORE_PORT=${BOOKLORE_PORT}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      - "${BOOKLORE_PORT}:${BOOKLORE_PORT}"
     volumes:
-      - ${ACW_CONFIG}:/config
-      - ${ACW_INGEST}:/cwa-book-ingest
-      - ${ACW_LIBRARY}:/calibre-library
-    stop_signal: SIGINT
-    stop_grace_period: 15s
+      - ${BKL_CONFIG}/data:/app/data
+      - ${BOOK_LIBRARY}:/books
+      - ${INGEST_FOLDER}:/bookdrop
+    restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.calibre.rule=Host(`${AUTOCAL_HOSTNAME?}`)"
-      - "traefik.http.routers.calibre.tls=true"
-      - "traefik.http.services.calibre.loadbalancer.server.port=${ACW_PORT}"
-      - "traefik.http.routers.calibre.tls.certresolver=letsencrypt"
-      - "traefik.http.middlewares.calibre-nocache.headers.customresponseheaders.Cache-Control=no-store, no-cache, must-revalidate, max-age=0"
-      - "traefik.http.middlewares.calibre-nocache.headers.customresponseheaders.Pragma=no-cache"
-      - "traefik.http.middlewares.calibre-nokeep.headers.customresponseheaders.Connection=close"
-      - "traefik.http.services.calibre.loadbalancer.passhostheader=true"
-      - "traefik.http.routers.calibre.middlewares=calibre-nocache,calibre-nokeep"
-    restart: unless-stopped
+      - "traefik.http.routers.booklore.rule=Host(`${BOOKLORE_HOSTNAME?}`)"
+      - "traefik.http.routers.booklore.tls=true"
+      - "traefik.http.services.booklore.loadbalancer.server.port=${BOOKLORE_PORT}"
+      - "traefik.http.routers.booklore.tls.certresolver=letsencrypt"
     profiles:
       - required
       - all
+
+  mariadb:
+    image: lscr.io/linuxserver/mariadb:11.4.5
+    container_name: mariadb
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${DB_USER}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - ${BKL_CONFIG}/mariadb/config:/config
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "mariadb-admin", "ping", "-h", "localhost" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   ephemera:
     image: ghcr.io/orwellianepilogue/ephemera:latest
@@ -40,12 +61,12 @@ services:
       FLARESOLVERR_URL: http://flaresolverr:8191
       LG_BASE_URL: #https://gen.com
       AA_API_KEY:
-      PUID: 1001
-      PGID: 1001
+      PUID: ${PUID}
+      PGID: ${PGID}
     volumes:
       - ${EPH_CONFIG}/data:/app/data
       - ${EPH_CONFIG}/downloads:/app/downloads
-      - ${ACW_INGEST}:/app/ingest
+      - ${INGEST_FOLDER}:/app/ingest
     dns:
       - 1.1.1.1
       - 1.0.0.1
@@ -60,43 +81,3 @@ services:
           "--spider",
           "http://127.0.0.1:8286/health",
         ]
-      interval: 30s
-      timeout: 10s
-      start_period: 40s
-      retries: 3
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.ephemera.rule=Host(`${EPHEMERA_HOSTNAME}`)"
-      - "traefik.http.middlewares.ephemera.headers.customrequestheaders.X-Scheme=https"
-      - "traefik.http.routers.ephemera.tls=true"
-      - "traefik.http.services.ephemera.loadbalancer.server.port=${EPH_PORT}"
-      - "traefik.http.routers.ephemera.tls.certresolver=letsencrypt"
-    profiles:
-      - required
-      - all
-
-
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: flaresolverr
-    restart: unless-stopped
-    environment:
-      - LOG_LEVEL=info
-      - LOG_HTML=false
-      - CAPTCHA_SOLVER=none
-      - TZ=$(TZ}
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8191/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
-    profiles:
-      - required
-      - all
-
-
-      
