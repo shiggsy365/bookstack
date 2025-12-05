@@ -704,28 +704,29 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
     end
 
     -- Sort books: series first, then standalone by title
-    table.sort(books, function(a, b)
-        local a_has_series = a.series and a.series ~= ""
-        local b_has_series = b.series and b.series ~= ""
-        
-        if a_has_series and b_has_series then
-            if a.series ~= b.series then
-                return a.series < b.series
-            end
-            local a_idx = tonumber(a.series_index) or 0
-            local b_idx = tonumber(b.series_index) or 0
-            if a_idx ~= b_idx then
-                return a_idx < b_idx
-            end
-            return a.title < b.title
+-- Sort books: series first, then standalone by title
+table.sort(books, function(a, b)
+    local a_has_series = a.series and a.series ~= ""
+    local b_has_series = b.series and b.series ~= ""
+    
+    if a_has_series and b_has_series then
+        if a.series ~= b.series then
+            return a.series < b.series
         end
-        
-        if a_has_series then return true end
-        if b_has_series then return false end
-        
+        -- Safely convert series_index to numbers
+        local a_idx = tonumber(a.series_index) or 0
+        local b_idx = tonumber(b.series_index) or 0
+        if a_idx ~= b_idx then
+            return a_idx < b_idx
+        end
         return a.title < b.title
-    end)
-
+    end
+    
+    if a_has_series then return true end
+    if b_has_series then return false end
+    
+    return a.title < b.title
+end)
     self:showBookList(books, T(_("Books by %1"), author_name))
 end
 
@@ -1407,6 +1408,18 @@ function OPDSBrowser:showHardcoverBookList(books, author_name)
     local items = {}
     for i, book in ipairs(books) do
         local display_text = book.title or "Unknown Title"
+        
+        -- Add series info to display if available
+        if book.book_series and #book.book_series > 0 then
+            local series_info = book.book_series[1]
+            if series_info.series then
+                display_text = display_text .. " - " .. (series_info.series.slug or "Unknown Series")
+                -- Check if details is a string before adding it
+                if series_info.details and type(series_info.details) == "string" and series_info.details ~= "" then
+                    display_text = display_text .. " " .. series_info.details
+                end
+            end
+        end
         
         -- Extract author name for comparison
         local book_author = author_name
