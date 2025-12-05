@@ -3,19 +3,26 @@ PUID = 1001
 PGID = 1001
 
 ##### - Install, Library and Ingest Folders - #####
-ACW_CONFIG = /path/to/autocaliweb
-ACW_INGEST = /path/to/ingest/folder
-ACW_LIBRARY = /path/to/book/library
+BKL_CONFIG = /path/to/booklore
+INGEST_FOLDER = /mnt/ingest
+BOOK_LIBRARY = /mnt/books
 EPH_CONFIG = /path/to/ephemera
 
-##### - Ports to run and host AutoCaliWeb and Ephemera - #####
-ACW_PORT = 8083
+##### - Ports to run and host Booklore and Ephemera - #####
+BOOKLORE_PORT = 6060
 EPH_PORT = 8286
-AUTOCAL_HOSTNAME = autocaliweb.yourdomain.com
-EPHEMERA_HOSTNAME = ephemera.yourdomain.com
+BOOKLORE_HOSTNAME = booklore.example.co.uk
+EPHEMERA_HOSTNAME = ephemera.example.co.uk
 
 ##### - Link to A Archive - #####
 AA_URL = https://anna
 
 ##### - Time Zone - #####
 TZ = Europe/London
+
+##### - MariaDB settings - #####
+DATABASE_URL=jdbc:mariadb://mariadb:3306/booklore
+DB_USER=booklore
+DB_PASSWORD=Changeme2025!
+MYSQL_ROOT_PASSWORD=Changeme2025!
+MYSQL_DATABASE=booklore
