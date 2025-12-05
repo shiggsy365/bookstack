@@ -75,6 +75,10 @@ function OPDSBrowser:init()
     self.ephemera_url = self.settings:readSetting("ephemera_url") or ""
     self.download_dir = self.settings:readSetting("download_dir") or DataStorage:getDataDir() .. "/mnt/us/books"
     self.hardcover_token = self.settings:readSetting("hardcover_token") or ""
+    self.use_publisher_as_series = self.settings:readSetting("use_publisher_as_series")
+    if self.use_publisher_as_series == nil then
+        self.use_publisher_as_series = false
+    end
     
     -- Initialize library cache
     self.library_cache = {}
@@ -200,14 +204,20 @@ function OPDSBrowser:showSettings()
     -- Check if hardcover token exists
     local hardcover_status = self.hardcover_token ~= "" and "✓ Configured" or "✗ Not configured"
     
+    -- Convert boolean to YES/NO for display
+    local publisher_setting = self.use_publisher_as_series and "YES" or "NO"
+    
+    logger.info("Settings: Current use_publisher_as_series value:", self.use_publisher_as_series)
+    
     self.settings_dialog = MultiInputDialog:new{
         title = _("Book Download Settings"),
         fields = {
-            { text = self.opds_url, hint = _("Base URL (e.g., https://example.com)"), input_type = "string" },
+            { text = self.opds_url, hint = _("Base URL (e.g., https://example.com/api/v1/opds)"), input_type = "string" },
             { text = self.opds_username, hint = _("OPDS Username (optional)"), input_type = "string" },
             { text = self.opds_password, hint = _("OPDS Password (optional)"), input_type = "string" },
             { text = self.ephemera_url, hint = _("Ephemera URL (e.g., http://example.com:8286)"), input_type = "string" },
             { text = self.download_dir, hint = _("Download Directory"), input_type = "string" },
+            { text = publisher_setting, hint = _("Use Publisher as Series? (YES/NO)"), input_type = "string" },
         },
         buttons = {
             {
@@ -222,6 +232,7 @@ function OPDSBrowser:showSettings()
                     local new_opds_password = fields[3] or ""
                     local new_ephemera_url = (fields[4] or ""):gsub("/$", ""):gsub("%s+", "")
                     local new_download_dir = fields[5] or self.download_dir
+                    local publisher_input = (fields[6] or "NO"):upper():gsub("%s+", "")
 
                     if new_opds_url ~= "" and not new_opds_url:match("^https?://") then
                         UIManager:show(InfoMessage:new{ text = _("Invalid OPDS URL!\n\nURL must start with http:// or https://"), timeout = 3 })
@@ -238,12 +249,18 @@ function OPDSBrowser:showSettings()
                     self.opds_password = new_opds_password
                     self.ephemera_url = new_ephemera_url
                     self.download_dir = new_download_dir
+                    
+                    -- Convert YES/NO to boolean
+                    self.use_publisher_as_series = (publisher_input == "YES")
+                    
+                    logger.info("Settings: Saving use_publisher_as_series as:", self.use_publisher_as_series)
 
                     self.settings:saveSetting("opds_url", self.opds_url)
                     self.settings:saveSetting("opds_username", self.opds_username)
                     self.settings:saveSetting("opds_password", self.opds_password)
                     self.settings:saveSetting("ephemera_url", self.ephemera_url)
                     self.settings:saveSetting("download_dir", self.download_dir)
+                    self.settings:saveSetting("use_publisher_as_series", self.use_publisher_as_series)
                     self.settings:flush()
 
                     UIManager:show(InfoMessage:new{ text = _("Settings saved successfully!"), timeout = 3 })
@@ -253,6 +270,7 @@ function OPDSBrowser:showSettings()
         },
         extra_text = T(_("Hardcover API: %1\n\nTo configure Hardcover, edit:\nkoreader/settings/opdsbrowser.lua"), hardcover_status),
     }
+    
     UIManager:show(self.settings_dialog)
     self.settings_dialog:onShowKeyboard()
 end
@@ -679,11 +697,11 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
     UIManager:show(InfoMessage:new{ text = _("Loading books..."), timeout = 2 })
     
     local query = url.escape(author_name)
-    -- Construct full URL - opds_url already includes /api/v1/opds
     local full_url = self.opds_url .. "/catalog?q=" .. query
     
     logger.info("Booklore: Fetching books for author:", author_name)
     logger.info("Booklore: URL:", full_url)
+    logger.info("Booklore: use_publisher_as_series:", self.use_publisher_as_series)
     
     local all_xml = self:fetchAllPages(full_url, 50)
     
@@ -691,9 +709,6 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
         UIManager:show(InfoMessage:new{ text = _("Failed to load books"), timeout = 3 })
         return
     end
-
-    logger.info("Booklore: Received XML length:", #all_xml)
-    logger.info("Booklore: First 500 chars:", all_xml:sub(1, 500))
 
     local books = self:parseBookloreOPDSFeed(all_xml)
     logger.info("Booklore: Parsed", #books, "books")
@@ -703,9 +718,37 @@ function OPDSBrowser:browseBooksByAuthorBooklore(author_name)
         return
     end
 
-    -- Sort books: series first, then standalone by title
+    -- Only use Hardcover if publisher series is NOT enabled
+    if not self.use_publisher_as_series then
+        logger.info("Booklore: Publisher series disabled, using Hardcover fallback")
+        local loading_msg = InfoMessage:new{ text = _("Loading series information...") }
+        UIManager:show(loading_msg)
+        
+        local series_lookup = self:getHardcoverSeriesData(author_name)
+        
+        -- Apply series data to books only if summary parsing didn't find series
+        for _, book in ipairs(books) do
+            if (not book.series or book.series == "") and series_lookup then
+                local normalized_title = book.title:lower():gsub("[^%w]", "")
+                if series_lookup[normalized_title] then
+                    book.series = series_lookup[normalized_title].name
+                    book.series_index = series_lookup[normalized_title].details
+                    logger.info("Applied Hardcover series to", book.title, ":", book.series, book.series_index)
+                end
+            else
+                logger.info("Book already has series:", book.title, "->", book.series, book.series_index)
+            end
+        end
+        
+        UIManager:close(loading_msg)
+        UIManager:setDirty("all", "full")
+    else
+        logger.info("Booklore: Publisher series enabled, skipping Hardcover")
+    end
+
+    -- Sort books: series first (with numeric index sorting), then standalone by title
 -- Sort books: series first, then standalone by title
-table.sort(books, function(a, b)
+	table.sort(books, function(a, b)
     local a_has_series = a.series and a.series ~= ""
     local b_has_series = b.series and b.series ~= ""
     
@@ -726,15 +769,18 @@ table.sort(books, function(a, b)
     if b_has_series then return false end
     
     return a.title < b.title
-end)
+	end)
+
     self:showBookList(books, T(_("Books by %1"), author_name))
 end
 
 function OPDSBrowser:parseBookloreOPDSFeed(xml_data)
     local entries = {}
-    logger.info("Booklore: Parsing OPDS feed")
+    logger.info("Booklore: Parsing OPDS feed, XML length:", #xml_data)
 
+    local entry_count = 0
     for entry in xml_data:gmatch("<entry>(.-)</entry>") do
+        entry_count = entry_count + 1
         local book = {}
 
         book.title = entry:match("<title>(.-)</title>") or "Unknown Title"
@@ -746,20 +792,39 @@ function OPDSBrowser:parseBookloreOPDSFeed(xml_data)
         local raw_summary = entry:match('<summary>(.-)</summary>') or ""
         raw_summary = html_unescape(raw_summary)
 
-        -- Extract series from summary BEFORE cleaning HTML
+        -- Extract publisher
+        local publisher = entry:match('<dc:publisher>(.-)</dc:publisher>') or ""
+        publisher = html_unescape(publisher)
+        
+        -- Initialize series fields
         book.series = ""
         book.series_index = ""
         
-        local series_match = raw_summary:match("|([^|]+)|")
-        if series_match then
-            local series_name, series_num = series_match:match("^(.-)%s*#(%d+)$")
+        -- Method 1: Use publisher as series if enabled
+        if self.use_publisher_as_series and publisher ~= "" then
+            local series_name, series_num = publisher:match("^(.-)%s+(%d+)$")
             if series_name and series_num then
                 book.series = series_name:gsub("^%s+", ""):gsub("%s+$", "")
                 book.series_index = series_num
-                logger.info("Booklore: Extracted series:", book.series, "#", book.series_index)
+                logger.info("Booklore: Extracted series from publisher:", book.series, "#", book.series_index)
             else
-                book.series = series_match:gsub("^%s+", ""):gsub("%s+$", "")
-                logger.info("Booklore: Extracted series (no number):", book.series)
+                -- No number found, use whole publisher as series
+                book.series = publisher:gsub("^%s+", ""):gsub("%s+$", "")
+                logger.info("Booklore: Using publisher as series (no number):", book.series)
+            end
+        else
+            -- Method 2: Extract series from summary if publisher not used
+            local series_match = raw_summary:match("|([^|]+)|")
+            if series_match then
+                local series_name, series_num = series_match:match("^(.-)%s*#(%d+)$")
+                if series_name and series_num then
+                    book.series = series_name:gsub("^%s+", ""):gsub("%s+$", "")
+                    book.series_index = series_num
+                    logger.info("Booklore: Extracted series from summary:", book.series, "#", book.series_index)
+                else
+                    book.series = series_match:gsub("^%s+", ""):gsub("%s+$", "")
+                    logger.info("Booklore: Extracted series from summary (no number):", book.series)
+                end
             end
         end
 
@@ -777,12 +842,13 @@ function OPDSBrowser:parseBookloreOPDSFeed(xml_data)
 
         if book.download_url then
             table.insert(entries, book)
+            logger.info("Booklore: Parsed book:", book.title, "by", book.author)
         else
             logger.warn("Booklore: Skipping entry without download URL:", book.title)
         end
     end
 
-    logger.info("Booklore: Parsed", #entries, "books")
+    logger.info("Booklore: Found", entry_count, "entries, parsed", #entries, "books")
     return entries
 end
 
