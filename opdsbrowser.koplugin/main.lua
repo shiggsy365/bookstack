@@ -1613,8 +1613,19 @@ function OPDSBrowser:showHardcoverStandaloneBooks(books, author_name)
 
     -- Sort by release_date descending
     table.sort(standalone_books, function(a, b)
-        local date_a = a.release_date or ""
-        local date_b = b.release_date or ""
+        local date_a = a.release_date
+        local date_b = b.release_date
+
+        -- Handle nil or non-string values
+        if type(date_a) ~= "string" then date_a = "" end
+        if type(date_b) ~= "string" then date_b = "" end
+
+        -- If both empty, maintain order
+        if date_a == "" and date_b == "" then return false end
+        -- Empty dates go to the end
+        if date_a == "" then return false end
+        if date_b == "" then return true end
+
         return date_a > date_b
     end)
 
@@ -1925,8 +1936,19 @@ function OPDSBrowser:showHardcoverAllBooks(books, author_name)
 
     -- Sort by release_date descending
     table.sort(books, function(a, b)
-        local date_a = a.release_date or ""
-        local date_b = b.release_date or ""
+        local date_a = a.release_date
+        local date_b = b.release_date
+
+        -- Handle nil or non-string values
+        if type(date_a) ~= "string" then date_a = "" end
+        if type(date_b) ~= "string" then date_b = "" end
+
+        -- If both empty, maintain order
+        if date_a == "" and date_b == "" then return false end
+        -- Empty dates go to the end
+        if date_a == "" then return false end
+        if date_b == "" then return true end
+
         return date_a > date_b
     end)
 
