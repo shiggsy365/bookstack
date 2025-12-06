@@ -1208,7 +1208,14 @@ function OPDSBrowser:showEphemeraResults(results)
     local items = {}
     for _, book in ipairs(epub_results) do
         local title = book.title or "Unknown Title"
-        local author = book.author or "Unknown Author"
+
+        -- Handle authors array from Ephemera API
+        local author = "Unknown Author"
+        if book.authors and type(book.authors) == "table" and #book.authors > 0 then
+            -- Join array elements: ["Child", "Lee"] becomes "Child Lee"
+            author = table.concat(book.authors, " ")
+        end
+
         local display_text = title .. " - " .. author
         table.insert(items, { text = display_text, callback = function() self:requestEphemeraBook(book) end })
     end
@@ -2542,7 +2549,14 @@ function OPDSBrowser:showEphemeraResultsLimited(results)
     local items = {}
     for _, book in ipairs(results) do
         local title = book.title or "Unknown Title"
-        local author = book.author or "Unknown Author"
+
+        -- Handle authors array from Ephemera API
+        local author = "Unknown Author"
+        if book.authors and type(book.authors) == "table" and #book.authors > 0 then
+            -- Join array elements: ["Child", "Lee"] becomes "Child Lee"
+            author = table.concat(book.authors, " ")
+        end
+
         local display_text = title .. " - " .. author
         table.insert(items, {
             text = display_text,
@@ -2568,16 +2582,14 @@ function OPDSBrowser:filterEphemeraResults(results, english_only)
     local filtered = {}
 
     for _, book in ipairs(results) do
-        -- Check if EPUB
+        -- Check if EPUB (prioritize 'format' field as it's most reliable)
         local is_epub = false
-        if book.extension and type(book.extension) == "string" then
+        if book.format and type(book.format) == "string" then
+            is_epub = book.format:upper() == "EPUB"
+        elseif book.extension and type(book.extension) == "string" then
             is_epub = book.extension:lower() == "epub"
-        elseif book.format and type(book.format) == "string" then
-            is_epub = book.format:lower() == "epub"
         elseif book.type and type(book.type) == "string" then
             is_epub = book.type:lower() == "epub"
-        else
-            is_epub = true -- Fallback for older Ephemera versions
         end
 
         if not is_epub then
