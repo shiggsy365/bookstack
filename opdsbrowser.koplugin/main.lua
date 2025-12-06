@@ -1520,20 +1520,21 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
 
     local success, data = pcall(json.decode, response_text)
     if success and data and data.data and data.data.books then
-        self:showHardcoverAuthorFilterOptions(data.data.books, author_name)
+        self:showHardcoverAuthorFilterOptions(data.data.books, author_name, author_id)
     else
         logger.err("Hardcover: Failed to parse books response")
         UIManager:show(InfoMessage:new{ text = _("Failed to parse books"), timeout = 3 })
     end
 end
 
-function OPDSBrowser:showHardcoverAuthorFilterOptions(books, author_name)
+function OPDSBrowser:showHardcoverAuthorFilterOptions(books, author_name, author_id)
     local Menu = require("ui/widget/menu")
     local Screen = require("device").screen
 
-    -- Store books for later use
+    -- Store books and author info for later use
     self.hardcover_all_books = books
     self.hardcover_current_author = author_name
+    self.hardcover_current_author_id = author_id
 
     local items = {
         {
@@ -1547,7 +1548,7 @@ function OPDSBrowser:showHardcoverAuthorFilterOptions(books, author_name)
             text = _("Book Series"),
             callback = function()
                 UIManager:close(self.filter_menu)
-                self:showHardcoverBookSeries(books, author_name)
+                self:showHardcoverBookSeries(author_id, author_name)
             end,
         },
         {
@@ -1641,53 +1642,90 @@ function OPDSBrowser:showHardcoverStandaloneBooks(books, author_name)
     UIManager:show(self.standalone_menu)
 end
 
-function OPDSBrowser:showHardcoverBookSeries(books, author_name)
-    local Menu = require("ui/widget/menu")
-    local Screen = require("device").screen
-
-    -- Group books by series
-    local series_map = {}
-    for _, book in ipairs(books) do
-        if book.book_series and type(book.book_series) == "table" and #book.book_series > 0 then
-            local series_info = book.book_series[1]
-            if series_info.series and series_info.series.slug then
-                local series_name = series_info.series.slug
-                if not series_map[series_name] then
-                    series_map[series_name] = {
-                        name = series_name,
-                        books = {}
-                    }
-                end
-                table.insert(series_map[series_name].books, book)
-            end
+function OPDSBrowser:showHardcoverBookSeries(author_id, author_name)
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
         end
     end
 
-    -- Convert to sorted array
-    local series_list = {}
-    for series_name, series_data in pairs(series_map) do
-        table.insert(series_list, series_data)
+    UIManager:show(InfoMessage:new{ text = _("Loading series..."), timeout = 2 })
+
+    -- Use efficient series query
+    local query = {
+        query = string.format([[
+            query AuthorSeries {
+                series(where: {_and: [{author_id: {_eq: %s}}, {books_count: {_gt: 0}}]}) {
+                    name
+                    id
+                    books_count
+                }
+            }
+        ]], author_id)
+    }
+
+    local body = json.encode(query)
+    logger.info("Hardcover: Fetching series for author ID:", author_id)
+
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+
+    local response_body = {}
+
+    local res, code, response_headers = https.request{
+        url = "https://api.hardcover.app/v1/graphql",
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = self.hardcover_token,
+            ["Content-Length"] = tostring(#body)
+        },
+        source = ltn12.source.string(body),
+        sink = ltn12.sink.table(response_body)
+    }
+
+    if not res or code ~= 200 then
+        logger.err("Hardcover: Series request failed with code:", code)
+        UIManager:show(InfoMessage:new{ text = T(_("Failed to load series: HTTP %1"), code or "error"), timeout = 3 })
+        return
     end
+
+    local response_text = table.concat(response_body)
+    local success, data = pcall(json.decode, response_text)
+
+    if not success or not data or not data.data or not data.data.series then
+        logger.err("Hardcover: Failed to parse series response")
+        UIManager:show(InfoMessage:new{ text = _("Failed to parse series"), timeout = 3 })
+        return
+    end
+
+    local series_list = data.data.series
 
     if #series_list == 0 then
         UIManager:show(InfoMessage:new{ text = _("No series found for this author"), timeout = 3 })
         return
     end
 
-    -- Sort series alphabetically
+    -- Sort series alphabetically by name
     table.sort(series_list, function(a, b)
         return a.name < b.name
     end)
 
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
     local items = {}
-    for _, series_data in ipairs(series_list) do
-        local book_count = #series_data.books
-        local display_text = series_data.name .. " (" .. book_count .. " book" .. (book_count > 1 and "s" or "") .. ")"
+    for _, series in ipairs(series_list) do
+        local book_count = series.books_count or 0
+        local display_text = series.name .. " (" .. book_count .. " book" .. (book_count > 1 and "s" or "") .. ")"
 
         table.insert(items, {
             text = display_text,
             callback = function()
-                self:showHardcoverSeriesBooks(series_data.books, series_data.name, author_name)
+                self:showHardcoverSeriesBooks(series.id, series.name, author_name)
             end,
         })
     end
@@ -1705,32 +1743,101 @@ function OPDSBrowser:showHardcoverBookSeries(books, author_name)
     UIManager:show(self.series_menu)
 end
 
-function OPDSBrowser:showHardcoverSeriesBooks(books, series_name, author_name)
-    local Menu = require("ui/widget/menu")
-    local Screen = require("device").screen
-
-    -- Sort books by series number
-    table.sort(books, function(a, b)
-        local a_num = 999999
-        local b_num = 999999
-
-        if a.book_series and #a.book_series > 0 and a.book_series[1].details then
-            local details = a.book_series[1].details
-            local num = details:match("%d+")
-            if num then a_num = tonumber(num) end
+function OPDSBrowser:showHardcoverSeriesBooks(series_id, series_name, author_name)
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
         end
+    end
 
-        if b.book_series and #b.book_series > 0 and b.book_series[1].details then
-            local details = b.book_series[1].details
-            local num = details:match("%d+")
-            if num then b_num = tonumber(num) end
-        end
+    UIManager:show(InfoMessage:new{ text = _("Loading books..."), timeout = 2 })
 
-        if a_num ~= b_num then
-            return a_num < b_num
-        end
-        return (a.title or "") < (b.title or "")
-    end)
+    -- Use efficient series_by_pk query
+    local query = {
+        query = string.format([[
+            query BookSeriesNu {
+                series_by_pk(id: %s) {
+                    id
+                    name
+                    book_series(
+                        where: {_and: [
+                            {book: {
+                                book_status_id: {_eq: "1"},
+                                compilation: {_eq: false},
+                                default_physical_edition: {language_id: {_eq: 1}}
+                            }},
+                            {position: {_gt: 0}}
+                        ]}
+                        order_by: {position: asc}
+                    ) {
+                        position
+                        book {
+                            id
+                            title
+                            description
+                            release_date
+                            isbn_13
+                            isbn_10
+                            pages
+                            rating
+                            ratings_count
+                            contributions {
+                                author {
+                                    name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        ]], series_id)
+    }
+
+    local body = json.encode(query)
+    logger.info("Hardcover: Fetching books for series ID:", series_id)
+
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+
+    local response_body = {}
+
+    local res, code, response_headers = https.request{
+        url = "https://api.hardcover.app/v1/graphql",
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Authorization"] = self.hardcover_token,
+            ["Content-Length"] = tostring(#body)
+        },
+        source = ltn12.source.string(body),
+        sink = ltn12.sink.table(response_body)
+    }
+
+    if not res or code ~= 200 then
+        logger.err("Hardcover: Series books request failed with code:", code)
+        UIManager:show(InfoMessage:new{ text = T(_("Failed to load books: HTTP %1"), code or "error"), timeout = 3 })
+        return
+    end
+
+    local response_text = table.concat(response_body)
+    local success, data = pcall(json.decode, response_text)
+
+    if not success or not data or not data.data or not data.data.series_by_pk then
+        logger.err("Hardcover: Failed to parse series books response")
+        UIManager:show(InfoMessage:new{ text = _("Failed to parse books"), timeout = 3 })
+        return
+    end
+
+    local series_data = data.data.series_by_pk
+    local book_series_list = series_data.book_series or {}
+
+    if #book_series_list == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No books found in this series"), timeout = 3 })
+        return
+    end
 
     -- Get library lookup (only if enabled)
     local author_books_lookup = {}
@@ -1738,14 +1845,21 @@ function OPDSBrowser:showHardcoverSeriesBooks(books, series_name, author_name)
         author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
     end
 
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
     local items = {}
-    for _, book in ipairs(books) do
+    for _, book_series in ipairs(book_series_list) do
+        local book = book_series.book
+        local position = book_series.position or 0
+
         local display_text = book.title or "Unknown Title"
 
-        -- Add series info
-        display_text = display_text .. " - " .. series_name
-        if book.book_series and #book.book_series > 0 and book.book_series[1].details then
-            display_text = display_text .. " " .. book.book_series[1].details
+        -- Add series position
+        if position > 0 then
+            display_text = display_text .. " - " .. series_name .. " #" .. position
+        else
+            display_text = display_text .. " - " .. series_name
         end
 
         -- Check if in library (only if checking is enabled)
@@ -1759,6 +1873,11 @@ function OPDSBrowser:showHardcoverSeriesBooks(books, series_name, author_name)
         table.insert(items, {
             text = display_text,
             callback = function()
+                -- Add series info to book for details view
+                book.book_series = {{
+                    series = { slug = series_name, id = series_id },
+                    details = "#" .. position
+                }}
                 self:showHardcoverBookDetails(book, author_name)
             end,
         })
@@ -2289,48 +2408,11 @@ function OPDSBrowser:downloadFromEphemera(book, author)
         return
     end
 
-    -- Try ISBN search first
-    local isbn = book.isbn_13 or book.isbn_10
-    if isbn and isbn ~= "" then
-        logger.info("Ephemera: Searching by ISBN:", isbn)
-        UIManager:show(InfoMessage:new{ text = _("Searching Ephemera by ISBN..."), timeout = 2 })
+    -- Search by author and book name
+    logger.info("Ephemera: Searching by author and title:", author, book.title)
+    UIManager:show(InfoMessage:new{ text = _("Searching Ephemera..."), timeout = 2 })
 
-        local query = url.escape(isbn)
-        local full_url = self.ephemera_url .. "/api/search?q=" .. query
-
-        local ok, response_or_err = self:httpGet(full_url)
-        if ok then
-            local success, data = pcall(json.decode, response_or_err)
-            if success and data and data.results and #data.results > 0 then
-                -- Filter for EPUB and English
-                local filtered = self:filterEphemeraResults(data.results, true) -- true = English only
-
-                if #filtered > 0 then
-                    -- Auto-download first result
-                    logger.info("Ephemera: Auto-downloading first ISBN match:", filtered[1].title or "Unknown")
-                    UIManager:show(InfoMessage:new{ text = _("Found by ISBN! Downloading..."), timeout = 2 })
-                    self:requestEphemeraBook(filtered[1])
-                    return
-                else
-                    logger.info("Ephemera: ISBN found but no English EPUB results, falling back to title search")
-                end
-            else
-                logger.info("Ephemera: No ISBN results, falling back to title/author search")
-            end
-        else
-            logger.warn("Ephemera: ISBN search failed, falling back to title/author search")
-        end
-    end
-
-    -- Fallback to title/author search (show results)
-    logger.info("Ephemera: Searching by title/author:", book.title, author)
-    UIManager:show(InfoMessage:new{ text = _("Searching Ephemera by title..."), timeout = 2 })
-
-    local search_string = book.title
-    if author and author ~= "" then
-        search_string = search_string .. " " .. author
-    end
-
+    local search_string = author .. " " .. book.title
     local query = url.escape(search_string)
     local full_url = self.ephemera_url .. "/api/search?q=" .. query
 
@@ -2341,11 +2423,55 @@ function OPDSBrowser:downloadFromEphemera(book, author)
     end
 
     local success, data = pcall(json.decode, response_or_err)
-    if success and data and data.results then
-        self:showEphemeraResults(data.results)
-    else
+    if not success or not data or not data.results then
         UIManager:show(InfoMessage:new{ text = _("Failed to parse search results"), timeout = 3 })
+        return
     end
+
+    -- Filter for EPUB and English language
+    local filtered = self:filterEphemeraResults(data.results, true) -- true = English only
+
+    if #filtered == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No English EPUB books found"), timeout = 3 })
+        return
+    end
+
+    -- Show top 5 results
+    local top_results = {}
+    for i = 1, math.min(5, #filtered) do
+        table.insert(top_results, filtered[i])
+    end
+
+    self:showEphemeraResultsLimited(top_results)
+end
+
+function OPDSBrowser:showEphemeraResultsLimited(results)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    local items = {}
+    for _, book in ipairs(results) do
+        local title = book.title or "Unknown Title"
+        local author = book.author or "Unknown Author"
+        table.insert(items, {
+            text = title,
+            subtitle = author,
+            callback = function()
+                self:requestEphemeraBook(book)
+            end
+        })
+    end
+
+    self.ephemera_menu = Menu:new{
+        title = T(_("Top %1 Results"), #results),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight()
+    }
+    UIManager:show(self.ephemera_menu)
 end
 
 function OPDSBrowser:filterEphemeraResults(results, english_only)
