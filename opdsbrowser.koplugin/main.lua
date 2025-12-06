@@ -1448,6 +1448,8 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
                     id
                     title
                     pages
+                    isbn_13
+                    isbn_10
                     book_series {
                         series {
                             id
@@ -1500,11 +1502,306 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
 
     local success, data = pcall(json.decode, response_text)
     if success and data and data.data and data.data.books then
-        self:showHardcoverBookList(data.data.books, author_name)
+        self:showHardcoverAuthorFilterOptions(data.data.books, author_name)
     else
         logger.err("Hardcover: Failed to parse books response")
         UIManager:show(InfoMessage:new{ text = _("Failed to parse books"), timeout = 3 })
     end
+end
+
+function OPDSBrowser:showHardcoverAuthorFilterOptions(books, author_name)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    -- Store books for later use
+    self.hardcover_all_books = books
+    self.hardcover_current_author = author_name
+
+    local items = {
+        {
+            text = _("Standalone Books"),
+            callback = function()
+                UIManager:close(self.filter_menu)
+                self:showHardcoverStandaloneBooks(books, author_name)
+            end,
+        },
+        {
+            text = _("Book Series"),
+            callback = function()
+                UIManager:close(self.filter_menu)
+                self:showHardcoverBookSeries(books, author_name)
+            end,
+        },
+        {
+            text = _("All Books"),
+            callback = function()
+                UIManager:close(self.filter_menu)
+                self:showHardcoverAllBooks(books, author_name)
+            end,
+        },
+    }
+
+    self.filter_menu = Menu:new{
+        title = T(_("Books by %1"), author_name),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+    }
+
+    UIManager:show(self.filter_menu)
+end
+
+function OPDSBrowser:showHardcoverStandaloneBooks(books, author_name)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    -- Filter to only standalone books (no series)
+    local standalone_books = {}
+    for _, book in ipairs(books) do
+        local has_series = book.book_series and type(book.book_series) == "table" and #book.book_series > 0
+        if not has_series then
+            table.insert(standalone_books, book)
+        end
+    end
+
+    if #standalone_books == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No standalone books found for this author"), timeout = 3 })
+        return
+    end
+
+    -- Sort by release_date descending
+    table.sort(standalone_books, function(a, b)
+        local date_a = a.release_date or ""
+        local date_b = b.release_date or ""
+        return date_a > date_b
+    end)
+
+    -- Get library lookup for "in library" indicator
+    local author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+
+    local items = {}
+    for _, book in ipairs(standalone_books) do
+        local display_text = book.title or "Unknown Title"
+
+        -- Add release date
+        if book.release_date and book.release_date ~= "" then
+            display_text = display_text .. " (" .. book.release_date .. ")"
+        end
+
+        -- Check if in library
+        local normalized_title = book.title:lower():gsub("[^%w]", "")
+        if author_books_lookup[normalized_title] then
+            display_text = "✓ " .. display_text
+        end
+
+        table.insert(items, {
+            text = display_text,
+            callback = function()
+                self:showHardcoverBookDetails(book, author_name)
+            end,
+        })
+    end
+
+    self.standalone_menu = Menu:new{
+        title = T(_("Standalone Books - %1"), author_name),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+    }
+
+    UIManager:show(self.standalone_menu)
+end
+
+function OPDSBrowser:showHardcoverBookSeries(books, author_name)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    -- Group books by series
+    local series_map = {}
+    for _, book in ipairs(books) do
+        if book.book_series and type(book.book_series) == "table" and #book.book_series > 0 then
+            local series_info = book.book_series[1]
+            if series_info.series and series_info.series.slug then
+                local series_name = series_info.series.slug
+                if not series_map[series_name] then
+                    series_map[series_name] = {
+                        name = series_name,
+                        books = {}
+                    }
+                end
+                table.insert(series_map[series_name].books, book)
+            end
+        end
+    end
+
+    -- Convert to sorted array
+    local series_list = {}
+    for series_name, series_data in pairs(series_map) do
+        table.insert(series_list, series_data)
+    end
+
+    if #series_list == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No series found for this author"), timeout = 3 })
+        return
+    end
+
+    -- Sort series alphabetically
+    table.sort(series_list, function(a, b)
+        return a.name < b.name
+    end)
+
+    local items = {}
+    for _, series_data in ipairs(series_list) do
+        local book_count = #series_data.books
+        local display_text = series_data.name .. " (" .. book_count .. " book" .. (book_count > 1 and "s" or "") .. ")"
+
+        table.insert(items, {
+            text = display_text,
+            callback = function()
+                self:showHardcoverSeriesBooks(series_data.books, series_data.name, author_name)
+            end,
+        })
+    end
+
+    self.series_menu = Menu:new{
+        title = T(_("Book Series - %1"), author_name),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+    }
+
+    UIManager:show(self.series_menu)
+end
+
+function OPDSBrowser:showHardcoverSeriesBooks(books, series_name, author_name)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    -- Sort books by series number
+    table.sort(books, function(a, b)
+        local a_num = 999999
+        local b_num = 999999
+
+        if a.book_series and #a.book_series > 0 and a.book_series[1].details then
+            local details = a.book_series[1].details
+            local num = details:match("%d+")
+            if num then a_num = tonumber(num) end
+        end
+
+        if b.book_series and #b.book_series > 0 and b.book_series[1].details then
+            local details = b.book_series[1].details
+            local num = details:match("%d+")
+            if num then b_num = tonumber(num) end
+        end
+
+        if a_num ~= b_num then
+            return a_num < b_num
+        end
+        return (a.title or "") < (b.title or "")
+    end)
+
+    -- Get library lookup
+    local author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+
+    local items = {}
+    for _, book in ipairs(books) do
+        local display_text = book.title or "Unknown Title"
+
+        -- Add series info
+        display_text = display_text .. " - " .. series_name
+        if book.book_series and #book.book_series > 0 and book.book_series[1].details then
+            display_text = display_text .. " " .. book.book_series[1].details
+        end
+
+        -- Check if in library
+        local normalized_title = book.title:lower():gsub("[^%w]", "")
+        if author_books_lookup[normalized_title] then
+            display_text = "✓ " .. display_text
+        end
+
+        table.insert(items, {
+            text = display_text,
+            callback = function()
+                self:showHardcoverBookDetails(book, author_name)
+            end,
+        })
+    end
+
+    self.series_books_menu = Menu:new{
+        title = series_name,
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+    }
+
+    UIManager:show(self.series_books_menu)
+end
+
+function OPDSBrowser:showHardcoverAllBooks(books, author_name)
+    local Menu = require("ui/widget/menu")
+    local Screen = require("device").screen
+
+    if #books == 0 then
+        UIManager:show(InfoMessage:new{ text = _("No books found for this author"), timeout = 3 })
+        return
+    end
+
+    -- Sort by release_date descending
+    table.sort(books, function(a, b)
+        local date_a = a.release_date or ""
+        local date_b = b.release_date or ""
+        return date_a > date_b
+    end)
+
+    -- Get library lookup for "in library" indicator
+    local author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+
+    local items = {}
+    for _, book in ipairs(books) do
+        local display_text = book.title or "Unknown Title"
+
+        -- Add release date
+        if book.release_date and book.release_date ~= "" then
+            display_text = display_text .. " (" .. book.release_date .. ")"
+        end
+
+        -- Check if in library
+        local normalized_title = book.title:lower():gsub("[^%w]", "")
+        if author_books_lookup[normalized_title] then
+            display_text = "✓ " .. display_text
+        end
+
+        table.insert(items, {
+            text = display_text,
+            callback = function()
+                self:showHardcoverBookDetails(book, author_name)
+            end,
+        })
+    end
+
+    self.all_books_menu = Menu:new{
+        title = T(_("All Books - %1"), author_name),
+        item_table = items,
+        is_borderless = true,
+        is_popout = false,
+        title_bar_fm_style = true,
+        width = Screen:getWidth(),
+        height = Screen:getHeight(),
+    }
+
+    UIManager:show(self.all_books_menu)
 end
 
 function OPDSBrowser:showHardcoverBookList(books, author_name)
@@ -1891,14 +2188,14 @@ function OPDSBrowser:showHardcoverBookDetails(book, author_name)
 
     local buttons = {
         {
-            { text = _("Search Ephemera"), callback = function()
+            { text = _("Download from Ephemera"), callback = function()
                 UIManager:close(self.hardcover_book_details)
-                self:searchEphemeraFromHardcover(book.title, book_author)
+                self:downloadFromEphemera(book, book_author)
             end },
         },
         {
-            { text = _("Close"), callback = function() 
-                UIManager:close(self.hardcover_book_details) 
+            { text = _("Close"), callback = function()
+                UIManager:close(self.hardcover_book_details)
             end },
         },
     }
@@ -1912,19 +2209,127 @@ function OPDSBrowser:showHardcoverBookDetails(book, author_name)
     UIManager:show(self.hardcover_book_details)
 end
 
+function OPDSBrowser:downloadFromEphemera(book, author)
+    if not self.ephemera_url or self.ephemera_url == "" then
+        UIManager:show(InfoMessage:new{ text = _("Ephemera URL not configured"), timeout = 3 })
+        return
+    end
+
+    -- Try ISBN search first
+    local isbn = book.isbn_13 or book.isbn_10
+    if isbn and isbn ~= "" then
+        logger.info("Ephemera: Searching by ISBN:", isbn)
+        UIManager:show(InfoMessage:new{ text = _("Searching Ephemera by ISBN..."), timeout = 2 })
+
+        local query = url.escape(isbn)
+        local full_url = self.ephemera_url .. "/api/search?q=" .. query
+
+        local ok, response_or_err = self:httpGet(full_url)
+        if ok then
+            local success, data = pcall(json.decode, response_or_err)
+            if success and data and data.results and #data.results > 0 then
+                -- Filter for EPUB and English
+                local filtered = self:filterEphemeraResults(data.results, true) -- true = English only
+
+                if #filtered > 0 then
+                    -- Auto-download first result
+                    logger.info("Ephemera: Auto-downloading first ISBN match:", filtered[1].title or "Unknown")
+                    UIManager:show(InfoMessage:new{ text = _("Found by ISBN! Downloading..."), timeout = 2 })
+                    self:requestEphemeraBook(filtered[1])
+                    return
+                else
+                    logger.info("Ephemera: ISBN found but no English EPUB results, falling back to title search")
+                end
+            else
+                logger.info("Ephemera: No ISBN results, falling back to title/author search")
+            end
+        else
+            logger.warn("Ephemera: ISBN search failed, falling back to title/author search")
+        end
+    end
+
+    -- Fallback to title/author search (show results)
+    logger.info("Ephemera: Searching by title/author:", book.title, author)
+    UIManager:show(InfoMessage:new{ text = _("Searching Ephemera by title..."), timeout = 2 })
+
+    local search_string = book.title
+    if author and author ~= "" then
+        search_string = search_string .. " " .. author
+    end
+
+    local query = url.escape(search_string)
+    local full_url = self.ephemera_url .. "/api/search?q=" .. query
+
+    local ok, response_or_err = self:httpGet(full_url)
+    if not ok then
+        UIManager:show(InfoMessage:new{ text = T(_("Ephemera search failed: %1"), response_or_err), timeout = 3 })
+        return
+    end
+
+    local success, data = pcall(json.decode, response_or_err)
+    if success and data and data.results then
+        self:showEphemeraResults(data.results)
+    else
+        UIManager:show(InfoMessage:new{ text = _("Failed to parse search results"), timeout = 3 })
+    end
+end
+
+function OPDSBrowser:filterEphemeraResults(results, english_only)
+    local filtered = {}
+
+    for _, book in ipairs(results) do
+        -- Check if EPUB
+        local is_epub = false
+        if book.extension and type(book.extension) == "string" then
+            is_epub = book.extension:lower() == "epub"
+        elseif book.format and type(book.format) == "string" then
+            is_epub = book.format:lower() == "epub"
+        elseif book.type and type(book.type) == "string" then
+            is_epub = book.type:lower() == "epub"
+        else
+            is_epub = true -- Fallback for older Ephemera versions
+        end
+
+        if not is_epub then
+            goto continue
+        end
+
+        -- Check if English (if required)
+        if english_only then
+            local is_english = false
+            if book.language and type(book.language) == "string" then
+                local lang = book.language:lower()
+                is_english = (lang == "english" or lang == "en" or lang == "eng")
+            else
+                -- If no language field, assume English
+                is_english = true
+            end
+
+            if not is_english then
+                goto continue
+            end
+        end
+
+        table.insert(filtered, book)
+        ::continue::
+    end
+
+    return filtered
+end
+
 function OPDSBrowser:searchEphemeraFromHardcover(title, author)
     if not self.ephemera_url or self.ephemera_url == "" then
         UIManager:show(InfoMessage:new{ text = _("Ephemera URL not configured"), timeout = 3 })
         return
     end
-    
+
     UIManager:show(InfoMessage:new{ text = _("Searching Ephemera..."), timeout = 3 })
-    
+
     local search_string = title
-    if author and author ~= "" then 
-        search_string = search_string .. " " .. author 
+    if author and author ~= "" then
+        search_string = search_string .. " " .. author
     end
-    
+
     local query = url.escape(search_string)
     local full_url = self.ephemera_url .. "/api/search?q=" .. query
 
