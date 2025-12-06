@@ -31,8 +31,14 @@ local OPDSBrowser = WidgetContainer:extend{
 local function html_unescape(s)
     if not s then return "" end
     s = tostring(s)
-    -- numeric entities
-    s = s:gsub("&#(%d+);", function(n) local v = tonumber(n); return v and string.char(v) or "" end)
+    -- numeric entities (with range check for string.char)
+    s = s:gsub("&#(%d+);", function(n)
+        local v = tonumber(n)
+        if v and v > 0 and v < 256 then
+            return string.char(v)
+        end
+        return "" -- Skip characters outside ASCII range
+    end)
     -- common named entities
     s = s:gsub("&lt;", "<")
     s = s:gsub("&gt;", ">")
@@ -109,6 +115,15 @@ function OPDSBrowser:addToMainMenu(menu_items)
 end
 
 function OPDSBrowser:browseRecentlyAdded()
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
     UIManager:show(InfoMessage:new{ text = _("Loading recently added books..."), timeout = 2 })
     
     local full_url = self.opds_url .. "/recent"
@@ -128,6 +143,15 @@ function OPDSBrowser:browseRecentlyAdded()
 end
 
 function OPDSBrowser:getRandomBook()
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
     UIManager:show(InfoMessage:new{ text = _("Getting random book..."), timeout = 2 })
     
     local full_url = self.opds_url .. "/surprise"
@@ -512,6 +536,15 @@ function OPDSBrowser:showBookDetails(book)
 end
 
 function OPDSBrowser:browseAuthors()
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
     UIManager:show(InfoMessage:new{ text = _("Loading authors..."), timeout = 2 })
     
     local full_url = self.opds_url .. "/catalog"
@@ -611,6 +644,15 @@ function OPDSBrowser:searchLibrary()
 end
 
 function OPDSBrowser:performLibrarySearch(search_term)
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
     UIManager:show(InfoMessage:new{ text = _("Searching library..."), timeout = 2 })
     
     local query = url.escape(search_term)
@@ -1167,7 +1209,8 @@ function OPDSBrowser:showEphemeraResults(results)
     for _, book in ipairs(epub_results) do
         local title = book.title or "Unknown Title"
         local author = book.author or "Unknown Author"
-        table.insert(items, { text = title, subtitle = author, callback = function() self:requestEphemeraBook(book) end })
+        local display_text = title .. " - " .. author
+        table.insert(items, { text = display_text, callback = function() self:requestEphemeraBook(book) end })
     end
 
     self.ephemera_menu = Menu:new{ 
@@ -1220,6 +1263,15 @@ function OPDSBrowser:requestEphemeraBook(book)
 end
 
 function OPDSBrowser:showDownloadQueue()
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
     UIManager:show(InfoMessage:new{ text = _("Loading queue..."), timeout = 3 })
     local full_url = self.ephemera_url .. "/api/queue"
     local ok, response_or_err = self:httpGet(full_url)
@@ -2491,9 +2543,9 @@ function OPDSBrowser:showEphemeraResultsLimited(results)
     for _, book in ipairs(results) do
         local title = book.title or "Unknown Title"
         local author = book.author or "Unknown Author"
+        local display_text = title .. " - " .. author
         table.insert(items, {
-            text = title,
-            subtitle = author,
+            text = display_text,
             callback = function()
                 self:requestEphemeraBook(book)
             end
