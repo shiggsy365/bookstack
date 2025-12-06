@@ -1517,14 +1517,36 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
 
     local response_text = table.concat(response_body)
     logger.info("Hardcover: Response length:", #response_text)
+    logger.info("Hardcover: Response preview:", response_text:sub(1, 500))
 
     local success, data = pcall(json.decode, response_text)
-    if success and data and data.data and data.data.books then
-        self:showHardcoverAuthorFilterOptions(data.data.books, author_name, author_id)
-    else
-        logger.err("Hardcover: Failed to parse books response")
-        UIManager:show(InfoMessage:new{ text = _("Failed to parse books"), timeout = 3 })
+    if not success then
+        logger.err("Hardcover: JSON parse error:", data)
+        UIManager:show(InfoMessage:new{ text = T(_("JSON parse error: %1"), tostring(data)), timeout = 5 })
+        return
     end
+
+    if not data then
+        logger.err("Hardcover: No data in response")
+        UIManager:show(InfoMessage:new{ text = _("No data in response"), timeout = 3 })
+        return
+    end
+
+    if data.errors then
+        logger.err("Hardcover: GraphQL errors:", json.encode(data.errors))
+        local error_msg = data.errors[1] and data.errors[1].message or "Unknown GraphQL error"
+        UIManager:show(InfoMessage:new{ text = T(_("GraphQL error: %1"), error_msg), timeout = 5 })
+        return
+    end
+
+    if not data.data or not data.data.books then
+        logger.err("Hardcover: Unexpected response structure")
+        logger.err("Hardcover: Response:", json.encode(data):sub(1, 1000))
+        UIManager:show(InfoMessage:new{ text = _("Unexpected response structure"), timeout = 3 })
+        return
+    end
+
+    self:showHardcoverAuthorFilterOptions(data.data.books, author_name, author_id)
 end
 
 function OPDSBrowser:showHardcoverAuthorFilterOptions(books, author_name, author_id)
