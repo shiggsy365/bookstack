@@ -1639,8 +1639,8 @@ function OPDSBrowser:showHardcoverStandaloneBooks(books, author_name)
     for _, book in ipairs(standalone_books) do
         local display_text = book.title or "Unknown Title"
 
-        -- Add release date
-        if book.release_date and book.release_date ~= "" then
+        -- Add release date (with type checking)
+        if book.release_date and type(book.release_date) == "string" and book.release_date ~= "" then
             display_text = display_text .. " (" .. book.release_date .. ")"
         end
 
@@ -1962,8 +1962,8 @@ function OPDSBrowser:showHardcoverAllBooks(books, author_name)
     for _, book in ipairs(books) do
         local display_text = book.title or "Unknown Title"
 
-        -- Add release date
-        if book.release_date and book.release_date ~= "" then
+        -- Add release date (with type checking)
+        if book.release_date and type(book.release_date) == "string" and book.release_date ~= "" then
             display_text = display_text .. " (" .. book.release_date .. ")"
         end
 
