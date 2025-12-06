@@ -1466,8 +1466,6 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
                     id
                     title
                     pages
-                    isbn_13
-                    isbn_10
                     book_series {
                         series {
                             id
@@ -1801,8 +1799,6 @@ function OPDSBrowser:showHardcoverSeriesBooks(series_id, series_name, author_nam
                             title
                             description
                             release_date
-                            isbn_13
-                            isbn_10
                             pages
                             rating
                             ratings_count
