@@ -79,11 +79,14 @@ function OPDSBrowser:init()
     if self.use_publisher_as_series == nil then
         self.use_publisher_as_series = false
     end
-    
-    -- Initialize library cache
+    self.enable_library_check = self.settings:readSetting("enable_library_check")
+    if self.enable_library_check == nil then
+        self.enable_library_check = true -- Default enabled for backwards compatibility
+    end
+    self.library_check_page_limit = self.settings:readSetting("library_check_page_limit") or 5 -- Limit to 5 pages (250 books at 50/page)
+
+    -- Initialize library cache (session-based, cleared on plugin reload)
     self.library_cache = {}
-    self.library_cache_timestamp = 0
-    self.library_cache_ttl = 300 -- 5 minutes cache lifetime
 end
 
 function OPDSBrowser:addToMainMenu(menu_items)
@@ -203,12 +206,14 @@ function OPDSBrowser:showSettings()
     
     -- Check if hardcover token exists
     local hardcover_status = self.hardcover_token ~= "" and "✓ Configured" or "✗ Not configured"
-    
+
     -- Convert boolean to YES/NO for display
     local publisher_setting = self.use_publisher_as_series and "YES" or "NO"
-    
+    local library_check_setting = self.enable_library_check and "YES" or "NO"
+
     logger.info("Settings: Current use_publisher_as_series value:", self.use_publisher_as_series)
-    
+    logger.info("Settings: Current enable_library_check value:", self.enable_library_check)
+
     self.settings_dialog = MultiInputDialog:new{
         title = _("Book Download Settings"),
         fields = {
@@ -218,6 +223,8 @@ function OPDSBrowser:showSettings()
             { text = self.ephemera_url, hint = _("Ephemera URL (e.g., http://example.com:8286)"), input_type = "string" },
             { text = self.download_dir, hint = _("Download Directory"), input_type = "string" },
             { text = publisher_setting, hint = _("Use Publisher as Series? (YES/NO)"), input_type = "string" },
+            { text = library_check_setting, hint = _("Check 'In Library' for Hardcover? (YES/NO)"), input_type = "string" },
+            { text = tostring(self.library_check_page_limit), hint = _("Max pages to check (5=250 books, 0=unlimited)"), input_type = "number" },
         },
         buttons = {
             {
@@ -233,6 +240,8 @@ function OPDSBrowser:showSettings()
                     local new_ephemera_url = (fields[4] or ""):gsub("/$", ""):gsub("%s+", "")
                     local new_download_dir = fields[5] or self.download_dir
                     local publisher_input = (fields[6] or "NO"):upper():gsub("%s+", "")
+                    local library_check_input = (fields[7] or "YES"):upper():gsub("%s+", "")
+                    local page_limit_input = tonumber(fields[8]) or 5
 
                     if new_opds_url ~= "" and not new_opds_url:match("^https?://") then
                         UIManager:show(InfoMessage:new{ text = _("Invalid OPDS URL!\n\nURL must start with http:// or https://"), timeout = 3 })
@@ -249,11 +258,15 @@ function OPDSBrowser:showSettings()
                     self.opds_password = new_opds_password
                     self.ephemera_url = new_ephemera_url
                     self.download_dir = new_download_dir
-                    
+
                     -- Convert YES/NO to boolean
                     self.use_publisher_as_series = (publisher_input == "YES")
-                    
+                    self.enable_library_check = (library_check_input == "YES")
+                    self.library_check_page_limit = page_limit_input
+
                     logger.info("Settings: Saving use_publisher_as_series as:", self.use_publisher_as_series)
+                    logger.info("Settings: Saving enable_library_check as:", self.enable_library_check)
+                    logger.info("Settings: Saving library_check_page_limit as:", self.library_check_page_limit)
 
                     self.settings:saveSetting("opds_url", self.opds_url)
                     self.settings:saveSetting("opds_username", self.opds_username)
@@ -261,7 +274,12 @@ function OPDSBrowser:showSettings()
                     self.settings:saveSetting("ephemera_url", self.ephemera_url)
                     self.settings:saveSetting("download_dir", self.download_dir)
                     self.settings:saveSetting("use_publisher_as_series", self.use_publisher_as_series)
+                    self.settings:saveSetting("enable_library_check", self.enable_library_check)
+                    self.settings:saveSetting("library_check_page_limit", self.library_check_page_limit)
                     self.settings:flush()
+
+                    -- Clear cache when settings change
+                    self.library_cache = {}
 
                     UIManager:show(InfoMessage:new{ text = _("Settings saved successfully!"), timeout = 3 })
                     UIManager:close(self.settings_dialog)
@@ -1579,8 +1597,11 @@ function OPDSBrowser:showHardcoverStandaloneBooks(books, author_name)
         return date_a > date_b
     end)
 
-    -- Get library lookup for "in library" indicator
-    local author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+    -- Get library lookup for "in library" indicator (only if enabled)
+    local author_books_lookup = {}
+    if self.enable_library_check then
+        author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+    end
 
     local items = {}
     for _, book in ipairs(standalone_books) do
@@ -1591,10 +1612,12 @@ function OPDSBrowser:showHardcoverStandaloneBooks(books, author_name)
             display_text = display_text .. " (" .. book.release_date .. ")"
         end
 
-        -- Check if in library
-        local normalized_title = book.title:lower():gsub("[^%w]", "")
-        if author_books_lookup[normalized_title] then
-            display_text = "✓ " .. display_text
+        -- Check if in library (only if checking is enabled)
+        if self.enable_library_check then
+            local normalized_title = book.title:lower():gsub("[^%w]", "")
+            if author_books_lookup[normalized_title] then
+                display_text = "✓ " .. display_text
+            end
         end
 
         table.insert(items, {
@@ -1709,8 +1732,11 @@ function OPDSBrowser:showHardcoverSeriesBooks(books, series_name, author_name)
         return (a.title or "") < (b.title or "")
     end)
 
-    -- Get library lookup
-    local author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+    -- Get library lookup (only if enabled)
+    local author_books_lookup = {}
+    if self.enable_library_check then
+        author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+    end
 
     local items = {}
     for _, book in ipairs(books) do
@@ -1722,10 +1748,12 @@ function OPDSBrowser:showHardcoverSeriesBooks(books, series_name, author_name)
             display_text = display_text .. " " .. book.book_series[1].details
         end
 
-        -- Check if in library
-        local normalized_title = book.title:lower():gsub("[^%w]", "")
-        if author_books_lookup[normalized_title] then
-            display_text = "✓ " .. display_text
+        -- Check if in library (only if checking is enabled)
+        if self.enable_library_check then
+            local normalized_title = book.title:lower():gsub("[^%w]", "")
+            if author_books_lookup[normalized_title] then
+                display_text = "✓ " .. display_text
+            end
         end
 
         table.insert(items, {
@@ -1765,8 +1793,11 @@ function OPDSBrowser:showHardcoverAllBooks(books, author_name)
         return date_a > date_b
     end)
 
-    -- Get library lookup for "in library" indicator
-    local author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+    -- Get library lookup for "in library" indicator (only if enabled)
+    local author_books_lookup = {}
+    if self.enable_library_check then
+        author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+    end
 
     local items = {}
     for _, book in ipairs(books) do
@@ -1777,10 +1808,12 @@ function OPDSBrowser:showHardcoverAllBooks(books, author_name)
             display_text = display_text .. " (" .. book.release_date .. ")"
         end
 
-        -- Check if in library
-        local normalized_title = book.title:lower():gsub("[^%w]", "")
-        if author_books_lookup[normalized_title] then
-            display_text = "✓ " .. display_text
+        -- Check if in library (only if checking is enabled)
+        if self.enable_library_check then
+            local normalized_title = book.title:lower():gsub("[^%w]", "")
+            if author_books_lookup[normalized_title] then
+                display_text = "✓ " .. display_text
+            end
         end
 
         table.insert(items, {
@@ -2066,51 +2099,92 @@ function OPDSBrowser:checkVisibleHardcoverBooks()
 end
 
 function OPDSBrowser:getAuthorBooksFromLibrary(author)
+    -- Check if library checking is enabled
+    if not self.enable_library_check then
+        logger.info("Library check: Disabled in settings")
+        return {}
+    end
+
     -- Check if the library path exists
     if not self.opds_url or self.opds_url == "" then
         return {}
     end
-    
+
     -- Create a normalized cache key for the author
     local cache_key = "author:" .. author:lower():gsub("[^%w]", "")
-    
-    -- Check cache first
-    local current_time = os.time()
-    if self.library_cache[cache_key] ~= nil and 
-       (current_time - self.library_cache_timestamp) < self.library_cache_ttl then
+
+    -- Check cache first (session-based)
+    if self.library_cache[cache_key] ~= nil then
         logger.info("Library check: Cache hit for author", author)
         return self.library_cache[cache_key]
     end
-    
+
     -- Search the library for this author using Booklore endpoint
     local query = url.escape(author)
-    local full_url = self.opds_url .. "/catalog?q=" .. query
-    
-    logger.info("Fetching all books by author from library:", author)
-    logger.info("Library check URL:", full_url)
-    
-    local all_xml = self:fetchAllPages(full_url, 50)
-    if not all_xml then
-        logger.warn("Library check failed for author:", author)
+    local base_url = self.opds_url .. "/catalog?q=" .. query
+    local size = 50
+
+    logger.info("Library check: Fetching books for author:", author)
+    logger.info("Library check: Page limit:", self.library_check_page_limit)
+
+    -- Optimized approach: Parse incrementally, keep only title lookup
+    local title_lookup = {}
+    local separator = base_url:match("%?") and "&" or "?"
+
+    -- Fetch page 1 to get total pages
+    local page1_url = base_url .. separator .. "page=1&size=" .. size
+    local ok, response_or_err = self:httpGet(page1_url)
+    if not ok then
+        logger.warn("Library check: Failed to fetch first page:", response_or_err)
         self.library_cache[cache_key] = {}
         return {}
     end
-    
-    local books = self:parseBookloreOPDSFeed(all_xml)
-    logger.info("Found", #books, "books in library for author:", author)
-    
-    -- Create a lookup table of normalized titles for quick comparison
-    local title_lookup = {}
+
+    -- Get last page number
+    local last_page = self:getLastPageNumber(response_or_err)
+
+    -- Apply page limit (0 = unlimited)
+    if self.library_check_page_limit > 0 and last_page > self.library_check_page_limit then
+        logger.info("Library check: Limiting to", self.library_check_page_limit, "pages instead of", last_page)
+        last_page = self.library_check_page_limit
+    end
+
+    logger.info("Library check: Fetching", last_page, "pages")
+
+    -- Parse page 1 and extract titles
+    local books = self:parseBookloreOPDSFeed(response_or_err)
     for _, book in ipairs(books) do
         local normalized_title = book.title:lower():gsub("[^%w]", "")
         title_lookup[normalized_title] = true
-        logger.info("Library book:", book.title, "->", normalized_title)
     end
-    
-    -- Cache the result
+    logger.info("Library check: Page 1 -", #books, "books")
+
+    -- Fetch and parse remaining pages incrementally
+    if last_page > 1 then
+        for page = 2, last_page do
+            local page_url = base_url .. separator .. "page=" .. page .. "&size=" .. size
+            ok, response_or_err = self:httpGet(page_url)
+
+            if ok then
+                books = self:parseBookloreOPDSFeed(response_or_err)
+                for _, book in ipairs(books) do
+                    local normalized_title = book.title:lower():gsub("[^%w]", "")
+                    title_lookup[normalized_title] = true
+                end
+                logger.info("Library check: Page", page, "-", #books, "books")
+            else
+                logger.warn("Library check: Failed to fetch page", page)
+            end
+        end
+    end
+
+    local total_count = 0
+    for _ in pairs(title_lookup) do total_count = total_count + 1 end
+    logger.info("Library check: Found", total_count, "unique books for author:", author)
+
+    -- Cache the result (session-based)
     self.library_cache[cache_key] = title_lookup
-    self.library_cache_timestamp = current_time
-    
+
     return title_lookup
 end
 
