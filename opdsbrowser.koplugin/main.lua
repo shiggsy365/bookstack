@@ -1460,16 +1460,21 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
         query = string.format([[
             query BooksByAuthor {
                 books(
-                    where: {contributions: {author: {id: {_eq: "%s"}}}}
-                    order_by: {users_count: desc}
+                    where: {_and: [
+                        {contributions: {author: {id: {_eq: %s}}}},
+                        {users_count: {_gt: 0}},
+                        {book_status_id: {_eq: "1"}},
+                        {compilation: {_eq: false}},
+                        {default_physical_edition: {language_id: {_eq: 1}}}
+                    ]}
+                    order_by: {title: asc}
                 ) {
                     id
                     title
                     pages
                     book_series {
                         series {
-                            id
-                            slug
+                            name
                         }
                         details
                     }
@@ -1477,14 +1482,9 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
                     description
                     rating
                     ratings_count
-                    contributions(where: {author_id: {_eq: "%s"}}) {
-                        author {
-                            name
-                        }
-                    }
                 }
             }
-        ]], author_id, author_id)
+        ]], author_id)
     }
 
     local body = json.encode(query)
@@ -2018,7 +2018,7 @@ function OPDSBrowser:showHardcoverBookList(books, author_name)
         if book.book_series and #book.book_series > 0 then
             local series_info = book.book_series[1]
             if series_info.series then
-                display_text = display_text .. " - " .. (series_info.series.slug or "Unknown Series")
+                display_text = display_text .. " - " .. (series_info.series.name or "Unknown Series")
                 -- Check if details is a string before adding it
                 if series_info.details and type(series_info.details) == "string" and series_info.details ~= "" then
                     display_text = display_text .. " " .. series_info.details
@@ -2168,7 +2168,7 @@ function OPDSBrowser:getHardcoverSeriesData(author_name)
             local series_info = book.book_series[1]
             if series_info.series then
                 series_lookup[normalized_title] = {
-                    name = series_info.series.slug or "Unknown Series",
+                    name = series_info.series.name or "Unknown Series",
                     details = series_info.details or ""
                 }
                 logger.info("Hardcover series:", book.title, "->", series_lookup[normalized_title].name, series_lookup[normalized_title].details)
@@ -2388,9 +2388,7 @@ function OPDSBrowser:showHardcoverBookDetails(book, author_name)
         local series_info = book.book_series[1]
         if series_info and type(series_info) == "table" and series_info.series then
             local series_text = ""
-            if series_info.series.slug and type(series_info.series.slug) == "string" then
-                series_text = series_info.series.slug
-            elseif series_info.series.name and type(series_info.series.name) == "string" then
+            if series_info.series.name and type(series_info.series.name) == "string" then
                 series_text = series_info.series.name
             else
                 series_text = "Unknown Series"
