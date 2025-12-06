@@ -31,8 +31,14 @@ local OPDSBrowser = WidgetContainer:extend{
 local function html_unescape(s)
     if not s then return "" end
     s = tostring(s)
-    -- numeric entities
-    s = s:gsub("&#(%d+);", function(n) local v = tonumber(n); return v and string.char(v) or "" end)
+    -- numeric entities (with range check for string.char)
+    s = s:gsub("&#(%d+);", function(n)
+        local v = tonumber(n)
+        if v and v > 0 and v < 256 then
+            return string.char(v)
+        end
+        return "" -- Skip characters outside ASCII range
+    end)
     -- common named entities
     s = s:gsub("&lt;", "<")
     s = s:gsub("&gt;", ">")
@@ -109,6 +115,15 @@ function OPDSBrowser:addToMainMenu(menu_items)
 end
 
 function OPDSBrowser:browseRecentlyAdded()
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
     UIManager:show(InfoMessage:new{ text = _("Loading recently added books..."), timeout = 2 })
     
     local full_url = self.opds_url .. "/recent"
@@ -128,6 +143,15 @@ function OPDSBrowser:browseRecentlyAdded()
 end
 
 function OPDSBrowser:getRandomBook()
+    if not NetworkMgr:isOnline() then
+        NetworkMgr:beforeWifiAction()
+        socket.sleep(1)
+        if not NetworkMgr:isOnline() then
+            UIManager:show(InfoMessage:new{ text = _("Network unavailable"), timeout = 3 })
+            return
+        end
+    end
+
     UIManager:show(InfoMessage:new{ text = _("Getting random book..."), timeout = 2 })
     
     local full_url = self.opds_url .. "/surprise"
