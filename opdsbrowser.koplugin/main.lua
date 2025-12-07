@@ -93,7 +93,7 @@ function OPDSBrowser:onReaderReady()
     if PlaceholderGenerator:isPlaceholder(current_file) then
         logger.info("OPDSBrowser: Detected placeholder file:", current_file)
         -- Delay slightly to let the reader UI fully initialize
-        UIManager:scheduleIn(0.5, function()
+        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_UI_DELAY, function()
             self:handlePlaceholderAutoDownload(current_file)
         end)
     end
@@ -206,7 +206,8 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     local data = table.concat(response_body)
     logger.info("OPDS: Downloaded", #data, "bytes")
     
-    if #data < 100 then
+    -- Validate file size - files smaller than MIN_VALID_BOOK_SIZE are likely errors
+    if #data < Constants.MIN_VALID_BOOK_SIZE then
         UIHelpers.showError(_("Downloaded file appears invalid (too small)\n\nPlaceholder will remain."))
         return
     end
@@ -233,31 +234,32 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     -- Close the current document (placeholder)
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
-        UIManager:scheduleIn(0.2, function()
+        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
             ReaderUI.instance:onClose()
             
-            -- Delete the placeholder
-            UIManager:scheduleIn(0.2, function()
+            -- Delete the placeholder after closing
+            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_DELETE_DELAY, function()
                 local ok = os.remove(placeholder_path)
                 if ok then
                     logger.info("OPDS: Deleted placeholder:", placeholder_path)
+                    -- Remove from placeholder database only after successful deletion
+                    self.library_sync.placeholder_db[placeholder_path] = nil
+                    self.library_sync:savePlaceholderDB()
                 else
                     logger.warn("OPDS: Failed to delete placeholder:", placeholder_path)
+                    -- Keep the entry in database since file still exists
+                    -- User can manually delete or retry later
                 end
-                
-                -- Remove from placeholder database
-                self.library_sync.placeholder_db[placeholder_path] = nil
-                self.library_sync:savePlaceholderDB()
                 
                 -- Show success and open the new book
                 UIHelpers.showSuccess(T(_("Downloaded: %1\n\nOpening book..."), book_info.title))
                 
                 -- Open the downloaded book
-                UIManager:scheduleIn(0.5, function()
+                UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_OPEN_DELAY, function()
                     ReaderUI:showReader(filepath)
                     
                     -- Refresh file manager
-                    UIManager:scheduleIn(0.5, function()
+                    UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
                         local FileManager = require("apps/filemanager/filemanager")
                         if FileManager.instance then
                             FileManager.instance:onRefresh()
