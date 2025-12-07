@@ -1485,13 +1485,81 @@ function OPDSBrowser:performLibrarySync()
     )
     
     UIHelpers.showInfo(summary, 10)
-    
+
+    -- Update "Recently Added" collection with 20 newest books
+    self:updateRecentlyAddedCollection(books)
+
     UIManager:scheduleIn(0.5, function()
         local FileManager = require("apps/filemanager/filemanager")
         if FileManager.instance then
             FileManager.instance:onRefresh()
         end
     end)
+end
+
+-- Update "Recently Added" collection with the 20 most recent books
+function OPDSBrowser:updateRecentlyAddedCollection(books)
+    logger.info("OPDS: Updating 'Recently Added' collection")
+
+    -- Sort books by updated timestamp (most recent first)
+    local books_with_dates = {}
+    for _, book in ipairs(books) do
+        if book.updated and book.updated ~= "" then
+            table.insert(books_with_dates, book)
+        end
+    end
+
+    table.sort(books_with_dates, function(a, b)
+        return a.updated > b.updated
+    end)
+
+    -- Take top 20
+    local recent_books = {}
+    for i = 1, math.min(20, #books_with_dates) do
+        table.insert(recent_books, books_with_dates[i])
+    end
+
+    logger.info("OPDS: Found", #recent_books, "recent books for collection")
+
+    if #recent_books == 0 then
+        logger.warn("OPDS: No books with timestamps found")
+        return
+    end
+
+    -- Load ReadCollection plugin
+    local ok, ReadCollection = pcall(require, "apps/filemanager/readcollection")
+    if not ok then
+        logger.warn("OPDS: ReadCollection plugin not available")
+        return
+    end
+
+    -- Get or create the "Recently Added" collection
+    local coll_name = "Recently Added"
+    local collections = ReadCollection.coll
+
+    -- Clear existing collection entries
+    collections[coll_name] = {}
+
+    -- Add book filepaths to collection
+    for _, book in ipairs(recent_books) do
+        -- Generate filepath for the placeholder
+        local target_dir = self.library_sync:getBookDirectory(book)
+        if target_dir then
+            local filename = self.library_sync:generateFilename(book)
+            local filepath = target_dir .. "/" .. filename
+
+            -- Check if file exists
+            if lfs.attributes(filepath, "mode") == "file" then
+                table.insert(collections[coll_name], filepath)
+                logger.dbg("OPDS: Added to collection:", filepath)
+            end
+        end
+    end
+
+    logger.info("OPDS: Added", #collections[coll_name], "books to 'Recently Added' collection")
+
+    -- Save the collection
+    ReadCollection:saveCollections()
 end
 
 -- ============================================================================

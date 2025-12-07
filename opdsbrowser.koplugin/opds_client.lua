@@ -145,6 +145,9 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
 
         book.id = entry:match('<id>(.-)</id>') or ""
 
+        -- Extract updated timestamp
+        book.updated = entry:match('<updated>(.-)</updated>') or ""
+
         -- Extract download link
         local download_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/acquisition"')
         if download_link then
