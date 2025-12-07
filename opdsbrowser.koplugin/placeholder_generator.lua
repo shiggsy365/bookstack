@@ -165,16 +165,37 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         cover_guide
     )
     
-    -- Build cover.xhtml (completely blank - user should never see this)
-    local cover_xhtml = [[<?xml version="1.0" encoding="UTF-8"?>
+    -- Build cover.xhtml
+    local cover_xhtml
+    if has_cover then
+        -- Include the cover image in the cover page
+        cover_xhtml = string.format([[<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Cover</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; text-align: center; }
+    img { max-width: 100%%; max-height: 100%%; }
+  </style>
+</head>
+<body>
+  <img src="%s" alt="Cover"/>
+</body>
+</html>]], cover_filename)
+    else
+        -- Blank placeholder (no cover available)
+        cover_xhtml = [[<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
   <title>Auto-Download Placeholder</title>
 </head>
 <body>
+  <p>This is a placeholder book. It will auto-download when opened.</p>
 </body>
 </html>]]
+    end
     
     -- Create EPUB zip file using Archiver.Writer API
     -- IMPORTANT: mimetype MUST be first and uncompressed for EPUB spec compliance
@@ -266,58 +287,63 @@ end
 
 -- Check if a file is a placeholder
 function PlaceholderGenerator:isPlaceholder(filepath)
+    logger.dbg("PlaceholderGenerator:isPlaceholder checking:", filepath)
+
     if not filepath:match("%.epub$") then
+        logger.dbg("PlaceholderGenerator:isPlaceholder - not an epub file")
         return false
     end
 
     local attr = lfs.attributes(filepath)
     if not attr or not attr.size then
+        logger.dbg("PlaceholderGenerator:isPlaceholder - no file attributes")
         return false
     end
 
-    -- Placeholders are small EPUB files
-    -- A minimal EPUB with embedded cover should be < 200KB
-    if attr.size < 200000 then
-        -- Check if it's a valid EPUB by reading the content.opf for our marker
-        -- Use Archiver.Reader API from ffi/archiver
-        local ok, reader = pcall(function()
-            local r = Archiver.Reader:new()
-            if not r then
-                return nil
-            end
-            if not r:open(filepath) then
-                return nil
-            end
-            return r
-        end)
-        
-        if not ok or not reader then
-            logger.warn("PlaceholderGenerator: Failed to open EPUB file:", filepath)
-            return false
+    logger.dbg("PlaceholderGenerator:isPlaceholder - file size:", attr.size, "bytes")
+
+    -- Check if it's a valid EPUB by reading the content.opf for our marker
+    -- Use Archiver.Reader API from ffi/archiver
+    -- NOTE: Removed size check - placeholders with embedded covers can exceed 200KB
+    local ok, reader = pcall(function()
+        local r = Archiver.Reader:new()
+        if not r then
+            return nil
         end
-        
-        -- Extract OEBPS/content.opf
-        local ok_extract, content = pcall(function()
-            return reader:extractToMemory(CONTENT_OPF_PATH)
-        end)
-        
-        -- Always close the reader, log any errors
-        local ok_close, close_err = pcall(function() reader:close() end)
-        if not ok_close then
-            logger.warn("PlaceholderGenerator: Error closing reader:", close_err)
+        if not r:open(filepath) then
+            return nil
         end
-        
-        if not ok_extract or not content then
-            logger.warn("PlaceholderGenerator: Failed to extract content.opf from:", filepath)
-            return false
-        end
-        
-        -- Check for our placeholder marker (set in createMinimalEPUB)
-        if content:match("opdsbrowser:placeholder") then
-            return true
-        end
+        return r
+    end)
+
+    if not ok or not reader then
+        logger.warn("PlaceholderGenerator: Failed to open EPUB file:", filepath)
+        return false
     end
 
+    -- Extract OEBPS/content.opf
+    local ok_extract, content = pcall(function()
+        return reader:extractToMemory(CONTENT_OPF_PATH)
+    end)
+
+    -- Always close the reader, log any errors
+    local ok_close, close_err = pcall(function() reader:close() end)
+    if not ok_close then
+        logger.warn("PlaceholderGenerator: Error closing reader:", close_err)
+    end
+
+    if not ok_extract or not content then
+        logger.warn("PlaceholderGenerator: Failed to extract content.opf from:", filepath)
+        return false
+    end
+
+    -- Check for our placeholder marker (set in createMinimalEPUB)
+    if content:match("opdsbrowser:placeholder") then
+        logger.info("PlaceholderGenerator:isPlaceholder - FOUND placeholder marker in:", filepath)
+        return true
+    end
+
+    logger.dbg("PlaceholderGenerator:isPlaceholder - no placeholder marker found")
     return false
 end
 
