@@ -151,6 +151,20 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
             book.download_url = download_link
             book.media_type = "application/epub+zip"
         end
+        
+        -- Extract cover image URL (same logic as downloaded OPDS EPUBs)
+        local cover_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/image"')
+        if cover_link then
+            book.cover_url = cover_link
+            logger.dbg("OPDS: Extracted cover URL:", cover_link)
+        else
+            -- Try alternative cover link patterns
+            cover_link = entry:match('<link href="([^"]+)" type="image/[^"]*"')
+            if cover_link then
+                book.cover_url = cover_link
+                logger.dbg("OPDS: Extracted cover URL (type pattern):", cover_link)
+            end
+        end
 
         if book.download_url then
             table.insert(entries, book)

@@ -127,16 +127,6 @@ end
 function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     if not self:ensureNetwork() then return end
     
-    -- Ensure download directory exists
-    local dir_exists = lfs.attributes(self.download_dir, "mode") == "directory"
-    if not dir_exists then
-        local ok = lfs.mkdir(self.download_dir)
-        if not ok then
-            UIHelpers.showError(_("Failed to create download directory"))
-            return
-        end
-    end
-
     -- Extract book ID
     local book_id = book_info.book_id
     if book_id then
@@ -155,15 +145,15 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         extension = ".kepub.epub"
     end
 
-    -- Generate safe filename
-    local title = book_info.title or "Unknown"
-    local filename = title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. extension
-    local filepath = self.download_dir .. "/" .. filename
+    -- Use same directory as placeholder, just change extension from .html to .epub
+    local filepath = placeholder_path:gsub("%.html$", extension)
     
     -- Construct download URL
     local download_url = self.opds_url .. "/" .. book_id .. "/download"
     
-    logger.info("OPDS: Auto-downloading:", book_info.title, "to", filepath)
+    logger.info("OPDS: Auto-downloading:", book_info.title)
+    logger.info("OPDS: Placeholder:", placeholder_path)
+    logger.info("OPDS: Target EPUB:", filepath)
 
     local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
     UIManager:show(loading)
@@ -212,7 +202,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         return
     end
     
-    -- Write to file
+    -- Write to file (same location as placeholder)
     local file, err = io.open(filepath, "wb")
     if not file then
         logger.err("OPDS: Failed to open file for writing:", err)
@@ -231,40 +221,47 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     
     logger.info("OPDS: Successfully downloaded book, replacing placeholder")
     
-    -- Close the current document (placeholder)
+    -- Close the current document (placeholder) and open downloaded book in-place
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
-        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            ReaderUI.instance:onClose()
+        -- Verify the downloaded EPUB exists before proceeding
+        if lfs.attributes(filepath, "mode") ~= "file" then
+            logger.err("OPDS: Downloaded file not found at:", filepath)
+            UIHelpers.showError(_("Download succeeded but file not found"))
+            return
+        end
+        
+        -- Delete the placeholder first
+        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_DELETE_DELAY, function()
+            local ok = os.remove(placeholder_path)
+            if ok then
+                logger.info("OPDS: Deleted placeholder:", placeholder_path)
+                -- Remove from placeholder database only after successful deletion
+                self.library_sync.placeholder_db[placeholder_path] = nil
+                self.library_sync:savePlaceholderDB()
+            else
+                logger.warn("OPDS: Failed to delete placeholder:", placeholder_path)
+            end
             
-            -- Delete the placeholder after closing
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_DELETE_DELAY, function()
-                local ok = os.remove(placeholder_path)
-                if ok then
-                    logger.info("OPDS: Deleted placeholder:", placeholder_path)
-                    -- Remove from placeholder database only after successful deletion
-                    self.library_sync.placeholder_db[placeholder_path] = nil
-                    self.library_sync:savePlaceholderDB()
+            -- Close placeholder and open downloaded book immediately
+            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
+                -- Double-check file exists before switching
+                if lfs.attributes(filepath, "mode") == "file" then
+                    ReaderUI.instance:switchDocument(filepath)
+                    
+                    -- Show brief success message
+                    UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
                 else
-                    logger.warn("OPDS: Failed to delete placeholder:", placeholder_path)
-                    -- Keep the entry in database since file still exists
-                    -- User can manually delete or retry later
+                    logger.err("OPDS: Cannot switch to document, file missing:", filepath)
+                    UIHelpers.showError(_("Downloaded book file is missing"))
                 end
                 
-                -- Show success and open the new book
-                UIHelpers.showSuccess(T(_("Downloaded: %1\n\nOpening book..."), book_info.title))
-                
-                -- Open the downloaded book
-                UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_OPEN_DELAY, function()
-                    ReaderUI:showReader(filepath)
-                    
-                    -- Refresh file manager
-                    UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
-                        local FileManager = require("apps/filemanager/filemanager")
-                        if FileManager.instance then
-                            FileManager.instance:onRefresh()
-                        end
-                    end)
+                -- Refresh file manager in background
+                UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
+                    local FileManager = require("apps/filemanager/filemanager")
+                    if FileManager.instance then
+                        FileManager.instance:onRefresh()
+                    end
                 end)
             end)
         end)
