@@ -276,6 +276,10 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
             
             -- Get the directory of the downloaded file for navigation
             local download_dir = filepath:match("(.*/)")
+            if not download_dir or download_dir == "" then
+                logger.warn("OPDS: Could not extract directory from filepath:", filepath)
+                download_dir = "/mnt/us/books" -- Fallback to default
+            end
             
             -- Close the reader view properly
             UIManager:close(ReaderUI.instance)
