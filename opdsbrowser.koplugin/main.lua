@@ -272,13 +272,10 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         -- Switch to the downloaded document
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
             logger.info("OPDS: Switching to downloaded book")
-            ReaderUI.instance:switchDocument(filepath)
-
-
-
-
-    
+            ReaderUI. instance:switchDocument(filepath)
         end)
+    else
+        UIHelpers.showError(_("Document not available to switch"))
     end
 end
 
