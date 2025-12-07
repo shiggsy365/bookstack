@@ -184,9 +184,13 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
         local filename = self:generateFilename(book)
         local filepath = target_dir .. "/" .. filename
         
-        -- Check if placeholder already exists
+        -- CRITICAL FIX: Check if file actually exists on disk first
+        -- The database might have stale entries if the library folder was deleted
+        local file_exists_on_disk = lfs.attributes(filepath, "mode") == "file"
         local existing_info = self.placeholder_db[filepath]
-        if existing_info then
+        
+        -- Only consider the DB entry valid if the file actually exists
+        if existing_info and file_exists_on_disk then
             -- Check if metadata has changed
             local metadata_changed = false
             if existing_info.title ~= book.title then
@@ -265,7 +269,41 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
                 skipped = skipped + 1
                 logger.dbg("LibrarySyncManager: Skipping unchanged:", filename)
             end
-        elseif lfs.attributes(filepath, "mode") == "file" then
+        elseif existing_info and not file_exists_on_disk then
+            -- File was in DB but doesn't exist on disk (folder was deleted)
+            -- Recreate the placeholder
+            logger.info("LibrarySyncManager: File in DB but missing on disk, recreating:", filepath)
+            
+            -- Create the placeholder
+            logger.dbg("LibrarySyncManager: Creating placeholder at:", filepath)
+            local ok = PlaceholderGenerator:createMinimalEPUB(book, filepath)
+            if ok then
+                created = created + 1
+                logger.info("LibrarySyncManager: Successfully recreated placeholder:", filename)
+                
+                -- Update the mapping with current metadata
+                self.placeholder_db[filepath] = {
+                    book_id = book.id,
+                    title = book.title,
+                    author = book.author,
+                    series = book.series,
+                    series_index = book.series_index,
+                    download_url = book.download_url,
+                    cover_url = book.cover_url,
+                    summary = book.summary,
+                }
+                
+                -- Save periodically
+                if created % 50 == 0 then
+                    logger.info("LibrarySyncManager: Progress - created", created, "placeholders so far")
+                    self:savePlaceholderDB()
+                end
+            else
+                failed = failed + 1
+                logger.err("LibrarySyncManager: Failed to recreate placeholder for:", book.title)
+                logger.err("LibrarySyncManager: Failed filepath was:", filepath)
+            end
+        elseif file_exists_on_disk then
             -- File exists but not in database - this might be a downloaded book
             -- Check if it's a placeholder
             if PlaceholderGenerator:isPlaceholder(filepath) then
