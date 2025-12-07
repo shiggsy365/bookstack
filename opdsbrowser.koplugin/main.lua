@@ -401,24 +401,42 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     -- Clean up any symlinks in "Recently Added" folder that point to this placeholder
     logger.info("OPDS: Checking for symlinks in Recently Added folder")
     local recently_added_path = self.library_sync.recently_added_path
-    if recently_added_path and lfs.attributes(recently_added_path, "mode") == "directory" then
-        local placeholder_filename = placeholder_path:match("([^/]+)$")
-        if placeholder_filename then
-            -- Check if there's a symlink/copy with the same name in Recently Added
-            local recently_added_file = recently_added_path .. "/" .. placeholder_filename
-            local attr = lfs.symlinkattributes(recently_added_file)
-            if attr then
-                logger.info("OPDS: Found file in Recently Added, deleting:", recently_added_file)
-                logger.info("OPDS: File type:", attr.mode)
-                local removed = os.remove(recently_added_file)
-                if removed then
-                    logger.info("OPDS: Successfully removed Recently Added symlink/copy")
+    
+    -- Validate recently_added_path exists and is a directory
+    if recently_added_path and type(recently_added_path) == "string" and recently_added_path ~= "" then
+        local attr = lfs.attributes(recently_added_path)
+        if attr and attr.mode == "directory" then
+            local placeholder_filename = placeholder_path:match("([^/]+)$")
+            
+            -- Validate filename doesn't contain directory traversal sequences
+            if placeholder_filename and not placeholder_filename:match("%.%./") and not placeholder_filename:match("/") then
+                -- Check if there's a symlink/copy with the same name in Recently Added
+                local recently_added_file = recently_added_path .. "/" .. placeholder_filename
+                
+                -- Verify the constructed path is actually within the Recently Added directory
+                -- This prevents path traversal attacks
+                if recently_added_file:sub(1, #recently_added_path + 1) == recently_added_path .. "/" then
+                    local file_attr = lfs.symlinkattributes(recently_added_file)
+                    if file_attr then
+                        logger.info("OPDS: Found file in Recently Added, deleting:", recently_added_file)
+                        logger.info("OPDS: File type:", file_attr.mode)
+                        local removed = os.remove(recently_added_file)
+                        if removed then
+                            logger.info("OPDS: Successfully removed Recently Added symlink/copy")
+                        else
+                            logger.warn("OPDS: Failed to remove Recently Added symlink/copy:", recently_added_file)
+                        end
+                    else
+                        logger.dbg("OPDS: No corresponding file in Recently Added folder")
+                    end
                 else
-                    logger.warn("OPDS: Failed to remove Recently Added symlink/copy:", recently_added_file)
+                    logger.warn("OPDS: Path validation failed - constructed path not within Recently Added directory")
                 end
             else
-                logger.dbg("OPDS: No corresponding file in Recently Added folder")
+                logger.warn("OPDS: Invalid filename detected, skipping cleanup:", placeholder_filename or "nil")
             end
+        else
+            logger.dbg("OPDS: Recently Added path is not a valid directory")
         end
     end
 
