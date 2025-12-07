@@ -261,23 +261,31 @@ function PlaceholderGenerator:isPlaceholder(filepath)
     -- A minimal EPUB with embedded cover should be < 200KB
     if attr.size < 200000 then
         -- Check if it's a valid EPUB by reading the content.opf for our marker
-        -- Use Archiver.Reader to read the EPUB file
-        local reader = Archiver.Reader:new()
-        if not reader then
-            logger.warn("PlaceholderGenerator: Failed to create archiver reader")
-            return false
-        end
+        -- Use Archiver.Reader API from ffi/archiver
+        local ok, reader = pcall(function()
+            local r = Archiver.Reader:new()
+            if not r then
+                return nil
+            end
+            if not r:open(filepath) then
+                return nil
+            end
+            return r
+        end)
         
-        if not reader:open(filepath) then
+        if not ok or not reader then
             logger.warn("PlaceholderGenerator: Failed to open EPUB file:", filepath)
             return false
         end
         
         -- Extract OEBPS/content.opf
-        local content = reader:extractToMemory(CONTENT_OPF_PATH)
-        reader:close()
+        local ok_extract, content = pcall(function()
+            return reader:extractToMemory(CONTENT_OPF_PATH)
+        end)
         
-        if not content then
+        pcall(function() reader:close() end)
+        
+        if not ok_extract or not content then
             logger.warn("PlaceholderGenerator: Failed to extract content.opf from:", filepath)
             return false
         end
