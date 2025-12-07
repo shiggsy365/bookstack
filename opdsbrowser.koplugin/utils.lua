@@ -78,6 +78,18 @@ function Utils.html_unescape(s)
     return s
 end
 
+function Utils.html_escape(s)
+    if not s then return "" end
+    s = tostring(s)
+    -- Escape in correct order (& must be first)
+    s = s:gsub("&", "&amp;")
+    s = s:gsub("<", "&lt;")
+    s = s:gsub(">", "&gt;")
+    s = s:gsub('"', "&quot;")
+    s = s:gsub("'", "&#39;")
+    return s
+end
+
 function Utils.strip_html(s)
     if not s then return "" end
     s = tostring(s)
