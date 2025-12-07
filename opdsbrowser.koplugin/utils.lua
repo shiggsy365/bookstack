@@ -159,9 +159,9 @@ function Utils.resolve_url(base_url, href)
     -- If href starts with /, it's absolute path - use base domain
     if href:match("^/") then
         -- Extract protocol and domain from base_url
-        local protocol, domain = base:match("^(https?://[^/]+)")
-        if protocol then
-            return protocol .. href
+        local protocol_domain = base:match("^(https?://[^/]+)")
+        if protocol_domain then
+            return protocol_domain .. href
         end
         return base .. href
     end

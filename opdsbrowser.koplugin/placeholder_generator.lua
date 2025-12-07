@@ -4,7 +4,10 @@ local Utils = require("utils")
 
 local PlaceholderGenerator = {}
 
--- Download cover image and save as sibling file if size <= 100KB
+-- Maximum cover image size to save locally (100KB)
+local MAX_COVER_SIZE = 100 * 1024
+
+-- Download cover image and save as sibling file if size <= MAX_COVER_SIZE
 local function save_cover_as_sibling(cover_url, html_path)
     if not cover_url or cover_url == "" then return nil end
     
@@ -32,8 +35,8 @@ local function save_cover_as_sibling(cover_url, html_path)
     local data = table.concat(response_body)
     local size = #data
     
-    -- Only save if size <= 100KB
-    if size > 100 * 1024 then
+    -- Only save if size <= MAX_COVER_SIZE
+    if size > MAX_COVER_SIZE then
         logger.info("PlaceholderGenerator: Cover too large:", size, "bytes, skipping save")
         return nil
     end
