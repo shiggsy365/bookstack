@@ -25,6 +25,7 @@ local EphemeraClient = require("ephemera_client")
 local HttpClient = require("http_client_new")
 local PlaceholderGenerator = require("placeholder_generator")
 local LibrarySyncManager = require("library_sync_manager")
+local PlaceholderBadge = require("placeholder_badge")
 
 local OPDSBrowser = WidgetContainer:extend{
     name = "opdsbrowser",
@@ -69,10 +70,19 @@ function OPDSBrowser:init()
     local library_path = settings.library_sync_path or (base_download_dir .. "/Library")
     LibrarySyncManager:init(library_path)
     self.library_sync = LibrarySyncManager
-    
+
+    -- Initialize placeholder badge system
+    self.placeholder_badge = PlaceholderBadge
+    local badge_ok = self.placeholder_badge:init(PlaceholderGenerator)
+    if badge_ok then
+        logger.info("OPDS Browser: Cloud badge overlay system initialized")
+    else
+        logger.warn("OPDS Browser: Cloud badge overlay system not available")
+    end
+
     -- Queue refresh
     self.queue_refresh_action = nil
-    
+
     logger.info("OPDS Browser: Initialized with improved architecture")
 end
 
@@ -282,6 +292,13 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end)
 
     logger.info("OPDS: Successfully downloaded book, replaced placeholder")
+
+    -- Clear placeholder cache for the old placeholder path
+    -- This ensures the cloud badge is removed on next file browser refresh
+    if self.placeholder_badge then
+        self.placeholder_badge:clearCache(placeholder_path)
+        self.placeholder_badge:clearCache(filepath)
+    end
 
     -- Verify the downloaded file exists
     if lfs.attributes(filepath, "mode") ~= "file" then
