@@ -1477,18 +1477,22 @@ function OPDSBrowser:performLibrarySync()
         return
     end
     
-    UIHelpers.updateProgressMessage(loading, T(_("Syncing %1 books..."), #books))
-    UIManager:setDirty("all", "ui")
-    
+    UIManager:show(loading)
+    UIManager:forceRePaint()
+
     local progress_count = 0
+    local last_update_time = os.time()
     local ok, result = self.library_sync:syncLibrary(books, function(current, total)
         progress_count = progress_count + 1
-        -- Update every 50 items to show progress for large libraries
-        if progress_count % 50 == 0 then
-            UIHelpers.updateProgressMessage(loading, T(_("Syncing... %1/%2"), current, total))
-            UIManager:setDirty("all", "ui")
-            -- Force UI update to show progress in real-time
+        -- Update every 50 items AND ensure at least 0.5s between updates to show progress
+        local current_time = os.time()
+        if progress_count % 50 == 0 or (current_time - last_update_time) >= 1 then
+            -- Close old message and show new one (simple and reliable)
+            UIManager:close(loading)
+            loading = UIHelpers.showLoading(T(_("Syncing... %1/%2"), current, total))
+            UIManager:show(loading)
             UIManager:forceRePaint()
+            last_update_time = current_time
         end
     end)
     

@@ -1,56 +1,63 @@
 --[[
     PlaceholderBadge - Adds cloud icon badges to placeholder book covers
 
-    This module hooks into KOReader's cover rendering to display a cloud icon
+    This module hooks into KOReader's FileChooser to display a cloud icon
     badge on placeholder files, indicating they haven't been downloaded yet.
+
+    Uses FileChooser.getListItem patching (works in all file browser views)
 ]]--
 
 local logger = require("logger")
 local ImageWidget = require("ui/widget/imagewidget")
+local OverlapGroup = require("ui/widget/overlapgroup")
+local TopContainer = require("ui/widget/container/topcontainer")
 local Size = require("ui/size")
+local Blitbuffer = require("ffi/blitbuffer")
 
 local PlaceholderBadge = {}
 
--- Reference to the original paintTo method
-local original_paintTo = nil
+-- Reference to the original getListItem function
+local original_getListItem = nil
 
 -- Cache for placeholder detection to improve performance
 local placeholder_cache = {}
 local cache_max_size = 100
 
 function PlaceholderBadge:init(placeholder_generator)
-    logger.info("PlaceholderBadge: Initializing cloud badge overlay system")
+    logger.info("PlaceholderBadge: Initializing cloud badge overlay system (FileChooser method)")
 
     self.placeholder_generator = placeholder_generator
 
-    -- Hook into MosaicMenuItem if CoverBrowser is available
-    local ok, MosaicMenu = pcall(require, "plugins/coverbrowser.koplugin/mosaicmenu")
-    if not ok or not MosaicMenu then
-        logger.warn("PlaceholderBadge: CoverBrowser not available, badges disabled")
+    -- Hook into FileChooser.getListItem
+    local ok, FileChooser = pcall(require, "ui/widget/filechooser")
+    if not ok or not FileChooser then
+        logger.warn("PlaceholderBadge: FileChooser not available, badges disabled")
         return false
     end
 
-    local MosaicMenuItem = MosaicMenu.MosaicMenuItem
-    if not MosaicMenuItem then
-        logger.warn("PlaceholderBadge: MosaicMenuItem not found, badges disabled")
-        return false
-    end
+    -- Store the original getListItem function
+    original_getListItem = FileChooser.getListItem
 
-    -- Store the original paintTo method
-    original_paintTo = MosaicMenuItem.paintTo
+    -- Create a reference to self for use in the hook
+    local badge_module = self
 
-    -- Override the paintTo method to add cloud badges
-    MosaicMenuItem.paintTo = function(menu_item, bb, x, y)
-        -- First, paint the original cover
-        original_paintTo(menu_item, bb, x, y)
+    -- Override getListItem to add cloud badges to placeholders
+    FileChooser.getListItem = function(self, dirpath, f, fullpath, attributes, collate)
+        -- Call the original function to get the list item
+        local item = original_getListItem(self, dirpath, f, fullpath, attributes, collate)
 
-        -- Check if this item has a filepath and is a placeholder
-        if menu_item.filepath and self:isPlaceholderCached(menu_item.filepath) then
-            self:drawCloudBadge(bb, x, y, menu_item.width, menu_item.height)
+        -- Only add badge to EPUB files (placeholders)
+        if item and fullpath and fullpath:match("%.epub$") then
+            -- Check if this is a placeholder
+            if badge_module:isPlaceholderCached(fullpath) then
+                badge_module:addCloudBadgeToItem(item)
+            end
         end
+
+        return item
     end
 
-    logger.info("PlaceholderBadge: Successfully hooked into MosaicMenuItem.paintTo")
+    logger.info("PlaceholderBadge: Successfully hooked into FileChooser.getListItem")
     return true
 end
 
@@ -74,7 +81,7 @@ function PlaceholderBadge:isPlaceholderCached(filepath)
     end
 
     if cache_size > cache_max_size then
-        logger.info("PlaceholderBadge: Clearing cache (size:", cache_size, ")")
+        logger.dbg("PlaceholderBadge: Clearing cache (size:", cache_size, ")")
         placeholder_cache = {}
         placeholder_cache[filepath] = is_placeholder
     end
@@ -82,44 +89,75 @@ function PlaceholderBadge:isPlaceholderCached(filepath)
     return is_placeholder
 end
 
--- Draw cloud badge at top-left corner of cover
-function PlaceholderBadge:drawCloudBadge(bb, x, y, width, height)
-    -- Badge size - scale based on cover size but keep reasonable bounds
-    local badge_size = math.min(math.max(width * 0.25, Size.item.height_default * 0.3), Size.item.height_default * 0.5)
+-- Add cloud badge overlay to a file list item
+function PlaceholderBadge:addCloudBadgeToItem(item)
+    -- Only add badge if item doesn't already have one
+    if item._placeholder_badge_added then
+        return
+    end
 
-    -- Position: top-left corner with small inset
-    local inset = Size.padding.small or 2
-    local badge_x = x + inset
-    local badge_y = y + inset
+    -- Mark that we've added the badge
+    item._placeholder_badge_added = true
 
-    -- Try to load and render the cloud SVG icon
-    local ok, badge = pcall(function()
-        return ImageWidget:new{
-            file = "plugins/opdsbrowser.koplugin/cloud-badge.svg",
+    -- Create cloud icon widget
+    local badge_size = Size.item.height_default * 0.35
+    local cloud_icon = self:createCloudIcon(badge_size)
+
+    if not cloud_icon then
+        return -- Failed to create icon
+    end
+
+    -- Position cloud icon in top-left corner
+    local icon_container = TopContainer:new{
+        dimen = item[1]:getSize(),
+        ImageWidget:new{
+            image = cloud_icon,
             width = badge_size,
             height = badge_size,
-            alpha = true, -- Enable alpha channel for transparency
+            alpha = true,
+        },
+        overlap_offset = { Size.padding.small, Size.padding.small },
+    }
+
+    -- Wrap the original item content with an OverlapGroup to add the cloud badge
+    local original_widget = item[1]
+    item[1] = OverlapGroup:new{
+        dimen = original_widget:getSize(),
+        original_widget,
+        icon_container,
+    }
+end
+
+-- Create cloud icon (load SVG or create fallback)
+function PlaceholderBadge:createCloudIcon(size)
+    -- Try to load the SVG cloud icon
+    local ok, image = pcall(function()
+        local img_widget = ImageWidget:new{
+            file = "plugins/opdsbrowser.koplugin/cloud-badge.svg",
+            width = size,
+            height = size,
+            alpha = true,
         }
+        img_widget:_render()
+        return img_widget:getImage()
     end)
 
-    if ok and badge then
-        -- Paint the badge onto the cover
-        badge:paintTo(bb, badge_x, badge_y)
-        badge:free() -- Free the image widget resources
-    else
-        logger.warn("PlaceholderBadge: Failed to load cloud badge icon")
-
-        -- Fallback: Draw a simple colored circle as indicator
-        local Screen = require("device").screen
-        local radius = badge_size / 2
-        local center_x = badge_x + radius
-        local center_y = badge_y + radius
-
-        -- Draw white circle background
-        bb:paintCircle(center_x, center_y, radius, 0xFF, 0.9)
-        -- Draw blue circle (cloud color)
-        bb:paintCircle(center_x, center_y, radius * 0.8, 0x5A, 1.0)
+    if ok and image then
+        return image
     end
+
+    -- Fallback: Create a simple blue circle
+    logger.dbg("PlaceholderBadge: SVG load failed, using fallback circle")
+    local bb = Blitbuffer.new(size, size, Blitbuffer.TYPE_BBRGB32)
+    bb:fill(Blitbuffer.COLOR_WHITE)
+
+    local radius = size / 2
+    local center = radius
+
+    -- Draw blue circle (cloud color #5AB8FF)
+    bb:paintCircle(center, center, radius * 0.9, Blitbuffer.COLOR_LIGHT_GRAY, 1.0)
+
+    return bb
 end
 
 -- Clear the cache (useful when placeholders are downloaded)
@@ -133,13 +171,13 @@ function PlaceholderBadge:clearCache(filepath)
     end
 end
 
--- Restore original paintTo method (cleanup on plugin disable)
+-- Restore original getListItem (cleanup on plugin disable)
 function PlaceholderBadge:cleanup()
-    if original_paintTo then
-        local ok, MosaicMenu = pcall(require, "plugins/coverbrowser.koplugin/mosaicmenu")
-        if ok and MosaicMenu and MosaicMenu.MosaicMenuItem then
-            MosaicMenu.MosaicMenuItem.paintTo = original_paintTo
-            logger.info("PlaceholderBadge: Restored original paintTo method")
+    if original_getListItem then
+        local ok, FileChooser = pcall(require, "ui/widget/filechooser")
+        if ok and FileChooser then
+            FileChooser.getListItem = original_getListItem
+            logger.info("PlaceholderBadge: Restored original getListItem function")
         end
     end
 
