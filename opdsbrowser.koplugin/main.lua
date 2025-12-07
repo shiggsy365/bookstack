@@ -128,7 +128,7 @@ function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
     end
     
     -- Schedule download after brief delay to ensure document is fully closed
-    UIManager:scheduleIn(0.5, function()
+    UIManager:scheduleIn(Constants.DOCUMENT_CLOSE_DELAY, function()
         -- Show brief notification (non-blocking)
         UIManager:show(require("ui/widget/notification"):new{
             text = T(_("Auto-downloading: %1"), book_info.title),

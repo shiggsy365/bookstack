@@ -62,7 +62,7 @@ local function download_cover_image(cover_url)
     logger.info("PlaceholderGenerator: Cover download size:", size, "bytes")
     
     -- Skip empty or very small responses
-    if size < 100 then
+    if size < Constants.MIN_COVER_SIZE then
         logger.warn("PlaceholderGenerator: Cover data too small:", size, "bytes, likely error")
         return nil, nil, nil
     end
