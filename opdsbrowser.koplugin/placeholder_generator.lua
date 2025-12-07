@@ -208,6 +208,8 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     local ok_open = zip:open_stream(zip_file, true)
     if not ok_open then
         logger.err("PlaceholderGenerator: Failed to open zip writer")
+        -- Clean up resources
+        pcall(function() zip:close() end)
         zip_file:close()
         return false
     end
@@ -249,9 +251,9 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         return false
     end
     
-    -- Add cover image if we have it (compressed)
+    -- Add cover image if we have it (compressed, binary data)
     if has_cover then
-        local cover_desc, cover_reader = make_string_reader(cover_data, false, true)
+        local cover_desc, cover_reader = make_string_reader(cover_data, false, true)  -- false = binary data
         ok = zip:write("OEBPS/" .. cover_filename, cover_desc, cover_reader)
         if not ok then
             logger.warn("PlaceholderGenerator: Failed to write cover image to zip")
