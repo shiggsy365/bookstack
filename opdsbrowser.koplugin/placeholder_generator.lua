@@ -4,27 +4,72 @@ local Utils = require("utils")
 
 local PlaceholderGenerator = {}
 
-local function fetch_and_encode_image(url)
-    if not url or url == "" then return nil end
+-- Maximum cover image size to save locally (100KB)
+local MAX_COVER_SIZE = 100 * 1024
+
+-- Download cover image and save as sibling file if size <= MAX_COVER_SIZE
+local function save_cover_as_sibling(cover_url, html_path)
+    if not cover_url or cover_url == "" then return nil end
+    
     local ok, https = pcall(require, "ssl.https")
-    if not ok then return nil end
+    if not ok then
+        logger.warn("PlaceholderGenerator: ssl.https not available")
+        return nil
+    end
+    
     local ltn12 = require("ltn12")
-    local mime = require("mime")
     local response_body = {}
+    
     local res, code, headers = https.request{
-        url = url,
+        url = cover_url,
         method = "GET",
         sink = ltn12.sink.table(response_body),
         headers = { ["Cache-Control"] = "no-cache" }
     }
+    
     if not res or code ~= 200 then
+        logger.warn("PlaceholderGenerator: Failed to download cover:", code)
         return nil
     end
+    
     local data = table.concat(response_body)
+    local size = #data
+    
+    -- Only save if size <= MAX_COVER_SIZE
+    if size > MAX_COVER_SIZE then
+        logger.info("PlaceholderGenerator: Cover too large:", size, "bytes, skipping save")
+        return nil
+    end
+    
+    -- Determine file extension from content-type
     local content_type = (headers and (headers["content-type"] or headers["Content-Type"])) or "image/jpeg"
-    local b64 = mime.b64(data)
-    if not b64 then return nil end
-    return "data:" .. content_type .. ";base64," .. b64
+    local ext = ".jpg"
+    if content_type:match("png") then
+        ext = ".png"
+    elseif content_type:match("gif") then
+        ext = ".gif"
+    elseif content_type:match("webp") then
+        ext = ".webp"
+    end
+    
+    -- Generate sibling file path
+    local cover_path = html_path:gsub("%.html$", ext)
+    
+    -- Write cover file
+    local file, err = io.open(cover_path, "wb")
+    if not file then
+        logger.err("PlaceholderGenerator: Failed to save cover:", err)
+        return nil
+    end
+    
+    file:write(data)
+    file:close()
+    
+    logger.info("PlaceholderGenerator: Saved cover as sibling file:", cover_path, "size:", size)
+    
+    -- Return just the filename (not full path) for HTML reference
+    local filename = cover_path:match("[^/]+$")
+    return filename
 end
 
 -- Create a placeholder file (HTML format, no zip required)
@@ -48,23 +93,25 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
             series_index ~= "" and " #" .. Utils.html_escape(series_index) or "")
     end
 
-    -- Build cover image if available, try to embed as data URI
+    -- Build cover image if available, try to save as sibling file
     local cover_html = ""
-    local cover_data = nil
     local cover_url = Utils.safe_string(book_info.cover_url, "")
+    local cover_filename = nil
+    
     if cover_url ~= "" then
-        cover_data = fetch_and_encode_image(cover_url)
+        -- Try to save as sibling file (only if <= 100KB)
+        cover_filename = save_cover_as_sibling(cover_url, output_path)
     end
-
-    if cover_data then
-        -- embed
+    
+    if cover_filename then
+        -- Reference local sibling file
         cover_html = string.format([[
             <div class="cover">
                 <img src="%s" alt="Cover" onerror="this.style.display='none'"/>
             </div>
-        ]], Utils.html_escape(cover_data))
+        ]], Utils.html_escape(cover_filename))
     elseif cover_url ~= "" then
-        -- fallback to remote URL
+        -- fallback to remote URL if local save failed
         cover_html = string.format([[
             <div class="cover">
                 <img src="%s" alt="Cover" onerror="this.style.display='none'"/>
@@ -74,7 +121,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
 
     -- Add meta tags for easier detection by the plugin when opening a placeholder
     local meta_cover_url = Utils.html_escape(cover_url)
-    local meta_cover_data = cover_data and Utils.html_escape(cover_data) or ""
+    local meta_cover_filename = cover_filename and Utils.html_escape(cover_filename) or ""
     local meta_download_url = Utils.html_escape(Utils.safe_string(book_info.download_url, ""))
     local meta_book_id = Utils.html_escape(book_id)
 
@@ -87,7 +134,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     <meta name="opdsbrowser:placeholder" content="true">
     <meta name="opdsbrowser:book_id" content="%s">
     <meta name="opdsbrowser:cover_url" content="%s">
-    <meta name="opdsbrowser:cover_data" content="%s">
+    <meta name="opdsbrowser:cover_filename" content="%s">
     <meta name="opdsbrowser:download_url" content="%s">
     <title>%s - Library Placeholder</title>
     <style>
@@ -167,7 +214,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
 ]],
         meta_book_id,
         meta_cover_url,
-        meta_cover_data,
+        meta_cover_filename,
         meta_download_url,
         Utils.html_escape(book_title),
         cover_html,

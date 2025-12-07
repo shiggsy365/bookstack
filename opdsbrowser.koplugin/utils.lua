@@ -137,6 +137,39 @@ function Utils.sanitize_input(input)
     return input
 end
 
+-- Resolve relative URL against a base URL
+function Utils.resolve_url(base_url, href)
+    if not href or href == "" then
+        return ""
+    end
+    
+    -- If href is already absolute, return as-is
+    if href:match("^https?://") then
+        return href
+    end
+    
+    -- If base_url is empty, return href as-is
+    if not base_url or base_url == "" then
+        return href
+    end
+    
+    -- Remove trailing slash from base_url
+    local base = base_url:gsub("/$", "")
+    
+    -- If href starts with /, it's absolute path - use base domain
+    if href:match("^/") then
+        -- Extract protocol and domain from base_url
+        local protocol_domain = base:match("^(https?://[^/]+)")
+        if protocol_domain then
+            return protocol_domain .. href
+        end
+        return base .. href
+    end
+    
+    -- Otherwise, href is relative - append to base
+    return base .. "/" .. href
+end
+
 -- Debounce function creator
 function Utils.debounce(func, delay)
     local timer = nil
