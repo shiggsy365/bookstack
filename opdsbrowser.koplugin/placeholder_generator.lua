@@ -2,6 +2,7 @@ local logger = require("logger")
 local lfs = require("libs/libkoreader-lfs")
 local Utils = require("utils")
 local Archiver = require("ffi/archiver")
+local Constants = require("constants")
 
 local PlaceholderGenerator = {}
 
