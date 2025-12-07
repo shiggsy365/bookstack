@@ -1,7 +1,7 @@
 local logger = require("logger")
 local lfs = require("libs/libkoreader-lfs")
 local Utils = require("utils")
-local ZipWriter = require("ffi/zipwriter")
+local mupdf = require("ffi/mupdf_wrapper")
 
 -- Escape a string for safe use in shell commands
 local function shell_escape(str)
@@ -17,27 +17,6 @@ local MAX_COVER_SIZE = 100 * 1024
 
 -- EPUB internal paths
 local CONTENT_OPF_PATH = "OEBPS/content.opf"
-
--- Helper function to create a reader for ZipWriter from string data
-local function make_string_reader(data, is_text, compressed)
-    local pos = 1
-    local chunk_size = 8192
-    local desc = {
-        istext = is_text or false,
-        isfile = true,
-        isdir = false,
-        mtime = os.time(),
-        platform = 'unix',
-        method = compressed and nil or ZipWriter.STORE,  -- STORE means uncompressed
-        level = compressed and nil or 0,                  -- level 0 = no compression
-    }
-    return desc, function()
-        if pos > #data then return nil end
-        local chunk = data:sub(pos, pos + chunk_size - 1)
-        pos = pos + chunk_size
-        return chunk
-    end
-end
 
 -- Download cover image data for embedding in EPUB
 local function download_cover_image(cover_url)
@@ -195,66 +174,50 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
 </body>
 </html>]]
     
-    -- Create EPUB zip file using ZipWriter
+    -- Create EPUB zip file using mupdf ZIP API
     -- IMPORTANT: mimetype MUST be first and uncompressed for EPUB spec compliance
-    local zip = ZipWriter:new()
-    local zip_file = io.open(output_path, "w+b")
-    if not zip_file then
-        logger.err("PlaceholderGenerator: Failed to open output file for writing")
-        return false
-    end
-    
-    -- Open the zip writer with autoclose enabled
-    local ok_open = zip:open_stream(zip_file, true)
-    if not ok_open then
+    local zw = mupdf.zipWriterOpen(output_path)
+    if not zw then
         logger.err("PlaceholderGenerator: Failed to open zip writer")
-        -- Clean up resources
-        pcall(function() zip:close() end)
-        zip_file:close()
         return false
     end
     
     -- Add mimetype first (MUST be uncompressed and first in archive)
     local mimetype_content = "application/epub+zip"
-    local mimetype_desc, mimetype_reader = make_string_reader(mimetype_content, true, false)
-    local ok_mimetype = zip:write("mimetype", mimetype_desc, mimetype_reader)
+    local ok_mimetype = mupdf.zipWriterAdd(zw, "mimetype", mimetype_content, false)
     if not ok_mimetype then
         logger.err("PlaceholderGenerator: Failed to write mimetype to zip")
-        zip:close()
+        mupdf.zipWriterClose(zw)
         return false
     end
     
     -- Add META-INF/container.xml (compressed)
-    local container_desc, container_reader = make_string_reader(container_xml, true, true)
-    local ok = zip:write("META-INF/container.xml", container_desc, container_reader)
+    local ok = mupdf.zipWriterAdd(zw, "META-INF/container.xml", container_xml, true)
     if not ok then
         logger.err("PlaceholderGenerator: Failed to write container.xml to zip")
-        zip:close()
+        mupdf.zipWriterClose(zw)
         return false
     end
     
     -- Add OEBPS/content.opf (compressed)
-    local opf_desc, opf_reader = make_string_reader(content_opf, true, true)
-    ok = zip:write("OEBPS/content.opf", opf_desc, opf_reader)
+    ok = mupdf.zipWriterAdd(zw, "OEBPS/content.opf", content_opf, true)
     if not ok then
         logger.err("PlaceholderGenerator: Failed to write content.opf to zip")
-        zip:close()
+        mupdf.zipWriterClose(zw)
         return false
     end
     
     -- Add OEBPS/cover.xhtml (compressed)
-    local xhtml_desc, xhtml_reader = make_string_reader(cover_xhtml, true, true)
-    ok = zip:write("OEBPS/cover.xhtml", xhtml_desc, xhtml_reader)
+    ok = mupdf.zipWriterAdd(zw, "OEBPS/cover.xhtml", cover_xhtml, true)
     if not ok then
         logger.err("PlaceholderGenerator: Failed to write cover.xhtml to zip")
-        zip:close()
+        mupdf.zipWriterClose(zw)
         return false
     end
     
     -- Add cover image if we have it (compressed, binary data)
     if has_cover then
-        local cover_desc, cover_reader = make_string_reader(cover_data, false, true)  -- false = binary data
-        ok = zip:write("OEBPS/" .. cover_filename, cover_desc, cover_reader)
+        ok = mupdf.zipWriterAdd(zw, "OEBPS/" .. cover_filename, cover_data, true)
         if not ok then
             logger.warn("PlaceholderGenerator: Failed to write cover image to zip")
             -- Continue anyway, cover is optional
@@ -262,7 +225,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     end
     
     -- Close the zip file
-    local ok_close = zip:close()
+    local ok_close = mupdf.zipWriterClose(zw)
     if not ok_close then
         logger.err("PlaceholderGenerator: Failed to close zip file")
         return false
