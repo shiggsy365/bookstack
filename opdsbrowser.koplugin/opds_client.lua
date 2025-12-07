@@ -113,8 +113,40 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
         book.series = ""
         book.series_index = ""
         
-        -- Method 1: Use publisher as series if enabled
-        if use_publisher_as_series and publisher ~= "" then
+        -- NEW: Method 0: Parse standard OPDS series metadata (highest priority)
+        -- Try schema.org/Series and belongs-to-collection metadata
+        local series_meta = entry:match('<meta property="belongs%-to%-collection"[^>]*>(.-)</meta>')
+        if series_meta then
+            series_meta = Utils.html_unescape(series_meta)
+            book.series = Utils.trim(series_meta)
+            logger.dbg("OPDS: Extracted series from belongs-to-collection:", book.series)
+            
+            -- Try to find series position/index
+            local series_pos = entry:match('<meta property="group%-position"[^>]*>(.-)</meta>')
+            if series_pos then
+                book.series_index = Utils.trim(Utils.html_unescape(series_pos))
+                logger.dbg("OPDS: Extracted series index from group-position:", book.series_index)
+            end
+        end
+        
+        -- Try calibre:series metadata if not found
+        if book.series == "" then
+            local calibre_series = entry:match('<meta name="calibre:series"[^>]*content="([^"]+)"')
+            if calibre_series then
+                book.series = Utils.trim(Utils.html_unescape(calibre_series))
+                logger.dbg("OPDS: Extracted series from calibre:series:", book.series)
+                
+                -- Try calibre:series_index
+                local calibre_index = entry:match('<meta name="calibre:series_index"[^>]*content="([^"]+)"')
+                if calibre_index then
+                    book.series_index = Utils.trim(Utils.html_unescape(calibre_index))
+                    logger.dbg("OPDS: Extracted series index from calibre:series_index:", book.series_index)
+                end
+            end
+        end
+        
+        -- Method 1: Use publisher as series if enabled (only if no standard series found)
+        if book.series == "" and use_publisher_as_series and publisher ~= "" then
             local series_name, series_num = publisher:match(Constants.SERIES_PATTERNS.PUBLISHER_WITH_NUMBER)
             if series_name and series_num then
                 book.series = Utils.trim(series_name)
@@ -124,8 +156,10 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
                 book.series = Utils.trim(publisher)
                 logger.dbg("OPDS: Using publisher as series:", book.series)
             end
-        else
-            -- Method 2: Extract series from summary
+        end
+        
+        -- Method 2: Extract series from summary (lowest priority fallback)
+        if book.series == "" then
             local series_match = raw_summary:match(Constants.SERIES_PATTERNS.SUMMARY_SERIES)
             if series_match then
                 local series_name, series_num = series_match:match(Constants.SERIES_PATTERNS.SERIES_WITH_NUMBER)
@@ -156,20 +190,37 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
             book.media_type = "application/epub+zip"
         end
         
-        -- Extract cover image URL (same logic as downloaded OPDS EPUBs)
+        -- Extract cover image URL - try multiple patterns for better coverage
         local cover_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/image"')
+        if not cover_link then
+            -- Try with rel and type in different order
+            cover_link = entry:match('<link rel="http://opds%-spec%.org/image"[^>]*href="([^"]+)"')
+        end
+        if not cover_link then
+            -- Try thumbnail pattern
+            cover_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/image/thumbnail"')
+        end
+        if not cover_link then
+            cover_link = entry:match('<link rel="http://opds%-spec%.org/image/thumbnail"[^>]*href="([^"]+)"')
+        end
+        if not cover_link then
+            -- Try alternative cover link patterns with image type
+            cover_link = entry:match('<link href="([^"]+)" type="image/[^"]*"[^>]*rel="[^"]*cover[^"]*"')
+        end
+        if not cover_link then
+            -- Try without rel restriction, just image type
+            cover_link = entry:match('<link href="([^"]+)" type="image/jpeg"')
+            if not cover_link then
+                cover_link = entry:match('<link href="([^"]+)" type="image/png"')
+            end
+        end
+        
         if cover_link then
             -- Resolve relative URLs against base_url
             book.cover_url = Utils.resolve_url(self.base_url, cover_link)
             logger.dbg("OPDS: Extracted cover URL:", book.cover_url)
         else
-            -- Try alternative cover link patterns
-            cover_link = entry:match('<link href="([^"]+)" type="image/[^"]*"')
-            if cover_link then
-                -- Resolve relative URLs against base_url
-                book.cover_url = Utils.resolve_url(self.base_url, cover_link)
-                logger.dbg("OPDS: Extracted cover URL (type pattern):", book.cover_url)
-            end
+            logger.dbg("OPDS: No cover URL found for:", book.title)
         end
 
         if book.download_url then

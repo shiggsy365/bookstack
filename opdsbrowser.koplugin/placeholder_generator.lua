@@ -29,19 +29,30 @@ local function download_cover_image(cover_url)
     logger.info("PlaceholderGenerator: Attempting to download cover from:", cover_url)
     
     local ltn12 = require("ltn12")
+    local socket = require("socket")
     local response_body = {}
     
-    local res, code, headers = https.request{
+    -- Add timeout and proper error handling
+    local res, code, headers, status = https.request{
         url = cover_url,
         method = "GET",
         sink = ltn12.sink.table(response_body),
-        headers = { ["Cache-Control"] = "no-cache" }
+        headers = { 
+            ["Cache-Control"] = "no-cache",
+            ["User-Agent"] = "KOReader/BookStack"
+        },
+        -- Add timeout for cover downloads (5 seconds)
+        create = function()
+            local sock = socket.tcp()
+            sock:settimeout(5)
+            return sock
+        end
     }
     
-    logger.info("PlaceholderGenerator: Cover download response code:", code)
+    logger.info("PlaceholderGenerator: Cover download response code:", code, "status:", status)
     
-    if not res or code ~= 200 then
-        logger.warn("PlaceholderGenerator: Failed to download cover:", code)
+    if not res or (code ~= 200 and code ~= 304) then
+        logger.warn("PlaceholderGenerator: Failed to download cover, code:", code, "status:", status)
         return nil, nil, nil
     end
     
@@ -49,6 +60,12 @@ local function download_cover_image(cover_url)
     local size = #data
     
     logger.info("PlaceholderGenerator: Cover download size:", size, "bytes")
+    
+    -- Skip empty or very small responses
+    if size < 100 then
+        logger.warn("PlaceholderGenerator: Cover data too small:", size, "bytes, likely error")
+        return nil, nil, nil
+    end
     
     -- Only use if size <= MAX_COVER_SIZE
     if size > MAX_COVER_SIZE then
