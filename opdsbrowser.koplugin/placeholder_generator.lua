@@ -1,14 +1,7 @@
 local logger = require("logger")
 local lfs = require("libs/libkoreader-lfs")
 local Utils = require("utils")
-local mupdf = require("ffi/mupdf_wrapper")
-
--- Escape a string for safe use in shell commands
-local function shell_escape(str)
-    if not str then return "''" end
-    -- Replace single quotes with '\'' (end quote, escaped quote, start quote)
-    return "'" .. str:gsub("'", "'\\''") .. "'"
-end
+local Archiver = require("ffi/archiver")
 
 local PlaceholderGenerator = {}
 
@@ -174,62 +167,62 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
 </body>
 </html>]]
     
-    -- Create EPUB zip file using mupdf ZIP API
+    -- Create EPUB zip file using Archiver.Writer API
     -- IMPORTANT: mimetype MUST be first and uncompressed for EPUB spec compliance
-    local zw = mupdf.zipWriterOpen(output_path)
-    if not zw then
-        logger.err("PlaceholderGenerator: Failed to open zip writer")
+    local writer = Archiver.Writer:new()
+    if not writer then
+        logger.err("PlaceholderGenerator: Failed to create archiver writer")
+        return false
+    end
+    
+    if not writer:open(output_path, "epub") then
+        logger.err("PlaceholderGenerator: Failed to open archiver writer for:", output_path)
         return false
     end
     
     -- Add mimetype first (MUST be uncompressed and first in archive)
+    writer:setZipCompression("store")
     local mimetype_content = "application/epub+zip"
-    local ok_mimetype = mupdf.zipWriterAdd(zw, "mimetype", mimetype_content, false)
-    if not ok_mimetype then
-        logger.err("PlaceholderGenerator: Failed to write mimetype to zip")
-        mupdf.zipWriterClose(zw)
+    if not writer:addFileFromMemory("mimetype", mimetype_content) then
+        logger.err("PlaceholderGenerator: Failed to write mimetype")
+        writer:close()
         return false
     end
     
+    -- Switch to compressed for all other files
+    writer:setZipCompression("deflate")
+    
     -- Add META-INF/container.xml (compressed)
-    local ok = mupdf.zipWriterAdd(zw, "META-INF/container.xml", container_xml, true)
-    if not ok then
-        logger.err("PlaceholderGenerator: Failed to write container.xml to zip")
-        mupdf.zipWriterClose(zw)
+    if not writer:addFileFromMemory("META-INF/container.xml", container_xml) then
+        logger.err("PlaceholderGenerator: Failed to write container.xml")
+        writer:close()
         return false
     end
     
     -- Add OEBPS/content.opf (compressed)
-    ok = mupdf.zipWriterAdd(zw, "OEBPS/content.opf", content_opf, true)
-    if not ok then
-        logger.err("PlaceholderGenerator: Failed to write content.opf to zip")
-        mupdf.zipWriterClose(zw)
+    if not writer:addFileFromMemory("OEBPS/content.opf", content_opf) then
+        logger.err("PlaceholderGenerator: Failed to write content.opf")
+        writer:close()
         return false
     end
     
     -- Add OEBPS/cover.xhtml (compressed)
-    ok = mupdf.zipWriterAdd(zw, "OEBPS/cover.xhtml", cover_xhtml, true)
-    if not ok then
-        logger.err("PlaceholderGenerator: Failed to write cover.xhtml to zip")
-        mupdf.zipWriterClose(zw)
+    if not writer:addFileFromMemory("OEBPS/cover.xhtml", cover_xhtml) then
+        logger.err("PlaceholderGenerator: Failed to write cover.xhtml")
+        writer:close()
         return false
     end
     
     -- Add cover image if we have it (compressed, binary data)
     if has_cover then
-        ok = mupdf.zipWriterAdd(zw, "OEBPS/" .. cover_filename, cover_data, true)
-        if not ok then
-            logger.warn("PlaceholderGenerator: Failed to write cover image to zip")
+        if not writer:addFileFromMemory("OEBPS/" .. cover_filename, cover_data) then
+            logger.warn("PlaceholderGenerator: Failed to write cover image")
             -- Continue anyway, cover is optional
         end
     end
     
-    -- Close the zip file
-    local ok_close = mupdf.zipWriterClose(zw)
-    if not ok_close then
-        logger.err("PlaceholderGenerator: Failed to close zip file")
-        return false
-    end
+    -- Close the archive
+    writer:close()
     
     logger.info("PlaceholderGenerator: Created EPUB placeholder:", output_path)
     return true
@@ -268,66 +261,42 @@ function PlaceholderGenerator:isPlaceholder(filepath)
     -- A minimal EPUB with embedded cover should be < 200KB
     if attr.size < 200000 then
         -- Check if it's a valid EPUB by reading the content.opf for our marker
-        -- Try to use LuaZip for reading, fallback to unzip command if not available
-        local ok_zip, zip_module = pcall(require, "zip")
+        -- Use Archiver.Reader API from ffi/archiver
+        local ok, reader = pcall(function()
+            local r = Archiver.Reader:new()
+            if not r then
+                return nil
+            end
+            if not r:open(filepath) then
+                return nil
+            end
+            return r
+        end)
         
-        if ok_zip then
-            -- Use LuaZip to read the file
-            local zfile, err = zip_module.open(filepath)
-            if not zfile then
-                logger.warn("PlaceholderGenerator: Failed to open zip file:", filepath, err)
-                return false
-            end
-            
-            local content = ""
-            local found = false
-            for file in zfile:files() do
-                if file.filename == CONTENT_OPF_PATH then
-                    local currFile, open_err = zfile:open(file.filename)
-                    if currFile then
-                        local success_read, read_data = pcall(function()
-                            return currFile:read("*a") or ""
-                        end)
-                        -- Close the file handle safely
-                        pcall(function() currFile:close() end)
-                        if success_read then
-                            content = read_data
-                            found = true
-                        end
-                    end
-                    break
-                end
-            end
-            zfile:close()
-            
-            if found and content:match("opdsbrowser:placeholder") then
-                return true
-            end
-        else
-            -- Fallback to unzip command if zip module not available
-            local unzip_cmd = string.format('unzip -p %s %s 2>/dev/null', 
-                shell_escape(filepath), 
-                shell_escape(CONTENT_OPF_PATH))
-            local handle = io.popen(unzip_cmd)
-            if not handle then
-                logger.warn("PlaceholderGenerator: Failed to execute unzip command for:", filepath)
-                return false
-            end
-            
-            local success, content = pcall(function()
-                return handle:read("*a") or ""
-            end)
-            handle:close()
-            
-            if not success then
-                logger.warn("PlaceholderGenerator: Failed to read content from:", filepath)
-                return false
-            end
-            
-            -- Check for our placeholder marker (set in createMinimalEPUB)
-            if content:match("opdsbrowser:placeholder") then
-                return true
-            end
+        if not ok or not reader then
+            logger.warn("PlaceholderGenerator: Failed to open EPUB file:", filepath)
+            return false
+        end
+        
+        -- Extract OEBPS/content.opf
+        local ok_extract, content = pcall(function()
+            return reader:extractToMemory(CONTENT_OPF_PATH)
+        end)
+        
+        -- Always close the reader, log any errors
+        local ok_close, close_err = pcall(function() reader:close() end)
+        if not ok_close then
+            logger.warn("PlaceholderGenerator: Error closing reader:", close_err)
+        end
+        
+        if not ok_extract or not content then
+            logger.warn("PlaceholderGenerator: Failed to extract content.opf from:", filepath)
+            return false
+        end
+        
+        -- Check for our placeholder marker (set in createMinimalEPUB)
+        if content:match("opdsbrowser:placeholder") then
+            return true
         end
     end
 
