@@ -66,7 +66,7 @@ local Constants = {
     AUTO_DOWNLOAD_DELETE_DELAY = 0.2, -- Delay before deleting placeholder
     AUTO_DOWNLOAD_OPEN_DELAY = 0.5, -- Delay before opening downloaded book
     AUTO_DOWNLOAD_REFRESH_DELAY = 0.5, -- Delay before refreshing file manager
-    MIN_VALID_BOOK_SIZE = 100, -- Minimum file size in bytes to consider valid
+    MIN_VALID_BOOK_SIZE = 1024, -- Minimum file size in bytes (1KB) - proper EPUB has structure
 }
 
 return Constants
