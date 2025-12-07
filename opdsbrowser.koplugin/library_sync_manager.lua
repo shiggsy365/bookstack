@@ -39,24 +39,74 @@ function LibrarySyncManager:createFolderStructure()
         return false
     end
     
-    -- Create library directory (where placeholders are stored)
-    local library_path = self.base_library_path .. "/library"
-    ok, err = lfs.mkdir(library_path)
-    if not ok and err ~= "File exists" then
-        logger.err("LibrarySyncManager: Failed to create library directory:", library_path, err)
-        return false
-    end
-    
-    -- Create Authors directory
-    local authors_path = self.base_library_path .. "/Authors"
+    -- Create authors directory (new structure - all books go under authors)
+    local authors_path = self.base_library_path .. "/authors"
     ok, err = lfs.mkdir(authors_path)
     if not ok and err ~= "File exists" then
-        logger.err("LibrarySyncManager: Failed to create Authors directory:", authors_path, err)
+        logger.err("LibrarySyncManager: Failed to create authors directory:", authors_path, err)
         return false
     end
     
     logger.info("LibrarySyncManager: Created folder structure at:", self.base_library_path)
     return true
+end
+
+-- Get the target directory for a book based on author/series
+function LibrarySyncManager:getBookDirectory(book)
+    local authors_path = self.base_library_path .. "/authors"
+    
+    -- Sanitize author name
+    local author = Utils.safe_string(book.author, "Unknown Author")
+    local safe_author = author:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', '_')
+    
+    local author_dir = authors_path .. "/" .. safe_author
+    
+    -- Create author directory if needed
+    local ok, err = lfs.mkdir(author_dir)
+    if not ok and err ~= "File exists" then
+        logger.warn("LibrarySyncManager: Failed to create author directory:", author_dir, err)
+        return nil
+    end
+    
+    -- Determine if book has series
+    local series = Utils.safe_string(book.series, "")
+    
+    local target_dir
+    if series ~= "" then
+        -- Book is part of a series - create series subfolder
+        local safe_series = series:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', '_')
+        target_dir = author_dir .. "/" .. safe_series
+    else
+        -- Standalone book - use 'standalones' subfolder
+        target_dir = author_dir .. "/standalones"
+    end
+    
+    -- Create target directory
+    ok, err = lfs.mkdir(target_dir)
+    if not ok and err ~= "File exists" then
+        logger.warn("LibrarySyncManager: Failed to create target directory:", target_dir, err)
+        return nil
+    end
+    
+    return target_dir
+end
+
+-- Generate filename with series ordering prefix
+function LibrarySyncManager:generateFilename(book)
+    local filename = PlaceholderGenerator:generateFilename(book)
+    
+    -- Add series number prefix for proper sorting if book has series
+    local series = Utils.safe_string(book.series, "")
+    if series ~= "" then
+        local series_idx = Utils.safe_string(book.series_index, "")
+        if series_idx ~= "" then
+            local num = tonumber(series_idx) or 0
+            -- Prefix with zero-padded series number for proper sorting
+            filename = string.format("%03d_", num) .. filename
+        end
+    end
+    
+    return filename
 end
 
 -- Sync library from book list
@@ -65,29 +115,31 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
         return false, "Failed to create folder structure"
     end
     
-    local library_path = self.base_library_path .. "/library"
-    
-    -- Clean up any leftover .tmp directories from previous failed runs
-    logger.info("LibrarySyncManager: Cleaning up any leftover temp directories")
-    os.execute('rm -rf "' .. library_path .. '"/*.tmp 2>/dev/null')
-    
     local total_books = #books
     local created = 0
     local skipped = 0
     local failed = 0
     
-    logger.info("LibrarySyncManager: Syncing", total_books, "books to", library_path)
+    logger.info("LibrarySyncManager: Syncing", total_books, "books with new authors folder structure")
     
     for i, book in ipairs(books) do
         if progress_callback then
             progress_callback(i, total_books)
         end
         
-        -- Generate filename
-        local filename = PlaceholderGenerator:generateFilename(book)
-        local filepath = library_path .. "/" .. filename
-        
         logger.dbg("LibrarySyncManager: Processing book", i, "of", total_books, ":", book.title)
+        
+        -- Get target directory based on author/series
+        local target_dir = self:getBookDirectory(book)
+        if not target_dir then
+            failed = failed + 1
+            logger.err("LibrarySyncManager: Failed to determine directory for:", book.title)
+            goto continue
+        end
+        
+        -- Generate filename with series prefix if applicable
+        local filename = self:generateFilename(book)
+        local filepath = target_dir .. "/" .. filename
         
         -- Check if already exists
         if lfs.attributes(filepath, "mode") == "file" then
@@ -108,6 +160,7 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
                     series = book.series,
                     series_index = book.series_index,
                     download_url = book.download_url,
+                    cover_url = book.cover_url,
                 }
                 
                 -- Save periodically
@@ -121,14 +174,12 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
                 logger.err("LibrarySyncManager: Failed filepath was:", filepath)
             end
         end
+        
+        ::continue::
     end
     
     -- Final save
     self:savePlaceholderDB()
-    
-    -- Create collections (symlinks)
-    self:createAuthorCollections(books)
-    self:createSeriesCollections(books)
     
     logger.info("LibrarySyncManager: Sync complete - Created:", created, "Skipped:", skipped, "Failed:", failed)
     
@@ -138,107 +189,6 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
         failed = failed,
         total = total_books
     }
-end
-
--- Create author collection symlinks
-function LibrarySyncManager:createAuthorCollections(books)
-    local authors_path = self.base_library_path .. "/Authors"
-    local library_path = self.base_library_path .. "/library"
-    
-    -- Group books by author
-    local author_books = {}
-    for _, book in ipairs(books) do
-        local author = Utils.safe_string(book.author, "Unknown")
-        if not author_books[author] then
-            author_books[author] = {}
-        end
-        table.insert(author_books[author], book)
-    end
-    
-    logger.info("LibrarySyncManager: Creating author collections for", Utils.table_count(author_books), "authors")
-    
-    for author, books_list in pairs(author_books) do
-        -- Create author directory
-        local safe_author = author:gsub('[/:*?"<>|\\]', '_')
-        local author_dir = authors_path .. "/" .. safe_author
-        
-        local ok, err = lfs.mkdir(author_dir)
-        if not ok and err ~= "File exists" then
-            logger.warn("LibrarySyncManager: Failed to create author directory:", author, err)
-        else
-            -- Copy files to author folder (symlinks don't work on FAT32)
-            for _, book in ipairs(books_list) do
-                local filename = PlaceholderGenerator:generateFilename(book)
-                local source = library_path .. "/" .. filename
-                local dest = author_dir .. "/" .. filename
-                
-                -- Copy file instead of symlinking
-                local copy_cmd = string.format('cp "%s" "%s" 2>/dev/null', source, dest)
-                os.execute(copy_cmd)
-            end
-        end
-    end
-end
-
--- Create series collection symlinks
-function LibrarySyncManager:createSeriesCollections(books)
-    local series_path = self.base_library_path .. "/Series"
-    local library_path = self.base_library_path .. "/library"
-    
-    -- Group books by series
-    local series_books = {}
-    for _, book in ipairs(books) do
-        local series = Utils.safe_string(book.series, "")
-        if series ~= "" then
-            if not series_books[series] then
-                series_books[series] = {}
-            end
-            table.insert(series_books[series], book)
-        end
-    end
-    
-    logger.info("LibrarySyncManager: Creating series collections for", Utils.table_count(series_books), "series")
-    
-    for series, books_list in pairs(series_books) do
-        -- Create series directory
-        local safe_series = series:gsub('[/:*?"<>|\\]', '_')
-        local series_dir = series_path .. "/" .. safe_series
-        
-        local ok, err = lfs.mkdir(series_dir)
-        if not ok and err ~= "File exists" then
-            logger.warn("LibrarySyncManager: Failed to create series directory:", series, err)
-        else
-            -- Sort books by series index
-            table.sort(books_list, function(a, b)
-                local a_idx = Utils.safe_number(a.series_index, 0)
-                local b_idx = Utils.safe_number(b.series_index, 0)
-                if a_idx ~= b_idx then
-                    return a_idx < b_idx
-                end
-                return a.title < b.title
-            end)
-            
-            -- Copy files to series folder
-            for _, book in ipairs(books_list) do
-                local filename = PlaceholderGenerator:generateFilename(book)
-                local source = library_path .. "/" .. filename
-                
-                -- Prefix with series index for proper sorting
-                local series_idx = Utils.safe_string(book.series_index, "")
-                local dest_filename = filename
-                if series_idx ~= "" then
-                    local num = tonumber(series_idx) or 0
-                    dest_filename = string.format("%03d_", num) .. filename
-                end
-                
-                local dest = series_dir .. "/" .. dest_filename
-                
-                -- Copy file instead of symlinking
-                local copy_cmd = string.format('cp "%s" "%s" 2>/dev/null', source, dest)
-                os.execute(copy_cmd)
-            end
-        end
-    end
 end
 
 -- Get book info from placeholder filepath
@@ -262,15 +212,32 @@ end
 
 -- Get sync statistics
 function LibrarySyncManager:getStats()
-    local library_path = self.base_library_path .. "/library"
+    -- Count files in authors folder recursively
     local count = 0
     
-    if lfs.attributes(library_path, "mode") == "directory" then
-        for file in lfs.dir(library_path) do
+    local function count_files(dir)
+        if lfs.attributes(dir, "mode") ~= "directory" then
+            return
+        end
+        
+        for file in lfs.dir(dir) do
             if file ~= "." and file ~= ".." then
-                count = count + 1
+                local path = dir .. "/" .. file
+                local attr = lfs.attributes(path)
+                if attr then
+                    if attr.mode == "directory" then
+                        count_files(path)
+                    elseif attr.mode == "file" and file:match("%.html$") then
+                        count = count + 1
+                    end
+                end
             end
         end
+    end
+    
+    local authors_path = self.base_library_path .. "/authors"
+    if lfs.attributes(authors_path, "mode") == "directory" then
+        count_files(authors_path)
     end
     
     return {
