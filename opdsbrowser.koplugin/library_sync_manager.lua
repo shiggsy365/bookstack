@@ -165,6 +165,7 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
                     series_index = book.series_index,
                     download_url = book.download_url,
                     cover_url = book.cover_url,
+                    summary = book.summary,
                 }
                 
                 -- Save periodically

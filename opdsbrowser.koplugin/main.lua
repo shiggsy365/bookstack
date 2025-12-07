@@ -256,36 +256,57 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end)
 
     logger.info("OPDS: Successfully downloaded book, replaced placeholder")
-    -- Switch to the downloaded book
+
+    -- Verify the downloaded file exists
+    if lfs.attributes(filepath, "mode") ~= "file" then
+        logger.err("OPDS: Downloaded file not found at:", filepath)
+        UIHelpers.showError(_("Download succeeded but file not found"))
+        return
+    end
+
+    -- Show success message
+    UIHelpers.showSuccess(T(_("Downloaded: %1\n\nReturning to file browser..."), book_info.title))
+
+    -- Close the current document (placeholder) and return to file manager
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
-        -- Verify the downloaded file exists
-        if lfs.attributes(filepath, "mode") ~= "file" then
-            logger.err("OPDS: Downloaded file not found at:", filepath)
-            UIHelpers.showError(_("Download succeeded but file not found"))
-            return
-        end
- 
-        -- Show success message
-        UIHelpers.showSuccess(T(_("Downloaded: %1\n\nSwitching to full book..."), book_info.title))
- 
-        -- Close the document and refresh folder view to show metadata
+        -- Schedule the close operation with proper event handling
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            logger.info("OPDS: Closing document and refreshing folder")
+            logger.info("OPDS: Closing placeholder and returning to file browser")
             
-            -- Close the reader
-            ReaderUI.instance:onClose()
+            -- Get the directory of the downloaded file for navigation
+            local download_dir = filepath:match("(.*/)")
             
-            -- Wait a moment, then refresh file manager to show new cover
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
+            -- Close the reader view properly
+            UIManager:close(ReaderUI.instance)
+            ReaderUI.instance = nil
+            
+            -- Small delay before opening file manager
+            UIManager:scheduleIn(0.5, function()
+                -- Switch to file manager at the book's directory
                 local FileManager = require("apps/filemanager/filemanager")
-                if FileManager.instance then
+                
+                -- If file manager isn't running, start it
+                if not FileManager.instance then
+                    FileManager:showFiles(download_dir)
+                else
+                    -- Navigate to the directory and refresh
+                    FileManager.instance:reinit(download_dir)
                     FileManager.instance:onRefresh()
                 end
+                
+                -- Additional delay to ensure UI is ready, then refresh again
+                UIManager:scheduleIn(0.3, function()
+                    if FileManager.instance then
+                        FileManager.instance:onRefresh()
+                        logger.info("OPDS: File browser refreshed, showing downloaded book")
+                    end
+                end)
             end)
         end)
     else
-        UIHelpers.showError(_("Document not available to switch"))
+        -- No reader instance, just show success
+        logger.info("OPDS: No reader instance, download complete")
     end
 end
 
