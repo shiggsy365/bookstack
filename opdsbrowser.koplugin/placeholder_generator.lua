@@ -127,6 +127,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         .book-title { font-size: 1.8em; color: #333; margin: 0 0 0.5em 0; font-weight: bold; }
         .info { color: #666; }
         .instructions { margin-top: 1.5em; color: #444; font-size: 0.95em; }
+        .footer { padding: 1em 2em; background: #f8f9fa; border-top: 1px solid #dee2e6; color: #666; font-size: 0.85em; text-align: center; }
     </style>
 </head>
 <body>
