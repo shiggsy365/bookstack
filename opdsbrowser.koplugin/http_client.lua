@@ -5,31 +5,62 @@ local ltn12 = require("ltn12")
 local socketutil = require("socketutil")
 local logger = require("logger")
 local url = require("socket.url")
+local Constants = require("constants")
+local Utils = require("utils")
 
 local HttpClient = {}
 
-local BLOCK_TIMEOUT = 5
-local TOTAL_TIMEOUT = 30
-local USER_AGENT = "KOReader-OPDS-Browser"
+-- Request with retry logic and exponential backoff
+function HttpClient:request_with_retry(url_str, method, body, content_type, username, password, max_retries)
+    max_retries = max_retries or Constants.MAX_RETRIES
+    local delay = Constants.RETRY_DELAY
+    
+    for attempt = 1, max_retries do
+        local ok, response = self:request(url_str, method, body, content_type, username, password)
+        
+        if ok then
+            return true, response
+        end
+        
+        -- Check if error is retryable (network errors, 5xx errors)
+        local is_retryable = response and (
+            response:match("timeout") or 
+            response:match("connection") or
+            response:match("50%d") -- 500-599 status codes
+        )
+        
+        if attempt < max_retries and is_retryable then
+            logger.warn("HttpClient: Attempt", attempt, "failed, retrying in", delay, "seconds")
+            socket.sleep(delay)
+            delay = delay * Constants.BACKOFF_MULTIPLIER
+        else
+            return false, response
+        end
+    end
+    
+    return false, "Max retries exceeded"
+end
 
--- signature: request(url_str, method, body, content_type, username, password)
-function HttpClient:request(url_str, method, body, content_type, username, password)
+-- Original request function with timeout
+function HttpClient:request(url_str, method, body, content_type, username, password, timeout)
     method = method or "GET"
+    timeout = timeout or Constants.TOTAL_TIMEOUT
+    
     logger.info("HttpClient: Requesting URL:", url_str, "method:", method)
 
     local sink = {}
-    socketutil:set_timeout(BLOCK_TIMEOUT, TOTAL_TIMEOUT)
+    socketutil:set_timeout(Constants.BLOCK_TIMEOUT, timeout)
 
     local parsed = url.parse(url_str)
     local host = parsed and parsed.host or nil
-    local req_id = tostring(os.time()) .. "-" .. tostring(math.random(1000000))
+    local req_id = Utils.create_request_id()
 
     local request_params = {
         url = url_str,
         method = method,
         headers = {
             ["Accept-Encoding"] = "identity",
-            ["User-Agent"] = USER_AGENT,
+            ["User-Agent"] = Constants.USER_AGENT,
             ["Connection"] = "close",
             ["Cache-Control"] = "no-cache",
             ["Pragma"] = "no-cache",
@@ -69,11 +100,17 @@ function HttpClient:request(url_str, method, body, content_type, username, passw
     local body_str = table.concat(sink)
 
     logger.info("HttpClient: Response code:", code, "status:", status or "nil", "req_id:", req_id)
-    if headers and headers["content-type"] then
-        logger.dbg("HttpClient: Content-Type:", headers["content-type"])
-    end
-    if headers and headers["content-length"] then
-        logger.dbg("HttpClient: Content-Length:", headers["content-length"])
+    if headers then
+        if headers["content-type"] then
+            logger.dbg("HttpClient: Content-Type:", headers["content-type"])
+        end
+        if headers["content-length"] then
+            logger.dbg("HttpClient: Content-Length:", headers["content-length"])
+        end
+        if headers["x-deny-reason"] then
+            logger.warn("HttpClient: Network denied:", headers["x-deny-reason"])
+            return false, "Network access denied: " .. headers["x-deny-reason"]
+        end
     end
 
     if code == 200 then
@@ -83,22 +120,23 @@ function HttpClient:request(url_str, method, body, content_type, username, passw
         return false, tostring(headers)
     else
         logger.warn("HttpClient: Request failed:", status or code)
-        return false, status or code
+        return false, status or tostring(code)
     end
 end
 
--- signature: request_to_file(url_str, file_handle, username, password)
--- Streams response into the provided file handle using a custom sink.
--- The sink will NOT close the file handle; caller must flush/close it.
-function HttpClient:request_to_file(url_str, file_handle, username, password)
+-- Stream to file with progress callback
+function HttpClient:request_to_file(url_str, file_handle, username, password, progress_callback)
     logger.info("HttpClient: Streaming URL to file:", url_str)
-    socketutil:set_timeout(BLOCK_TIMEOUT, TOTAL_TIMEOUT)
+    socketutil:set_timeout(Constants.BLOCK_TIMEOUT, Constants.TOTAL_TIMEOUT)
 
     local parsed = url.parse(url_str)
     local host = parsed and parsed.host or nil
-    local req_id = tostring(os.time()) .. "-" .. tostring(math.random(1000000))
+    local req_id = Utils.create_request_id()
+    
+    local bytes_received = 0
+    local total_size = nil
 
-    -- custom sink that writes chunks to the provided Lua file handle
+    -- Custom sink that writes chunks and reports progress
     local function file_sink(chunk)
         if chunk then
             local ok, err = pcall(function() file_handle:write(chunk) end)
@@ -106,9 +144,17 @@ function HttpClient:request_to_file(url_str, file_handle, username, password)
                 logger.err("HttpClient: Error writing chunk to file:", tostring(err))
                 return nil, err
             end
+            
+            bytes_received = bytes_received + #chunk
+            
+            -- Call progress callback if provided
+            if progress_callback then
+                local progress = total_size and (bytes_received / total_size * 100) or nil
+                progress_callback(bytes_received, total_size, progress)
+            end
+            
             return true
         end
-        -- chunk == nil indicates end of stream
         return true
     end
 
@@ -116,7 +162,7 @@ function HttpClient:request_to_file(url_str, file_handle, username, password)
         url = url_str,
         method = "GET",
         headers = {
-            ["User-Agent"] = USER_AGENT,
+            ["User-Agent"] = Constants.USER_AGENT,
             ["Connection"] = "close",
             ["Cache-Control"] = "no-cache",
             ["Pragma"] = "no-cache",
@@ -141,24 +187,36 @@ function HttpClient:request_to_file(url_str, file_handle, username, password)
 
     local code, headers, status = socket.skip(1, requester.request(request_params))
     socketutil:reset_timeout()
+    
+    -- Get total size from headers
+    if headers and headers["content-length"] then
+        total_size = tonumber(headers["content-length"])
+    end
 
     logger.info("HttpClient: Stream response code:", code, "status:", status or "nil", "req_id:", req_id)
-    if headers and headers["content-type"] then
-        logger.dbg("HttpClient: Stream Content-Type:", headers["content-type"])
-    end
-    if headers and headers["content-length"] then
-        logger.dbg("HttpClient: Stream Content-Length:", headers["content-length"])
+    if headers then
+        if headers["content-type"] then
+            logger.dbg("HttpClient: Stream Content-Type:", headers["content-type"])
+        end
+        if headers["content-length"] then
+            logger.dbg("HttpClient: Stream Content-Length:", headers["content-length"])
+        end
     end
 
     if code == 200 then
-        return true, nil
+        return true, bytes_received
     elseif code == nil then
         logger.warn("HttpClient: Stream request failed (no code):", headers)
         return false, tostring(headers)
     else
         logger.warn("HttpClient: Stream request failed:", status or code)
-        return false, status or code
+        return false, status or tostring(code)
     end
+end
+
+-- Make a request with timeout
+function HttpClient:request_with_timeout(url_str, timeout, method, body, content_type, username, password)
+    return self:request(url_str, method, body, content_type, username, password, timeout)
 end
 
 return HttpClient
