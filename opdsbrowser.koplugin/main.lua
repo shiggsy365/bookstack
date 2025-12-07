@@ -277,7 +277,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
             ReaderUI.instance:onClose()
             
             -- Wait a moment, then refresh file manager to show new cover
-            UIManager:scheduleIn(0.5, function()
+            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
                 local FileManager = require("apps/filemanager/filemanager")
                 if FileManager.instance then
                     FileManager.instance:onRefresh()
@@ -1570,11 +1570,6 @@ function OPDSBrowser:updateRecentlyAddedCollection(books)
 
     -- Force save the collection
     ReadCollection:saveCollections()
-    
-    -- Verify save
-    UIManager:scheduleIn(0.5, function()
-        logger.info("OPDS: Collection save completed")
-    end)
 end
 
 -- Create "Currently Reading" collection from ReadHistory
@@ -1602,13 +1597,13 @@ function OPDSBrowser:updateCurrentlyReadingCollection()
     -- Get reading history
     for _, item in ipairs(ReadHistory.hist) do
         local filepath = item.file
-        -- Check if file still exists and has reading progress but isn't finished
+        -- Check if file still exists and has reading status
         if lfs.attributes(filepath, "mode") == "file" then
             local DocSettings = require("docsettings")
             local doc_settings = DocSettings:open(filepath)
             local summary = doc_settings:readSetting("summary")
             
-            -- Include if status is "reading" or "abandoned" (not "complete")
+            -- Include if status is "reading" (not "complete")
             if summary and summary.status and summary.status == "reading" then
                 table.insert(collections[coll_name], filepath)
                 logger.dbg("OPDS: Added to Currently Reading:", filepath)
