@@ -162,8 +162,9 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         extension = ".kepub.epub"
     end
 
-    -- IMPORTANT: Use unique temp file name to avoid any conflicts
-    local temp_filepath = placeholder_path:gsub("%.epub$", ".downloading.tmp")
+    -- IMPORTANT: Use unique temp file name with timestamp to avoid any conflicts
+    local timestamp = os.time()
+    local temp_filepath = placeholder_path:gsub("%.epub$", string.format(".downloading_%d.tmp", timestamp))
 
     -- Final filepath after placeholder is removed
     -- If extension is same as placeholder (.epub), this will be the same as placeholder_path

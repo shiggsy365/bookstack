@@ -70,6 +70,7 @@ local Constants = {
     DOCUMENT_CLOSE_DELAY = 0.5, -- Delay after closing document before download starts
     MIN_VALID_BOOK_SIZE = 1024, -- Minimum file size in bytes (1KB) - proper EPUB has structure
     MIN_COVER_SIZE = 100, -- Minimum cover image size in bytes to detect errors
+    COVER_DOWNLOAD_TIMEOUT = 5, -- Timeout for cover image downloads in seconds
 }
 
 return Constants

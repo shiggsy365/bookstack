@@ -42,10 +42,10 @@ local function download_cover_image(cover_url)
             ["Cache-Control"] = "no-cache",
             ["User-Agent"] = "KOReader/BookStack"
         },
-        -- Add timeout for cover downloads (5 seconds)
+        -- Add timeout and proper error handling
         create = function()
             local sock = socket.tcp()
-            sock:settimeout(5)
+            sock:settimeout(Constants.COVER_DOWNLOAD_TIMEOUT)
             return sock
         end
     }
