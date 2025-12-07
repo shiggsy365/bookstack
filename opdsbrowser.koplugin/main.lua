@@ -68,7 +68,7 @@ function OPDSBrowser:init()
     -- Remove trailing slash if present
     base_download_dir = base_download_dir:gsub("/$", "")
     local library_path = settings.library_sync_path or (base_download_dir .. "/Library")
-    LibrarySyncManager:init(library_path)
+    LibrarySyncManager:init(library_path, self.opds_username, self.opds_password)
     self.library_sync = LibrarySyncManager
 
     -- Initialize placeholder badge system
@@ -129,31 +129,11 @@ function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
 
     logger.info("OPDSBrowser: Starting auto-download for:", book_info.title)
 
-    -- CRITICAL: Show loading dialog BEFORE closing reader to prevent empty UI
-    local InfoMessage = require("ui/widget/infomessage")
-    local loading_msg = InfoMessage:new{
-        text = T(_("Auto-downloading:\n%1"), book_info.title),
-    }
-    UIManager:show(loading_msg)
+    -- NEW STRATEGY: Keep placeholder open, download in background, then switch to real book
+    -- This provides better user experience and prevents the "already downloaded" confusion
 
-    -- Small delay to ensure loading message is displayed
-    UIManager:scheduleIn(0.2, function()
-        -- Close the document to avoid file locks
-        local ReaderUI = require("apps/reader/readerui")
-        if ReaderUI.instance then
-            logger.info("OPDSBrowser: Closing placeholder document before download")
-            UIManager:close(ReaderUI.instance)
-            ReaderUI.instance = nil
-        end
-
-        -- Close the loading message and start download
-        UIManager:scheduleIn(0.3, function()
-            UIManager:close(loading_msg)
-
-            -- Start download without confirmation
-            self:downloadFromPlaceholderAuto(filepath, book_info)
-        end)
-    end)
+    -- Start download immediately (placeholder stays open during download)
+    self:downloadFromPlaceholderAuto(filepath, book_info)
 end
 
 -- Download from placeholder with auto-replacement
@@ -291,12 +271,6 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
 
     logger.info("OPDS: Successfully renamed temp file to:", filepath)
 
-    -- Clear cached metadata for the new file
-    pcall(function()
-        local DocSettings = require("docsettings")
-        DocSettings:open(filepath):purge()
-    end)
-
     logger.info("OPDS: Successfully downloaded book, replaced placeholder")
 
     -- Clear placeholder cache for the old placeholder path
@@ -313,27 +287,38 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         return
     end
 
-    -- Show success message
-    UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+    -- NEW STRATEGY: Close placeholder and open the real book
+    local ReaderUI = require("apps/reader/readerui")
 
-    -- Return to file manager to show the downloaded book
-    -- Note: ReaderUI was already closed before download started (line 126)
-    -- So we just need to ensure file manager is shown to prevent empty UI
-    UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-        logger.info("OPDS: Returning to file browser after download")
+    -- Close the placeholder reader if still open
+    if ReaderUI.instance then
+        logger.info("OPDS: Closing placeholder reader")
+        UIManager:close(ReaderUI.instance)
+        ReaderUI.instance = nil
+    end
 
-        local FileManager = require("apps/filemanager/filemanager")
-        local download_dir = filepath:match("(.*/)")
+    -- Small delay to ensure reader is fully closed
+    UIManager:scheduleIn(0.3, function()
+        logger.info("OPDS: Opening downloaded book:", filepath)
 
-        -- Ensure file manager is shown
-        if not FileManager.instance then
-            logger.info("OPDS: Starting file manager at:", download_dir)
-            FileManager:showFiles(download_dir)
-        else
-            logger.info("OPDS: Refreshing file manager at:", download_dir)
-            FileManager.instance:reinit(download_dir)
-            FileManager.instance:onRefresh()
-        end
+        -- Open the real downloaded book
+        ReaderUI:showReader(filepath)
+
+        -- Background: Clear cached metadata and refresh file manager
+        UIManager:scheduleIn(1, function()
+            -- Clear doc settings for the new file
+            pcall(function()
+                local DocSettings = require("docsettings")
+                DocSettings:open(filepath):purge()
+            end)
+
+            -- Refresh file manager in background
+            local FileManager = require("apps/filemanager/filemanager")
+            if FileManager.instance then
+                FileManager.instance:onRefresh()
+                logger.info("OPDS: Background metadata refresh complete")
+            end
+        end)
     end)
 end
 
@@ -1498,8 +1483,8 @@ function OPDSBrowser:performLibrarySync()
     local progress_count = 0
     local ok, result = self.library_sync:syncLibrary(books, function(current, total)
         progress_count = progress_count + 1
-        -- Update every 100 items for better performance with large libraries
-        if progress_count % 100 == 0 then
+        -- Update every 50 items to show progress for large libraries
+        if progress_count % 50 == 0 then
             UIHelpers.updateProgressMessage(loading, T(_("Syncing... %1/%2"), current, total))
             UIManager:setDirty("all", "ui")
             -- Force UI update to show progress in real-time

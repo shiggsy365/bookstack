@@ -12,12 +12,16 @@ local LibrarySyncManager = {
     authors_path = nil,
     recently_added_path = nil,
     placeholder_db = {}, -- Maps filepath -> book_info
+    opds_username = nil,
+    opds_password = nil,
 }
 
-function LibrarySyncManager:init(base_path)
+function LibrarySyncManager:init(base_path, username, password)
     self.base_library_path = base_path or "/mnt/us/opdslibrary"
     self.authors_path = self.base_library_path .. "/authors"
     self.recently_added_path = self.base_library_path .. "/Recently Added"
+    self.opds_username = username
+    self.opds_password = password
     self.settings = LuaSettings:open(self.settings_file)
     self:loadPlaceholderDB()
     logger.info("LibrarySyncManager: Initialized with base path:", self.base_library_path)
@@ -259,7 +263,7 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
                 local new_filepath = target_dir .. "/" .. filename
                 
                 logger.dbg("LibrarySyncManager: Creating updated placeholder at:", new_filepath)
-                local ok = PlaceholderGenerator:createMinimalEPUB(book, new_filepath)
+                local ok = PlaceholderGenerator:createMinimalEPUB(book, new_filepath, self.opds_username, self.opds_password)
                 if ok then
                     updated = updated + 1
                     logger.dbg("LibrarySyncManager: Successfully updated:", filename)
@@ -297,7 +301,7 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
             
             -- Create the placeholder
             logger.dbg("LibrarySyncManager: Creating placeholder at:", filepath)
-            local ok = PlaceholderGenerator:createMinimalEPUB(book, filepath)
+            local ok = PlaceholderGenerator:createMinimalEPUB(book, filepath, self.opds_username, self.opds_password)
             if ok then
                 created = created + 1
                 logger.info("LibrarySyncManager: Successfully recreated placeholder:", filename)
@@ -349,7 +353,7 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
         else
             -- Create new placeholder
             logger.dbg("LibrarySyncManager: Creating new placeholder at:", filepath)
-            local ok = PlaceholderGenerator:createMinimalEPUB(book, filepath)
+            local ok = PlaceholderGenerator:createMinimalEPUB(book, filepath, self.opds_username, self.opds_password)
             if ok then
                 created = created + 1
                 logger.dbg("LibrarySyncManager: Successfully created:", filename)
