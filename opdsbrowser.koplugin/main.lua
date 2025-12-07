@@ -118,11 +118,30 @@ end
 function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
     logger.info("OPDSBrowser: handlePlaceholderAutoDownload called for:", filepath)
 
-    -- Get book info from placeholder database
-    local book_info = self.library_sync:getBookInfo(filepath)
+    -- CRITICAL: Resolve symlinks to get the real file path
+    -- "Recently Added" folder contains symlinks to books in author folders
+    local real_filepath = filepath
+    local attr = lfs.symlinkattributes(filepath)
+    if attr and attr.mode == "link" then
+        -- It's a symlink, resolve it
+        local target = lfs.readlink(filepath)
+        if target then
+            -- Handle relative symlinks
+            if not target:match("^/") then
+                local dir = filepath:match("(.*/)")
+                real_filepath = dir .. target
+            else
+                real_filepath = target
+            end
+            logger.info("OPDSBrowser: Resolved symlink:", filepath, "->", real_filepath)
+        end
+    end
+
+    -- Get book info from placeholder database using real path
+    local book_info = self.library_sync:getBookInfo(real_filepath)
 
     if not book_info then
-        logger.warn("OPDSBrowser: Placeholder not found in database:", filepath)
+        logger.warn("OPDSBrowser: Placeholder not found in database:", real_filepath)
         UIHelpers.showError(_("Placeholder information not found.\n\nPlease use the manual download option."))
         return
     end
@@ -133,7 +152,8 @@ function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
     -- This provides better user experience and prevents the "already downloaded" confusion
 
     -- Start download immediately (placeholder stays open during download)
-    self:downloadFromPlaceholderAuto(filepath, book_info)
+    -- Pass the real filepath (not the symlink)
+    self:downloadFromPlaceholderAuto(real_filepath, book_info)
 end
 
 -- Download from placeholder with auto-replacement
@@ -245,7 +265,42 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
 
     logger.info("OPDS: Temp file verified, size:", temp_attr.size, "bytes")
 
-    -- NOW delete the placeholder (not the temp file!)
+    -- CRITICAL: Close the placeholder reader BEFORE deleting/renaming files
+    -- This prevents file locking issues on systems that lock open files
+    local ReaderUI = require("apps/reader/readerui")
+    local reader_was_open = false
+
+    if ReaderUI.instance then
+        logger.info("OPDS: Closing placeholder reader before file operations")
+        reader_was_open = true
+
+        -- Show a brief "processing" message to keep UI populated
+        local processing_msg = UIHelpers.showLoading(_("Preparing downloaded book..."))
+        UIManager:show(processing_msg)
+
+        -- Close the reader
+        UIManager:close(ReaderUI.instance)
+        ReaderUI.instance = nil
+
+        -- Brief delay to ensure reader is fully closed
+        UIManager:scheduleIn(0.2, function()
+            UIManager:close(processing_msg)
+
+            -- Now continue with file operations in a scheduled callback
+            self:_finishPlaceholderDownload(placeholder_path, temp_filepath, filepath)
+        end)
+    else
+        -- Reader wasn't open (shouldn't happen, but handle it)
+        logger.warn("OPDS: Reader not open during placeholder download")
+        self:_finishPlaceholderDownload(placeholder_path, temp_filepath, filepath)
+    end
+end
+
+-- Finish placeholder download by replacing file and opening book
+function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath, filepath)
+    logger.info("OPDS: Finishing placeholder download")
+
+    -- Delete the placeholder file
     logger.info("OPDS: Deleting placeholder file:", placeholder_path)
     local delete_ok = os.remove(placeholder_path)
     if delete_ok then
@@ -255,7 +310,6 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         self.library_sync:savePlaceholderDB()
     else
         logger.warn("OPDS: Failed to delete placeholder:", placeholder_path, "- continuing anyway")
-        -- Continue even if deletion fails - we'll try to rename which might overwrite
     end
 
     -- Rename temp file to final location
@@ -265,16 +319,20 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         logger.err("OPDS: Failed to rename temp file to final location")
         logger.err("OPDS: Attempting to clean up temp file")
         os.remove(temp_filepath)
-        UIHelpers.showError(_("Download succeeded but file rename failed\n\nPlease try again."))
+        UIHelpers.showError(_("Download succeeded but file operations failed\n\nPlease try again."))
+
+        -- Return to file manager
+        local FileManager = require("apps/filemanager/filemanager")
+        if not FileManager.instance then
+            local dir = placeholder_path:match("(.*/)")
+            FileManager:showFiles(dir)
+        end
         return
     end
 
     logger.info("OPDS: Successfully renamed temp file to:", filepath)
 
-    logger.info("OPDS: Successfully downloaded book, replaced placeholder")
-
-    -- Clear placeholder cache for the old placeholder path
-    -- This ensures the cloud badge is removed on next file browser refresh
+    -- Clear placeholder cache
     if self.placeholder_badge then
         self.placeholder_badge:clearCache(placeholder_path)
         self.placeholder_badge:clearCache(filepath)
@@ -287,38 +345,26 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         return
     end
 
-    -- NEW STRATEGY: Close placeholder and open the real book
+    logger.info("OPDS: Successfully downloaded book, opening:", filepath)
+
+    -- Open the downloaded book
     local ReaderUI = require("apps/reader/readerui")
+    ReaderUI:showReader(filepath)
 
-    -- Close the placeholder reader if still open
-    if ReaderUI.instance then
-        logger.info("OPDS: Closing placeholder reader")
-        UIManager:close(ReaderUI.instance)
-        ReaderUI.instance = nil
-    end
-
-    -- Small delay to ensure reader is fully closed
-    UIManager:scheduleIn(0.3, function()
-        logger.info("OPDS: Opening downloaded book:", filepath)
-
-        -- Open the real downloaded book
-        ReaderUI:showReader(filepath)
-
-        -- Background: Clear cached metadata and refresh file manager
-        UIManager:scheduleIn(1, function()
-            -- Clear doc settings for the new file
-            pcall(function()
-                local DocSettings = require("docsettings")
-                DocSettings:open(filepath):purge()
-            end)
-
-            -- Refresh file manager in background
-            local FileManager = require("apps/filemanager/filemanager")
-            if FileManager.instance then
-                FileManager.instance:onRefresh()
-                logger.info("OPDS: Background metadata refresh complete")
-            end
+    -- Background: Clear cached metadata and refresh file manager
+    UIManager:scheduleIn(1, function()
+        -- Clear doc settings for the new file
+        pcall(function()
+            local DocSettings = require("docsettings")
+            DocSettings:open(filepath):purge()
         end)
+
+        -- Refresh file manager in background
+        local FileManager = require("apps/filemanager/filemanager")
+        if FileManager.instance then
+            FileManager.instance:onRefresh()
+            logger.info("OPDS: Background metadata refresh complete")
+        end
     end)
 end
 
