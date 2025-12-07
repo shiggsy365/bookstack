@@ -287,24 +287,25 @@ end
 
 -- Check if a file is a placeholder
 function PlaceholderGenerator:isPlaceholder(filepath)
-    logger.dbg("PlaceholderGenerator:isPlaceholder checking:", filepath)
+    logger.info("PlaceholderGenerator:isPlaceholder checking:", filepath)
 
     if not filepath:match("%.epub$") then
-        logger.dbg("PlaceholderGenerator:isPlaceholder - not an epub file")
+        logger.info("PlaceholderGenerator:isPlaceholder - not an epub file")
         return false
     end
 
     local attr = lfs.attributes(filepath)
     if not attr or not attr.size then
-        logger.dbg("PlaceholderGenerator:isPlaceholder - no file attributes")
+        logger.info("PlaceholderGenerator:isPlaceholder - no file attributes")
         return false
     end
 
-    logger.dbg("PlaceholderGenerator:isPlaceholder - file size:", attr.size, "bytes")
+    logger.info("PlaceholderGenerator:isPlaceholder - file size:", attr.size, "bytes")
 
     -- Check if it's a valid EPUB by reading the content.opf for our marker
     -- Use Archiver.Reader API from ffi/archiver
     -- NOTE: Removed size check - placeholders with embedded covers can exceed 200KB
+    logger.info("PlaceholderGenerator:isPlaceholder - attempting to open EPUB archive")
     local ok, reader = pcall(function()
         local r = Archiver.Reader:new()
         if not r then
@@ -317,9 +318,11 @@ function PlaceholderGenerator:isPlaceholder(filepath)
     end)
 
     if not ok or not reader then
-        logger.warn("PlaceholderGenerator: Failed to open EPUB file:", filepath)
+        logger.warn("PlaceholderGenerator: Failed to open EPUB file:", filepath, "error:", ok)
         return false
     end
+
+    logger.info("PlaceholderGenerator:isPlaceholder - EPUB opened, extracting content.opf")
 
     -- Extract OEBPS/content.opf
     local ok_extract, content = pcall(function()
@@ -333,17 +336,19 @@ function PlaceholderGenerator:isPlaceholder(filepath)
     end
 
     if not ok_extract or not content then
-        logger.warn("PlaceholderGenerator: Failed to extract content.opf from:", filepath)
+        logger.warn("PlaceholderGenerator: Failed to extract content.opf from:", filepath, "error:", ok_extract)
         return false
     end
 
+    logger.info("PlaceholderGenerator:isPlaceholder - content.opf extracted, checking for marker")
+
     -- Check for our placeholder marker (set in createMinimalEPUB)
     if content:match("opdsbrowser:placeholder") then
-        logger.info("PlaceholderGenerator:isPlaceholder - FOUND placeholder marker in:", filepath)
+        logger.info("PlaceholderGenerator:isPlaceholder - FOUND placeholder marker!")
         return true
     end
 
-    logger.dbg("PlaceholderGenerator:isPlaceholder - no placeholder marker found")
+    logger.info("PlaceholderGenerator:isPlaceholder - no placeholder marker found")
     return false
 end
 
