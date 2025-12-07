@@ -291,42 +291,27 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end
 
     -- Show success message
-    UIHelpers.showSuccess(T(_("Downloaded: %1\n\nOpening book..."), book_info.title))
+    UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
 
-    -- Close the current document (placeholder) and open the downloaded book
-    local ReaderUI = require("apps/reader/readerui")
-    if ReaderUI.instance then
-        -- Schedule the close operation with proper event handling
-        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            logger.info("OPDS: Closing placeholder and opening downloaded book")
-            
-            -- Close the reader view properly
-            UIManager:close(ReaderUI.instance)
-            ReaderUI.instance = nil
-            
-            -- Small delay before opening the downloaded book
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_OPEN_DELAY, function()
-                -- Open the downloaded book
-                logger.info("OPDS: Opening downloaded book:", filepath)
-                
-                -- Use ReaderUI to open the book
-                ReaderUI:showReader(filepath)
-                
-                -- Schedule file manager refresh for when user closes the book
-                -- This ensures the metadata is updated in the file browser
-                UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_FINAL_REFRESH_DELAY, function()
-                    local FileManager = require("apps/filemanager/filemanager")
-                    if FileManager.instance then
-                        FileManager.instance:onRefresh()
-                        logger.info("OPDS: File browser metadata refreshed")
-                    end
-                end)
-            end)
-        end)
-    else
-        -- No reader instance, just show success
-        logger.info("OPDS: No reader instance, download complete")
-    end
+    -- Return to file manager to show the downloaded book
+    -- Note: ReaderUI was already closed before download started (line 126)
+    -- So we just need to ensure file manager is shown to prevent empty UI
+    UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
+        logger.info("OPDS: Returning to file browser after download")
+
+        local FileManager = require("apps/filemanager/filemanager")
+        local download_dir = filepath:match("(.*/)")
+
+        -- Ensure file manager is shown
+        if not FileManager.instance then
+            logger.info("OPDS: Starting file manager at:", download_dir)
+            FileManager:showFiles(download_dir)
+        else
+            logger.info("OPDS: Refreshing file manager at:", download_dir)
+            FileManager.instance:reinit(download_dir)
+            FileManager.instance:onRefresh()
+        end
+    end)
 end
 
 function OPDSBrowser:addToMainMenu(menu_items)
