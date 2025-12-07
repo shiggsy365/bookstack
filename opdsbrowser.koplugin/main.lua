@@ -285,9 +285,16 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         -- Capture self in closure for scheduled callback
         local plugin_ref = self
 
-        -- Brief delay to ensure reader is fully closed
-        UIManager:scheduleIn(0.3, function()
+        -- Increased delay to ensure reader is fully closed and all locks released
+        UIManager:scheduleIn(0.5, function()
             UIManager:close(processing_msg)
+
+            -- Verify ReaderUI.instance is truly nil after closing
+            if ReaderUI.instance then
+                logger.warn("OPDS: ReaderUI.instance still exists after close attempt")
+            else
+                logger.info("OPDS: Verified ReaderUI.instance is nil after close")
+            end
 
             -- Now continue with file operations
             logger.info("OPDS: Continuing with file operations after reader closed")
@@ -332,16 +339,70 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
 
     logger.info("OPDS: Verified - temp file is a real book (not placeholder)")
 
-    -- Delete the placeholder file
+    -- Delete the placeholder file with retry logic
     logger.info("OPDS: Deleting placeholder file:", placeholder_path)
-    local delete_ok = os.remove(placeholder_path)
-    if delete_ok then
-        logger.info("OPDS: Successfully deleted placeholder:", placeholder_path)
-        -- Remove from placeholder database
-        self.library_sync.placeholder_db[placeholder_path] = nil
-        self.library_sync:savePlaceholderDB()
-    else
-        logger.warn("OPDS: Failed to delete placeholder:", placeholder_path, "- continuing anyway")
+    local delete_ok = false
+    local max_delete_attempts = 3
+    
+    for attempt = 1, max_delete_attempts do
+        delete_ok = os.remove(placeholder_path)
+        
+        if delete_ok then
+            logger.info("OPDS: Successfully deleted placeholder on attempt", attempt, ":", placeholder_path)
+            -- Verify file actually deleted
+            local still_exists = lfs.attributes(placeholder_path)
+            if still_exists then
+                logger.err("OPDS: os.remove() returned true but file still exists!")
+                delete_ok = false
+            else
+                logger.info("OPDS: Verified placeholder file no longer exists")
+                -- Remove from placeholder database
+                self.library_sync.placeholder_db[placeholder_path] = nil
+                self.library_sync:savePlaceholderDB()
+                break
+            end
+        else
+            logger.warn("OPDS: Failed to delete placeholder on attempt", attempt, ":", placeholder_path)
+            if attempt < max_delete_attempts then
+                -- Brief delay before retry to allow any locks to clear
+                logger.info("OPDS: Waiting before retry...")
+                socket.sleep(0.2)
+            end
+        end
+    end
+    
+    if not delete_ok then
+        logger.err("OPDS: Failed to delete placeholder after", max_delete_attempts, "attempts")
+        os.remove(temp_filepath)
+        UIHelpers.showError(_("Failed to delete placeholder file after multiple attempts.\n\nThe file may be locked or have permission issues.\n\nPlease close any other apps using the file and try again."))
+        
+        -- Return to file manager
+        local FileManager = require("apps/filemanager/filemanager")
+        if not FileManager.instance then
+            local dir = placeholder_path:match("(.*/)")
+            FileManager:showFiles(dir)
+        else
+            FileManager.instance:onRefresh()
+        end
+        return
+    end
+
+    -- Verify placeholder is truly gone before renaming
+    local placeholder_still_exists = lfs.attributes(placeholder_path)
+    if placeholder_still_exists then
+        logger.err("OPDS: Placeholder file still exists before rename operation")
+        os.remove(temp_filepath)
+        UIHelpers.showError(_("Placeholder deletion verification failed.\n\nThe old file still exists.\n\nPlease try again."))
+        
+        -- Return to file manager
+        local FileManager = require("apps/filemanager/filemanager")
+        if not FileManager.instance then
+            local dir = placeholder_path:match("(.*/)")
+            FileManager:showFiles(dir)
+        else
+            FileManager.instance:onRefresh()
+        end
+        return
     end
 
     -- Rename temp file to final location
@@ -349,9 +410,18 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     local rename_ok = os.rename(temp_filepath, filepath)
     if not rename_ok then
         logger.err("OPDS: Failed to rename temp file to final location")
+        logger.err("OPDS: Temp file:", temp_filepath)
+        logger.err("OPDS: Target file:", filepath)
+        
+        -- Check if temp file still exists
+        local temp_exists = lfs.attributes(temp_filepath)
+        logger.err("OPDS: Temp file exists:", temp_exists ~= nil)
+        
+        -- Attempt cleanup
         logger.err("OPDS: Attempting to clean up temp file")
         os.remove(temp_filepath)
-        UIHelpers.showError(_("Download succeeded but file operations failed\n\nPlease try again."))
+        
+        UIHelpers.showError(_("Failed to rename downloaded file to final location.\n\nThis may be a permissions or filesystem issue.\n\nPlease try again."))
 
         -- Return to file manager
         local FileManager = require("apps/filemanager/filemanager")
@@ -401,11 +471,25 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
 
     logger.info("OPDS: Verified - final file is a real book (not placeholder)")
 
-    -- Clear placeholder cache
+    -- Clear all relevant caches
+    logger.info("OPDS: Clearing caches for placeholder and final file")
+    
+    -- Clear placeholder badge cache
     if self.placeholder_badge then
         self.placeholder_badge:clearCache(placeholder_path)
         self.placeholder_badge:clearCache(filepath)
+        logger.info("OPDS: Cleared placeholder badge cache")
     end
+    
+    -- Clear document settings for both old and new paths
+    pcall(function()
+        local DocSettings = require("docsettings")
+        -- Clear placeholder settings
+        DocSettings:open(placeholder_path):purge()
+        -- Clear final file settings (in case it existed before)
+        DocSettings:open(filepath):purge()
+        logger.info("OPDS: Cleared document settings cache")
+    end)
 
     logger.info("OPDS: Successfully downloaded book, opening:", filepath)
 
@@ -413,19 +497,14 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     local ReaderUI = require("apps/reader/readerui")
     ReaderUI:showReader(filepath)
 
-    -- Background: Clear cached metadata and refresh file manager
+    -- Background: Refresh file manager and force cache clearing
     UIManager:scheduleIn(1, function()
-        -- Clear doc settings for the new file
-        pcall(function()
-            local DocSettings = require("docsettings")
-            DocSettings:open(filepath):purge()
-        end)
-
         -- Refresh file manager in background
         local FileManager = require("apps/filemanager/filemanager")
         if FileManager.instance then
+            -- Force a full refresh to clear any cached file information
             FileManager.instance:onRefresh()
-            logger.info("OPDS: Background metadata refresh complete")
+            logger.info("OPDS: Background file manager refresh complete")
         end
     end)
 end
