@@ -204,7 +204,8 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         return false
     end
     
-    local ok_open = zip:open(zip_file)
+    -- Open the zip writer with autoclose enabled
+    local ok_open = zip:open_stream(zip_file, true)
     if not ok_open then
         logger.err("PlaceholderGenerator: Failed to open zip writer")
         zip_file:close()
@@ -322,7 +323,8 @@ function PlaceholderGenerator:isPlaceholder(filepath)
                         local success_read, read_data = pcall(function()
                             return currFile:read("*a") or ""
                         end)
-                        currFile:close()
+                        -- Close the file handle safely
+                        pcall(function() currFile:close() end)
                         if success_read then
                             content = read_data
                             found = true
