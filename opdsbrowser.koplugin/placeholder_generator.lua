@@ -28,28 +28,22 @@ local function download_cover_image(cover_url)
     end
     
     logger.info("PlaceholderGenerator: Attempting to download cover from:", cover_url)
-    
+
     local ltn12 = require("ltn12")
-    local socket = require("socket")
     local response_body = {}
-    
-    -- Add timeout and proper error handling
+
+    -- Simple HTTPS request without custom socket creation
+    -- Note: Timeout is handled at a higher level by KOReader's network manager
     local res, code, headers, status = https.request{
         url = cover_url,
         method = "GET",
         sink = ltn12.sink.table(response_body),
-        headers = { 
+        headers = {
             ["Cache-Control"] = "no-cache",
             ["User-Agent"] = "KOReader/BookStack"
-        },
-        -- Add timeout and proper error handling
-        create = function()
-            local sock = socket.tcp()
-            sock:settimeout(Constants.COVER_DOWNLOAD_TIMEOUT)
-            return sock
-        end
+        }
     }
-    
+
     logger.info("PlaceholderGenerator: Cover download response code:", code, "status:", status)
     
     if not res or (code ~= 200 and code ~= 304) then
