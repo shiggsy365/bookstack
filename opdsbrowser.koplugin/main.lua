@@ -154,15 +154,19 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         extension = ".kepub.epub"
     end
 
-    -- Use same directory as placeholder, just change extension from .epub to desired extension
+    -- Download to temporary file first to avoid overwriting placeholder
+    local temp_filepath = placeholder_path:gsub("%.epub$", ".download.tmp")
+
+    -- Final filepath after placeholder is removed
     local filepath = placeholder_path:gsub("%.epub$", extension)
-    
+
     -- Construct download URL
     local download_url = self.opds_url .. "/" .. book_id .. "/download"
-    
+
     logger.info("OPDS: Auto-downloading:", book_info.title)
     logger.info("OPDS: Placeholder:", placeholder_path)
-    logger.info("OPDS: Target EPUB:", filepath)
+    logger.info("OPDS: Temp file:", temp_filepath)
+    logger.info("OPDS: Final EPUB:", filepath)
 
     local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
     UIManager:show(loading)
@@ -204,74 +208,78 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     
     local data = table.concat(response_body)
     logger.info("OPDS: Downloaded", #data, "bytes")
-    
+
     -- Validate file size - files smaller than MIN_VALID_BOOK_SIZE are likely errors
     if #data < Constants.MIN_VALID_BOOK_SIZE then
         UIHelpers.showError(_("Downloaded file appears invalid (too small)\n\nPlaceholder will remain."))
         return
     end
-    
-    -- Write to file (same location as placeholder)
-    local file, err = io.open(filepath, "wb")
+
+    -- Write to temporary file first
+    local file, err = io.open(temp_filepath, "wb")
     if not file then
-        logger.err("OPDS: Failed to open file for writing:", err)
+        logger.err("OPDS: Failed to open temp file for writing:", err)
         UIHelpers.showError(T(_("Failed to create file: %1\n\nPlaceholder will remain."), err or "unknown"))
         return
     end
-    
+
     file:write(data)
     file:close()
-    
+
+    logger.info("OPDS: Wrote to temp file:", temp_filepath)
+
+    -- Now delete the placeholder
+    local delete_ok = os.remove(placeholder_path)
+    if delete_ok then
+        logger.info("OPDS: Deleted placeholder:", placeholder_path)
+        -- Remove from placeholder database
+        self.library_sync.placeholder_db[placeholder_path] = nil
+        self.library_sync:savePlaceholderDB()
+    else
+        logger.warn("OPDS: Failed to delete placeholder:", placeholder_path)
+    end
+
+    -- Rename temp file to final location
+    local rename_ok = os.rename(temp_filepath, filepath)
+    if not rename_ok then
+        logger.err("OPDS: Failed to rename temp file to final location")
+        UIHelpers.showError(_("Download succeeded but file rename failed"))
+        return
+    end
+
+    logger.info("OPDS: Renamed temp file to:", filepath)
+
     -- Clear cached metadata for the new file
     pcall(function()
         local DocSettings = require("docsettings")
         DocSettings:open(filepath):purge()
     end)
+
+    logger.info("OPDS: Successfully downloaded book, replaced placeholder")
     
-    logger.info("OPDS: Successfully downloaded book, replacing placeholder")
-    
-    -- Close the current document (placeholder) and open downloaded book in-place
+    -- Switch to the downloaded book
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
-        -- Verify the downloaded EPUB exists before proceeding
+        -- Verify the downloaded file exists
         if lfs.attributes(filepath, "mode") ~= "file" then
             logger.err("OPDS: Downloaded file not found at:", filepath)
             UIHelpers.showError(_("Download succeeded but file not found"))
             return
         end
-        
-        -- Delete the placeholder first
-        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_DELETE_DELAY, function()
-            local ok = os.remove(placeholder_path)
-            if ok then
-                logger.info("OPDS: Deleted placeholder:", placeholder_path)
-                -- Remove from placeholder database only after successful deletion
-                self.library_sync.placeholder_db[placeholder_path] = nil
-                self.library_sync:savePlaceholderDB()
-            else
-                logger.warn("OPDS: Failed to delete placeholder:", placeholder_path)
-            end
-            
-            -- Close placeholder and open downloaded book immediately
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-                -- Double-check file exists before switching
-                if lfs.attributes(filepath, "mode") == "file" then
-                    ReaderUI.instance:switchDocument(filepath)
-                    
-                    -- Show brief success message
-                    UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
-                else
-                    logger.err("OPDS: Cannot switch to document, file missing:", filepath)
-                    UIHelpers.showError(_("Downloaded book file is missing"))
+
+        -- Switch to the new document
+        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
+            ReaderUI.instance:switchDocument(filepath)
+
+            -- Show brief success message
+            UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+
+            -- Refresh file manager in background
+            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
+                local FileManager = require("apps/filemanager/filemanager")
+                if FileManager.instance then
+                    FileManager.instance:onRefresh()
                 end
-                
-                -- Refresh file manager in background
-                UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
-                    local FileManager = require("apps/filemanager/filemanager")
-                    if FileManager.instance then
-                        FileManager.instance:onRefresh()
-                    end
-                end)
             end)
         end)
     end
