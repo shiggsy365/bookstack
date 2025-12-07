@@ -256,8 +256,8 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end)
 
     logger.info("OPDS: Successfully downloaded book, replaced placeholder")
-    
-    -- Switch to the downloaded book
+
+    -- Close current document and return to file manager
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
         -- Verify the downloaded file exists
@@ -267,18 +267,24 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
             return
         end
 
-        -- Switch to the new document
+        -- Show success message
+        UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+
+        -- Close the reader and return to file manager
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            ReaderUI.instance:switchDocument(filepath)
+            logger.info("OPDS: Closing reader and returning to file manager")
 
-            -- Show brief success message
-            UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+            -- Close the current document
+            ReaderUI.instance:onClose()
 
-            -- Refresh file manager in background
+            -- Refresh file manager to update metadata
             UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
                 local FileManager = require("apps/filemanager/filemanager")
                 if FileManager.instance then
+                    logger.info("OPDS: Refreshing file manager")
                     FileManager.instance:onRefresh()
+                else
+                    logger.warn("OPDS: FileManager instance not available")
                 end
             end)
         end)
@@ -289,66 +295,42 @@ function OPDSBrowser:addToMainMenu(menu_items)
     menu_items.opdsbrowser = {
         text = _("Cloud Book Library"),
         sub_item_table = {
-            -- Library section
-            { text = _("Library - Browse by Author"), 
-              callback = function() self:browseAuthors() end, 
-              enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Library - Recently Added"), 
-              callback = function() self:browseRecentlyAdded() end, 
-              enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Library - Random Choice"), 
-              callback = function() self:getRandomBook() end, 
-              enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Library - Search"), 
-              callback = function() self:searchLibrary() end, 
-              enabled_func = function() return self.opds_url ~= "" end },
-            
-            { text = "────────────────────", enabled_func = function() return false end },
-            
             -- Library Sync section
-            { text = _("Library Sync - Build Placeholder Library"), 
-              callback = function() self:buildPlaceholderLibrary() end, 
+            { text = _("Library Sync - Build Placeholder Library"),
+              callback = function() self:buildPlaceholderLibrary() end,
               enabled_func = function() return self.opds_url ~= "" end },
-            { text = _("Library Sync - View Statistics"), 
-              callback = function() self:showLibrarySyncStats() end },
-            { text = _("Library Sync - Clear All Placeholders"), 
-              callback = function() self:clearPlaceholderLibrary() end },
-            { text = _("Library Sync - Download from Placeholder"), 
-              callback = function() self:downloadFromCurrentPlaceholder() end },
-            
+
             { text = "────────────────────", enabled_func = function() return false end },
-            
+
             -- Ephemera section
-            { text = _("Ephemera - Request New Book"), 
-              callback = function() self:requestBook() end, 
+            { text = _("Ephemera - Request New Book"),
+              callback = function() self:requestBook() end,
               enabled_func = function() return self.ephemera_client:isConfigured() end },
-            { text = _("Ephemera - View Download Queue"), 
-              callback = function() self:showDownloadQueue() end, 
+            { text = _("Ephemera - View Download Queue"),
+              callback = function() self:showDownloadQueue() end,
               enabled_func = function() return self.ephemera_client:isConfigured() end },
-            
+
             { text = "────────────────────", enabled_func = function() return false end },
-            
+
             -- Hardcover section
-            { text = _("Hardcover - Search Author"), 
-              callback = function() self:hardcoverSearchAuthor() end, 
+            { text = _("Hardcover - Search Author"),
+              callback = function() self:hardcoverSearchAuthor() end,
               enabled_func = function() return self.hardcover_client:isConfigured() end },
-            
+
             { text = "────────────────────", enabled_func = function() return false end },
-            
+
             -- History section
-            { text = _("History - Recent Searches"), 
+            { text = _("History - Recent Searches"),
               callback = function() self:showSearchHistory() end },
-            { text = _("History - Recently Viewed"), 
+            { text = _("History - Recently Viewed"),
               callback = function() self:showRecentBooks() end },
-            { text = _("Bookmarks - View Favorites"), 
-              callback = function() self:showBookmarks() end },
-            
+
             { text = "────────────────────", enabled_func = function() return false end },
-            
+
             -- Settings section
-            { text = _("Plugin - Settings"), 
+            { text = _("Plugin - Settings"),
               callback = function() self:showSettings() end },
-            { text = _("Plugin - Cache Info"), 
+            { text = _("Plugin - Cache Info"),
               callback = function() self:showCacheInfo() end },
         },
     }
@@ -494,195 +476,6 @@ function OPDSBrowser:ensureNetwork()
         end
     end
     return true
-end
-
--- Browse authors
-function OPDSBrowser:browseAuthors()
-    if not self:ensureNetwork() then return end
-    
-    local loading = UIHelpers.showLoading(_("Loading authors..."))
-    UIManager:show(loading)
-    
-    local full_url = self.opds_url .. "/catalog"
-    local all_xml = self.opds_client:fetchAllPages(full_url, Constants.DEFAULT_PAGE_SIZE)
-    
-    UIManager:close(loading)
-    
-    if not all_xml then
-        UIHelpers.showError(_("Failed to load authors"))
-        return
-    end
-
-    local authors = self.opds_client:parseAuthorsFromBooklore(all_xml)
-    if #authors > 0 then
-        self:showAuthorList(authors)
-    else
-        UIHelpers.showInfo(_("No authors found."))
-    end
-end
-
-function OPDSBrowser:showAuthorList(authors)
-    local items = {}
-    for _, author in ipairs(authors) do
-        table.insert(items, {
-            text = author.name,
-            callback = function()
-                HistoryManager:addRecentAuthor(author.name)
-                self:browseBooksByAuthor(author.name)
-            end,
-        })
-    end
-
-    self.author_menu = UIHelpers.createMenu(_("Authors"), items)
-    UIManager:show(self.author_menu)
-end
-
--- Browse recently added
-function OPDSBrowser:browseRecentlyAdded()
-    if not self:ensureNetwork() then return end
-    
-    local loading = UIHelpers.showLoading(_("Loading recently added books..."))
-    UIManager:show(loading)
-    
-    local full_url = self.opds_url .. "/recent"
-    local all_xml = self.opds_client:fetchAllPages(full_url, Constants.DEFAULT_PAGE_SIZE)
-    
-    UIManager:close(loading)
-    
-    if not all_xml then
-        UIHelpers.showError(_("Failed to load recent books"))
-        return
-    end
-
-    local books = self.opds_client:parseBookloreOPDSFeed(all_xml, self.use_publisher_as_series)
-    if #books > 0 then
-        self:showBookList(books, _("Recently Added"))
-    else
-        UIHelpers.showInfo(_("No recent books found."))
-    end
-end
-
--- Get random book
-function OPDSBrowser:getRandomBook()
-    if not self:ensureNetwork() then return end
-    
-    local loading = UIHelpers.showLoading(_("Getting random book..."))
-    UIManager:show(loading)
-    
-    local full_url = self.opds_url .. "/surprise"
-    local ok, response_or_err = self.opds_client:httpGet(full_url)
-    
-    UIManager:close(loading)
-    
-    if not ok then
-        UIHelpers.showError(_("Failed to get random book"))
-        return
-    end
-
-    local books = self.opds_client:parseBookloreOPDSFeed(response_or_err, self.use_publisher_as_series)
-    if #books > 0 then
-        self:showBookDetails(books[1])
-    else
-        UIHelpers.showInfo(_("No book found."))
-    end
-end
-
--- Library search
-function OPDSBrowser:searchLibrary()
-    local search_history = HistoryManager:getSearchHistory()
-    local hint = _("Enter title, author, or keywords")
-    
-    if #search_history > 0 then
-        hint = hint .. "\n" .. _("Recent: ") .. search_history[1]
-    end
-    
-    UIHelpers.createInputDialog(
-        _("Search Library"),
-        hint,
-        function(search_term)
-            if search_term and search_term ~= "" then
-                HistoryManager:addSearchHistory(search_term)
-                self:performLibrarySearch(search_term)
-            end
-        end
-    )
-end
-
-function OPDSBrowser:performLibrarySearch(search_term)
-    if not self:ensureNetwork() then return end
-    
-    local loading = UIHelpers.showLoading(_("Searching library..."))
-    UIManager:show(loading)
-    
-    local query = url.escape(search_term)
-    local full_url = self.opds_url .. "/catalog?q=" .. query
-    
-    local all_xml = self.opds_client:fetchAllPages(full_url, Constants.DEFAULT_PAGE_SIZE)
-    
-    UIManager:close(loading)
-    
-    if not all_xml then
-        UIHelpers.showError(_("Search failed"))
-        return
-    end
-
-    local books = self.opds_client:parseBookloreOPDSFeed(all_xml, self.use_publisher_as_series)
-    if #books > 0 then
-        self:showBookList(books, T(_("Search Results: %1"), search_term))
-    else
-        UIHelpers.showInfo(_("No books found matching your search."))
-    end
-end
-
--- Browse books by author
-function OPDSBrowser:browseBooksByAuthor(author_name)
-    local loading = UIHelpers.showLoading(_("Loading books..."))
-    UIManager:show(loading)
-    
-    local query = url.escape(author_name)
-    local full_url = self.opds_url .. "/catalog?q=" .. query
-    
-    local all_xml = self.opds_client:fetchAllPages(full_url, Constants.DEFAULT_PAGE_SIZE)
-    
-    if not all_xml then
-        UIManager:close(loading)
-        UIHelpers.showError(_("Failed to load books"))
-        return
-    end
-
-    local books = self.opds_client:parseBookloreOPDSFeed(all_xml, self.use_publisher_as_series)
-    
-    if #books == 0 then
-        UIManager:close(loading)
-        UIHelpers.showInfo(_("No books found for this author."))
-        return
-    end
-
-    -- Apply Hardcover series data if not using publisher
-    if not self.use_publisher_as_series and self.hardcover_client:isConfigured() then
-        UIHelpers.updateProgressMessage(loading, _("Loading series information..."))
-        
-        local ok, series_lookup = self.hardcover_client:getSeriesData(author_name, true)
-        if ok and series_lookup then
-            for _, book in ipairs(books) do
-                if not book.series or book.series == "" then
-                    local normalized_title = Utils.normalize_title(book.title)
-                    if series_lookup[normalized_title] then
-                        book.series = series_lookup[normalized_title].name
-                        book.series_index = series_lookup[normalized_title].details
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Sort books
-    books = self.opds_client:sortBooks(books)
-    
-    UIManager:close(loading)
-    UIManager:setDirty("all", "full")
-    
-    self:showBookList(books, T(_("Books by %1"), author_name))
 end
 
 -- Show book list
@@ -1620,38 +1413,6 @@ function OPDSBrowser:showRecentBooks()
     UIManager:show(self.recent_menu)
 end
 
-function OPDSBrowser:showBookmarks()
-    local bookmarks = HistoryManager:getBookmarks()
-    
-    if #bookmarks == 0 then
-        UIHelpers.showInfo(_("No bookmarks"))
-        return
-    end
-    
-    local items = {}
-    for _, book_info in ipairs(bookmarks) do
-        local display_text = Utils.safe_string(book_info.title, "Unknown")
-        if book_info.author then
-            display_text = display_text .. " - " .. book_info.author
-        end
-        
-        table.insert(items, {
-            text = display_text,
-            callback = function()
-                -- Show book details if we have full info
-                if book_info.download_url then
-                    self:showBookDetails(book_info)
-                else
-                    UIHelpers.showInfo(_("Limited book information available"))
-                end
-            end,
-        })
-    end
-    
-    self.bookmarks_menu = UIHelpers.createMenu(_("Bookmarks"), items)
-    UIManager:show(self.bookmarks_menu)
-end
-
 -- ============================================================================
 -- LIBRARY SYNC FUNCTIONS
 -- ============================================================================
@@ -1731,74 +1492,6 @@ function OPDSBrowser:performLibrarySync()
             FileManager.instance:onRefresh()
         end
     end)
-end
-
-function OPDSBrowser:showLibrarySyncStats()
-    local stats = self.library_sync:getStats()
-    
-    local details = T(
-        _("Library Sync Statistics\n\n") ..
-        _("Placeholders: %1\n") ..
-        _("DB Entries: %2\n") ..
-        _("Path: %3"),
-        stats.total_placeholders, stats.db_entries, stats.base_path
-    )
-    
-    local buttons = {
-        {{ text = _("Rebuild"), callback = function()
-            UIManager:close(self.stats_viewer)
-            self:buildPlaceholderLibrary()
-        end }},
-        {{ text = _("Close"), callback = function()
-            UIManager:close(self.stats_viewer)
-        end }},
-    }
-    
-    self.stats_viewer = UIHelpers.createTextViewer(_("Library Sync"), details, buttons)
-    UIManager:show(self.stats_viewer)
-end
-
-function OPDSBrowser:clearPlaceholderLibrary()
-    UIHelpers.createConfirmDialog(
-        _("Clear Library"),
-        _("Delete all placeholders?\n\nThis cannot be undone."),
-        function()
-            local loading = UIHelpers.showLoading(_("Clearing..."))
-            UIManager:show(loading)
-            self.library_sync:clearLibrary()
-            UIManager:close(loading)
-            UIHelpers.showSuccess(_("Cleared"))
-            
-            UIManager:scheduleIn(0.5, function()
-                local FileManager = require("apps/filemanager/filemanager")
-                if FileManager.instance then FileManager.instance:onRefresh() end
-            end)
-        end
-    )
-end
-
-function OPDSBrowser:downloadFromCurrentPlaceholder()
-    local ReaderUI = require("apps/reader/readerui")
-    local current_file = nil
-    
-    if ReaderUI.instance and ReaderUI.instance.document then
-        current_file = ReaderUI.instance.document.file
-    end
-    
-    if not current_file then
-        UIHelpers.showError(_("No document open"))
-        return
-    end
-    
-    local book_info = self.library_sync:getBookInfo(current_file)
-    
-    if not book_info then
-        UIHelpers.showError(_("Not a placeholder file"))
-        return
-    end
-    
-    logger.info("Downloading from placeholder:", book_info.title)
-    self:downloadBook(book_info)
 end
 
 -- ============================================================================
