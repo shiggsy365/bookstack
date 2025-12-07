@@ -2,7 +2,12 @@ local logger = require("logger")
 local lfs = require("libs/libkoreader-lfs")
 local Utils = require("utils")
 
-local PlaceholderGenerator = {}
+-- Escape a string for safe use in shell commands
+local function shell_escape(str)
+    if not str then return "''" end
+    -- Replace single quotes with '\'' (end quote, escaped quote, start quote)
+    return "'" .. str:gsub("'", "'\\''") .. "'"
+end
 
 -- Maximum cover image size to embed in EPUB (100KB)
 local MAX_COVER_SIZE = 100 * 1024
@@ -95,7 +100,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     ok, err = lfs.mkdir(meta_inf_dir)
     if not ok and err ~= "File exists" then
         logger.err("PlaceholderGenerator: Failed to create META-INF:", err)
-        os.execute('rm -rf "' .. temp_dir .. '"')
+        os.execute('rm -rf ' .. shell_escape(temp_dir))
         return false
     end
     
@@ -104,7 +109,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     ok, err = lfs.mkdir(oebps_dir)
     if not ok and err ~= "File exists" then
         logger.err("PlaceholderGenerator: Failed to create OEBPS:", err)
-        os.execute('rm -rf "' .. temp_dir .. '"')
+        os.execute('rm -rf ' .. shell_escape(temp_dir))
         return false
     end
     
@@ -112,7 +117,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     local mimetype_file = io.open(temp_dir .. "/mimetype", "w")
     if not mimetype_file then
         logger.err("PlaceholderGenerator: Failed to create mimetype")
-        os.execute('rm -rf "' .. temp_dir .. '"')
+        os.execute('rm -rf ' .. shell_escape(temp_dir))
         return false
     end
     mimetype_file:write("application/epub+zip")
@@ -129,7 +134,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     local container_file = io.open(meta_inf_dir .. "/container.xml", "w")
     if not container_file then
         logger.err("PlaceholderGenerator: Failed to create container.xml")
-        os.execute('rm -rf "' .. temp_dir .. '"')
+        os.execute('rm -rf ' .. shell_escape(temp_dir))
         return false
     end
     container_file:write(container_xml)
@@ -208,7 +213,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     local opf_file = io.open(oebps_dir .. "/content.opf", "w")
     if not opf_file then
         logger.err("PlaceholderGenerator: Failed to create content.opf")
-        os.execute('rm -rf "' .. temp_dir .. '"')
+        os.execute('rm -rf ' .. shell_escape(temp_dir))
         return false
     end
     opf_file:write(content_opf)
@@ -232,7 +237,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     local xhtml_file = io.open(oebps_dir .. "/cover.xhtml", "w")
     if not xhtml_file then
         logger.err("PlaceholderGenerator: Failed to create cover.xhtml")
-        os.execute('rm -rf "' .. temp_dir .. '"')
+        os.execute('rm -rf ' .. shell_escape(temp_dir))
         return false
     end
     xhtml_file:write(cover_xhtml)
@@ -242,17 +247,19 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     -- First, add mimetype uncompressed (-X)
     -- Then add other files compressed
     local zip_cmd = string.format(
-        'cd "%s" && zip -X0 "%s" mimetype && zip -r "%s" META-INF OEBPS',
-        temp_dir,
-        output_path,
-        output_path
+        'cd %s && zip -X0 %s mimetype && zip -r %s META-INF OEBPS',
+        shell_escape(temp_dir),
+        shell_escape(output_path),
+        shell_escape(output_path)
     )
     
     local result = os.execute(zip_cmd)
     
     -- Clean up temporary directory
-    os.execute('rm -rf "' .. temp_dir .. '"')
+    os.execute('rm -rf ' .. shell_escape(temp_dir))
     
+    -- os.execute() returns different types in different Lua versions
+    -- Lua 5.1: returns true/false, Lua 5.2+: returns exit code (0 = success)
     if result ~= 0 and result ~= true then
         logger.err("PlaceholderGenerator: Failed to create EPUB zip file")
         return false
@@ -296,7 +303,9 @@ function PlaceholderGenerator:isPlaceholder(filepath)
     if attr.size < 200000 then
         -- Check if it's a valid EPUB by reading the content.opf for our marker
         -- We need to extract and read the OEBPS/content.opf file from the zip
-        local unzip_cmd = string.format('unzip -p "%s" "OEBPS/content.opf" 2>/dev/null', filepath)
+        local unzip_cmd = string.format('unzip -p %s %s 2>/dev/null', 
+            shell_escape(filepath), 
+            shell_escape("OEBPS/content.opf"))
         local handle = io.popen(unzip_cmd)
         if handle then
             local content = handle:read("*a") or ""
