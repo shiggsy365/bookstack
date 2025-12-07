@@ -1590,9 +1590,21 @@ function OPDSBrowser:updateCurrentlyReadingCollection()
         return
     end
     
+    -- Initialize collections if needed
+    if not ReadCollection.coll then
+        ReadCollection.coll = {}
+    end
+    
     local coll_name = "Currently Reading"
     local collections = ReadCollection.coll
     collections[coll_name] = {}
+    
+    -- Check if ReadHistory has items
+    if not ReadHistory.hist or #ReadHistory.hist == 0 then
+        logger.info("OPDS: No items in ReadHistory")
+        ReadCollection:saveCollections()
+        return
+    end
     
     -- Get reading history
     for _, item in ipairs(ReadHistory.hist) do
