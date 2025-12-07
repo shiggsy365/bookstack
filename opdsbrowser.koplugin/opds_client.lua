@@ -215,8 +215,12 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
             end
         end
         if not cover_link then
-            -- Try generic image link without specific type
+            -- Try generic image link without specific type - more flexible pattern
             cover_link = entry:match('<link[^>]+type="image/[^"]*"[^>]+href="([^"]+)"')
+            if not cover_link then
+                -- Try reverse attribute order
+                cover_link = entry:match('<link[^>]+href="([^"]+)"[^>]+type="image/[^"]*"')
+            end
         end
         
         if cover_link then

@@ -512,20 +512,67 @@ function LibrarySyncManager:populateRecentlyAdded(books)
                 -- Create symlink in Recently Added folder
                 local symlink_path = self.recently_added_path .. "/" .. filename
                 
-                -- Use ln -s to create symlink (works on most e-readers)
-                local cmd = string.format('ln -sf "%s" "%s"', original_path, symlink_path)
-                local result = os.execute(cmd)
+                -- Try to create symlink using lfs.link if available, otherwise use os.execute
+                local link_ok = false
                 
-                if result == 0 or result == true then
+                -- First try using lfs.link (safer, no shell injection risk)
+                if lfs.link then
+                    local ok, err = pcall(function()
+                        -- lfs.link(old, new, true) creates a symbolic link
+                        return lfs.link(original_path, symlink_path, true)
+                    end)
+                    if ok then
+                        link_ok = true
+                        logger.dbg("LibrarySyncManager: Created symlink with lfs.link:", symlink_path)
+                    end
+                end
+                
+                -- Fallback to os.execute if lfs.link not available or failed
+                if not link_ok then
+                    -- Escape paths for shell safety
+                    local escaped_original = original_path:gsub("'", "'\\''")
+                    local escaped_symlink = symlink_path:gsub("'", "'\\''")
+                    local cmd = string.format("ln -sf '%s' '%s'", escaped_original, escaped_symlink)
+                    local result = os.execute(cmd)
+                    
+                    -- os.execute returns 0 on success, non-zero on failure
+                    if result == 0 then
+                        link_ok = true
+                        logger.dbg("LibrarySyncManager: Created symlink with ln:", symlink_path)
+                    end
+                end
+                
+                if link_ok then
                     added = added + 1
-                    logger.dbg("LibrarySyncManager: Created symlink:", symlink_path)
                 else
-                    -- If symlink fails, try creating a copy instead
-                    local copy_cmd = string.format('cp "%s" "%s"', original_path, symlink_path)
-                    local copy_result = os.execute(copy_cmd)
-                    if copy_result == 0 or copy_result == true then
+                    -- If symlink fails, try creating a hard link or copy instead
+                    local copy_ok = false
+                    
+                    -- Try hard link first (no space cost)
+                    if lfs.link then
+                        local ok, err = pcall(function()
+                            return lfs.link(original_path, symlink_path)
+                        end)
+                        if ok then
+                            copy_ok = true
+                            logger.dbg("LibrarySyncManager: Created hard link:", symlink_path)
+                        end
+                    end
+                    
+                    -- Fallback to file copy
+                    if not copy_ok then
+                        local escaped_original = original_path:gsub("'", "'\\''")
+                        local escaped_symlink = symlink_path:gsub("'", "'\\''")
+                        local copy_cmd = string.format("cp '%s' '%s'", escaped_original, escaped_symlink)
+                        local copy_result = os.execute(copy_cmd)
+                        if copy_result == 0 then
+                            copy_ok = true
+                            logger.dbg("LibrarySyncManager: Created copy:", symlink_path)
+                        end
+                    end
+                    
+                    if copy_ok then
                         added = added + 1
-                        logger.dbg("LibrarySyncManager: Created copy:", symlink_path)
                     else
                         failed = failed + 1
                         logger.warn("LibrarySyncManager: Failed to create link/copy for:", filename)
