@@ -117,36 +117,42 @@ end
 -- Handle auto-download from placeholder
 function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
     logger.info("OPDSBrowser: handlePlaceholderAutoDownload called for:", filepath)
-    
+
     -- Get book info from placeholder database
     local book_info = self.library_sync:getBookInfo(filepath)
-    
+
     if not book_info then
         logger.warn("OPDSBrowser: Placeholder not found in database:", filepath)
         UIHelpers.showError(_("Placeholder information not found.\n\nPlease use the manual download option."))
         return
     end
-    
+
     logger.info("OPDSBrowser: Starting auto-download for:", book_info.title)
-    
-    -- CRITICAL: Close the document FIRST before downloading to avoid file locks
-    local ReaderUI = require("apps/reader/readerui")
-    if ReaderUI.instance then
-        logger.info("OPDSBrowser: Closing placeholder document before download")
-        UIManager:close(ReaderUI.instance)
-        ReaderUI.instance = nil
-    end
-    
-    -- Schedule download after brief delay to ensure document is fully closed
-    UIManager:scheduleIn(Constants.DOCUMENT_CLOSE_DELAY, function()
-        -- Show brief notification (non-blocking)
-        UIManager:show(require("ui/widget/notification"):new{
-            text = T(_("Auto-downloading: %1"), book_info.title),
-            timeout = 2,
-        })
-        
-        -- Start download without confirmation
-        self:downloadFromPlaceholderAuto(filepath, book_info)
+
+    -- CRITICAL: Show loading dialog BEFORE closing reader to prevent empty UI
+    local InfoMessage = require("ui/widget/infomessage")
+    local loading_msg = InfoMessage:new{
+        text = T(_("Auto-downloading:\n%1"), book_info.title),
+    }
+    UIManager:show(loading_msg)
+
+    -- Small delay to ensure loading message is displayed
+    UIManager:scheduleIn(0.2, function()
+        -- Close the document to avoid file locks
+        local ReaderUI = require("apps/reader/readerui")
+        if ReaderUI.instance then
+            logger.info("OPDSBrowser: Closing placeholder document before download")
+            UIManager:close(ReaderUI.instance)
+            ReaderUI.instance = nil
+        end
+
+        -- Close the loading message and start download
+        UIManager:scheduleIn(0.3, function()
+            UIManager:close(loading_msg)
+
+            -- Start download without confirmation
+            self:downloadFromPlaceholderAuto(filepath, book_info)
+        end)
     end)
 end
 
