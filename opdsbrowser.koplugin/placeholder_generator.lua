@@ -13,35 +13,45 @@ local MAX_COVER_SIZE = 100 * 1024
 local CONTENT_OPF_PATH = "OEBPS/content.opf"
 
 -- Download cover image data for embedding in EPUB
-local function download_cover_image(cover_url)
+local function download_cover_image(cover_url, username, password)
     logger.info("PlaceholderGenerator: download_cover_image called with URL:", cover_url or "nil")
-    
-    if not cover_url or cover_url == "" then 
+
+    if not cover_url or cover_url == "" then
         logger.warn("PlaceholderGenerator: No cover URL provided")
-        return nil, nil, nil 
+        return nil, nil, nil
     end
-    
+
     local ok, https = pcall(require, "ssl.https")
     if not ok then
         logger.warn("PlaceholderGenerator: ssl.https not available")
         return nil, nil, nil
     end
-    
+
     logger.info("PlaceholderGenerator: Attempting to download cover from:", cover_url)
 
     local ltn12 = require("ltn12")
+    local mime = require("mime")
     local response_body = {}
+
+    -- Build headers with authentication if credentials provided
+    local headers = {
+        ["Cache-Control"] = "no-cache",
+        ["User-Agent"] = "KOReader/BookStack"
+    }
+
+    if username and password and username ~= "" and password ~= "" then
+        local credentials = mime.b64(username .. ":" .. password)
+        headers["Authorization"] = "Basic " .. credentials
+        logger.dbg("PlaceholderGenerator: Added authentication header for cover download")
+    end
 
     -- Simple HTTPS request without custom socket creation
     -- Note: Timeout is handled at a higher level by KOReader's network manager
-    local res, code, headers, status = https.request{
+    local res, code, headers_resp, status = https.request{
         url = cover_url,
         method = "GET",
         sink = ltn12.sink.table(response_body),
-        headers = {
-            ["Cache-Control"] = "no-cache",
-            ["User-Agent"] = "KOReader/BookStack"
-        }
+        headers = headers
     }
 
     logger.info("PlaceholderGenerator: Cover download response code:", code, "status:", status)
@@ -90,7 +100,7 @@ local function download_cover_image(cover_url)
 end
 
 -- Create a minimal EPUB placeholder file with embedded cover
-function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
+function PlaceholderGenerator:createMinimalEPUB(book_info, output_path, username, password)
     logger.info("PlaceholderGenerator: Creating EPUB placeholder for:", book_info.title)
 
     local book_title = Utils.safe_string(book_info.title, "Unknown Title")
@@ -102,10 +112,10 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
 
     -- Ensure output path ends with .epub
     output_path = output_path:gsub("%.html$", ".epub")
-    
-    -- Download cover image if available
+
+    -- Download cover image if available (with authentication)
     local cover_url = Utils.safe_string(book_info.cover_url, "")
-    local cover_data, cover_ext, cover_media_type = download_cover_image(cover_url)
+    local cover_data, cover_ext, cover_media_type = download_cover_image(cover_url, username, password)
     local has_cover = (cover_data ~= nil)
     local cover_filename = "cover." .. (cover_ext or "jpg")
     
