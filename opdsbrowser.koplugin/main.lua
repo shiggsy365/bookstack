@@ -119,15 +119,23 @@ function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
     
     logger.info("OPDSBrowser: Starting auto-download for:", book_info.title)
     
-    -- Close the current document FIRST before downloading
-    UIManager:scheduleIn(0.1, function()
+    -- CRITICAL: Close the document FIRST before downloading to avoid file locks
+    local ReaderUI = require("apps/reader/readerui")
+    if ReaderUI.instance then
+        logger.info("OPDSBrowser: Closing placeholder document before download")
+        UIManager:close(ReaderUI.instance)
+        ReaderUI.instance = nil
+    end
+    
+    -- Schedule download after brief delay to ensure document is fully closed
+    UIManager:scheduleIn(Constants.DOCUMENT_CLOSE_DELAY, function()
         -- Show brief notification (non-blocking)
         UIManager:show(require("ui/widget/notification"):new{
             text = T(_("Auto-downloading: %1"), book_info.title),
             timeout = 2,
         })
         
-        -- Immediately start download without confirmation
+        -- Start download without confirmation
         self:downloadFromPlaceholderAuto(filepath, book_info)
     end)
 end
@@ -154,19 +162,22 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         extension = ".kepub.epub"
     end
 
-    -- Download to temporary file first to avoid overwriting placeholder
-    local temp_filepath = placeholder_path:gsub("%.epub$", ".download.tmp")
+    -- IMPORTANT: Use unique temp file name with timestamp to avoid any conflicts
+    local timestamp = os.time()
+    local temp_filepath = placeholder_path:gsub("%.epub$", string.format(".downloading_%d.tmp", timestamp))
 
     -- Final filepath after placeholder is removed
+    -- If extension is same as placeholder (.epub), this will be the same as placeholder_path
+    -- That's OK because we delete the placeholder first, then rename temp to this location
     local filepath = placeholder_path:gsub("%.epub$", extension)
 
     -- Construct download URL
     local download_url = self.opds_url .. "/" .. book_id .. "/download"
 
     logger.info("OPDS: Auto-downloading:", book_info.title)
-    logger.info("OPDS: Placeholder:", placeholder_path)
-    logger.info("OPDS: Temp file:", temp_filepath)
-    logger.info("OPDS: Final EPUB:", filepath)
+    logger.info("OPDS: Placeholder path:", placeholder_path)
+    logger.info("OPDS: Temp download path:", temp_filepath)
+    logger.info("OPDS: Final book path:", filepath)
 
     local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
     UIManager:show(loading)
@@ -226,28 +237,43 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     file:write(data)
     file:close()
 
-    logger.info("OPDS: Wrote to temp file:", temp_filepath)
+    logger.info("OPDS: Wrote", #data, "bytes to temp file:", temp_filepath)
 
-    -- Now delete the placeholder
+    -- Verify temp file was written successfully
+    local temp_attr = lfs.attributes(temp_filepath)
+    if not temp_attr or temp_attr.mode ~= "file" then
+        logger.err("OPDS: Temp file was not created successfully")
+        UIHelpers.showError(_("Download succeeded but temp file not found\n\nPlaceholder will remain."))
+        return
+    end
+
+    logger.info("OPDS: Temp file verified, size:", temp_attr.size, "bytes")
+
+    -- NOW delete the placeholder (not the temp file!)
+    logger.info("OPDS: Deleting placeholder file:", placeholder_path)
     local delete_ok = os.remove(placeholder_path)
     if delete_ok then
-        logger.info("OPDS: Deleted placeholder:", placeholder_path)
+        logger.info("OPDS: Successfully deleted placeholder:", placeholder_path)
         -- Remove from placeholder database
         self.library_sync.placeholder_db[placeholder_path] = nil
         self.library_sync:savePlaceholderDB()
     else
-        logger.warn("OPDS: Failed to delete placeholder:", placeholder_path)
+        logger.warn("OPDS: Failed to delete placeholder:", placeholder_path, "- continuing anyway")
+        -- Continue even if deletion fails - we'll try to rename which might overwrite
     end
 
     -- Rename temp file to final location
+    logger.info("OPDS: Renaming temp file to final location:", filepath)
     local rename_ok = os.rename(temp_filepath, filepath)
     if not rename_ok then
         logger.err("OPDS: Failed to rename temp file to final location")
-        UIHelpers.showError(_("Download succeeded but file rename failed"))
+        logger.err("OPDS: Attempting to clean up temp file")
+        os.remove(temp_filepath)
+        UIHelpers.showError(_("Download succeeded but file rename failed\n\nPlease try again."))
         return
     end
 
-    logger.info("OPDS: Renamed temp file to:", filepath)
+    logger.info("OPDS: Successfully renamed temp file to:", filepath)
 
     -- Clear cached metadata for the new file
     pcall(function()
@@ -1444,13 +1470,8 @@ end
 function OPDSBrowser:buildPlaceholderLibrary()
     if not self:ensureNetwork() then return end
     
-    UIHelpers.createConfirmDialog(
-        _("Build Placeholder Library"),
-        _("This will fetch all books from your OPDS library and create placeholder files.\n\nThis may take several minutes.\n\nContinue?"),
-        function()
-            self:performLibrarySync()
-        end
-    )
+    -- Go straight to sync without confirmation dialog
+    self:performLibrarySync()
 end
 
 function OPDSBrowser:performLibrarySync()
@@ -1474,17 +1495,17 @@ function OPDSBrowser:performLibrarySync()
         return
     end
     
-    UIHelpers.updateProgressMessage(loading, T(_("Creating placeholders for %1 books..."), #books))
+    UIHelpers.updateProgressMessage(loading, T(_("Syncing %1 books..."), #books))
     UIManager:setDirty("all", "ui")
     
     local progress_count = 0
     local ok, result = self.library_sync:syncLibrary(books, function(current, total)
         progress_count = progress_count + 1
-        -- Update every 5 books instead of every 10 for more responsive UI
-        if progress_count % 5 == 0 then
-            UIHelpers.updateProgressMessage(loading, T(_("Creating placeholders... %1/%2"), current, total))
+        -- Update every 100 items for better performance with large libraries
+        if progress_count % 100 == 0 then
+            UIHelpers.updateProgressMessage(loading, T(_("Syncing... %1/%2"), current, total))
             UIManager:setDirty("all", "ui")
-            -- Force UI update to prevent freezing
+            -- Force UI update to show progress in real-time
             UIManager:forceRePaint()
         end
     end)
@@ -1499,11 +1520,13 @@ function OPDSBrowser:performLibrarySync()
     local summary = T(
         _("Library Sync Complete!\n\n") ..
         _("Created: %1\n") ..
-        _("Skipped: %2\n") ..
-        _("Failed: %3\n") ..
-        _("Total: %4\n\n") ..
-        _("Location: %5"),
-        result.created, result.skipped, result.failed, result.total,
+        _("Updated: %2\n") ..
+        _("Skipped: %3\n") ..
+        _("Failed: %4\n") ..
+        _("Orphans removed: %5\n") ..
+        _("Total: %6\n\n") ..
+        _("Location: %7"),
+        result.created, result.updated, result.skipped, result.failed, result.deleted_orphans, result.total,
         self.library_sync.base_library_path
     )
     

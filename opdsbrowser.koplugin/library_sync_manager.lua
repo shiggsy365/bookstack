@@ -123,9 +123,48 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
     local created = 0
     local skipped = 0
     local failed = 0
+    local updated = 0
+    local deleted_orphans = 0
     
     logger.info("LibrarySyncManager: Syncing", total_books, "books with new authors folder structure")
     
+    -- Create a lookup map of book IDs from remote library
+    local remote_book_ids = {}
+    for _, book in ipairs(books) do
+        if book.id then
+            remote_book_ids[book.id] = true
+        end
+    end
+    
+    -- First pass: Identify and remove orphaned placeholders
+    logger.info("LibrarySyncManager: Checking for orphaned placeholders")
+    local orphaned_paths = {}
+    for filepath, book_info in pairs(self.placeholder_db) do
+        local book_id = book_info.book_id
+        if book_id and not remote_book_ids[book_id] then
+            -- This placeholder's book no longer exists in remote library
+            table.insert(orphaned_paths, filepath)
+        end
+    end
+    
+    -- Delete orphaned placeholders
+    for _, filepath in ipairs(orphaned_paths) do
+        logger.info("LibrarySyncManager: Removing orphaned placeholder:", filepath)
+        local ok = os.remove(filepath)
+        if ok then
+            self.placeholder_db[filepath] = nil
+            deleted_orphans = deleted_orphans + 1
+        else
+            logger.warn("LibrarySyncManager: Failed to remove orphaned placeholder:", filepath)
+        end
+    end
+    
+    if deleted_orphans > 0 then
+        logger.info("LibrarySyncManager: Removed", deleted_orphans, "orphaned placeholders")
+        self:savePlaceholderDB()
+    end
+    
+    -- Second pass: Create/update placeholders for books in remote library
     for i, book in ipairs(books) do
         if progress_callback then
             progress_callback(i, total_books)
@@ -145,13 +184,112 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
         local filename = self:generateFilename(book)
         local filepath = target_dir .. "/" .. filename
         
-        -- Check if already exists
-        if lfs.attributes(filepath, "mode") == "file" then
-            skipped = skipped + 1
-            logger.dbg("LibrarySyncManager: Skipping existing:", filename)
+        -- Check if placeholder already exists
+        local existing_info = self.placeholder_db[filepath]
+        if existing_info then
+            -- Check if metadata has changed
+            local metadata_changed = false
+            if existing_info.title ~= book.title then
+                logger.info("LibrarySyncManager: Title changed:", existing_info.title, "->", book.title)
+                metadata_changed = true
+            end
+            if existing_info.author ~= book.author then
+                logger.info("LibrarySyncManager: Author changed:", existing_info.author, "->", book.author)
+                metadata_changed = true
+            end
+            if existing_info.series ~= book.series then
+                logger.info("LibrarySyncManager: Series changed:", existing_info.series or "none", "->", book.series or "none")
+                metadata_changed = true
+            end
+            if existing_info.series_index ~= book.series_index then
+                logger.info("LibrarySyncManager: Series index changed:", existing_info.series_index or "none", "->", book.series_index or "none")
+                metadata_changed = true
+            end
+            
+            if metadata_changed then
+                -- Metadata changed - need to regenerate placeholder
+                logger.info("LibrarySyncManager: Metadata changed, regenerating placeholder:", book.title)
+                
+                -- Delete old placeholder
+                local delete_ok = os.remove(filepath)
+                if not delete_ok then
+                    logger.warn("LibrarySyncManager: Failed to delete old placeholder for update:", filepath)
+                    failed = failed + 1
+                    goto continue
+                end
+                
+                -- Remove old entry from database
+                self.placeholder_db[filepath] = nil
+                
+                -- Regenerate with new metadata
+                -- Note: filename might be different if series changed, so recalculate
+                target_dir = self:getBookDirectory(book)
+                if not target_dir then
+                    failed = failed + 1
+                    logger.err("LibrarySyncManager: Failed to determine new directory for:", book.title)
+                    goto continue
+                end
+                
+                filename = self:generateFilename(book)
+                local new_filepath = target_dir .. "/" .. filename
+                
+                logger.dbg("LibrarySyncManager: Creating updated placeholder at:", new_filepath)
+                local ok = PlaceholderGenerator:createMinimalEPUB(book, new_filepath)
+                if ok then
+                    updated = updated + 1
+                    logger.dbg("LibrarySyncManager: Successfully updated:", filename)
+                    
+                    -- Store new mapping
+                    self.placeholder_db[new_filepath] = {
+                        book_id = book.id,
+                        title = book.title,
+                        author = book.author,
+                        series = book.series,
+                        series_index = book.series_index,
+                        download_url = book.download_url,
+                        cover_url = book.cover_url,
+                        summary = book.summary,
+                    }
+                    
+                    -- Save periodically
+                    if (updated + created) % 50 == 0 then
+                        logger.info("LibrarySyncManager: Progress - processed", updated + created, "items so far")
+                        self:savePlaceholderDB()
+                    end
+                else
+                    failed = failed + 1
+                    logger.err("LibrarySyncManager: Failed to update placeholder for:", book.title)
+                end
+            else
+                -- No metadata changes, skip
+                skipped = skipped + 1
+                logger.dbg("LibrarySyncManager: Skipping unchanged:", filename)
+            end
+        elseif lfs.attributes(filepath, "mode") == "file" then
+            -- File exists but not in database - this might be a downloaded book
+            -- Check if it's a placeholder
+            if PlaceholderGenerator:isPlaceholder(filepath) then
+                -- It's a placeholder but not in DB - add to DB
+                logger.info("LibrarySyncManager: Found placeholder not in DB, adding:", filepath)
+                self.placeholder_db[filepath] = {
+                    book_id = book.id,
+                    title = book.title,
+                    author = book.author,
+                    series = book.series,
+                    series_index = book.series_index,
+                    download_url = book.download_url,
+                    cover_url = book.cover_url,
+                    summary = book.summary,
+                }
+                skipped = skipped + 1
+            else
+                -- It's a real book (downloaded), don't touch it
+                logger.dbg("LibrarySyncManager: Skipping downloaded book:", filename)
+                skipped = skipped + 1
+            end
         else
-            -- Create placeholder
-            logger.dbg("LibrarySyncManager: Creating placeholder at:", filepath)
+            -- Create new placeholder
+            logger.dbg("LibrarySyncManager: Creating new placeholder at:", filepath)
             local ok = PlaceholderGenerator:createMinimalEPUB(book, filepath)
             if ok then
                 created = created + 1
@@ -186,12 +324,14 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
     -- Final save
     self:savePlaceholderDB()
     
-    logger.info("LibrarySyncManager: Sync complete - Created:", created, "Skipped:", skipped, "Failed:", failed)
+    logger.info("LibrarySyncManager: Sync complete - Created:", created, "Updated:", updated, "Skipped:", skipped, "Failed:", failed, "Orphans removed:", deleted_orphans)
     
     return true, {
         created = created,
+        updated = updated,
         skipped = skipped,
         failed = failed,
+        deleted_orphans = deleted_orphans,
         total = total_books
     }
 end
