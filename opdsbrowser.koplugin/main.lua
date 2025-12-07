@@ -307,6 +307,31 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     logger.info("OPDS:   Temp file path:", temp_filepath)
     logger.info("OPDS:   Final file path:", filepath)
 
+    -- CRITICAL: Verify the temp file is NOT a placeholder before we proceed
+    local PlaceholderGenerator = require("placeholder_generator")
+    local temp_is_placeholder = PlaceholderGenerator:isPlaceholder(temp_filepath)
+    logger.info("OPDS: Checking if downloaded temp file is placeholder:", temp_is_placeholder)
+
+    if temp_is_placeholder then
+        logger.err("OPDS: ERROR - Downloaded file is a placeholder!")
+        logger.err("OPDS: The server sent us a placeholder instead of the real book")
+        logger.err("OPDS: Download URL may be incorrect or server returned wrong content")
+        os.remove(temp_filepath)
+        UIHelpers.showError(_("Download failed: Server returned a placeholder instead of the book.\n\nPlease try downloading manually or contact support."))
+
+        -- Return to file manager
+        local FileManager = require("apps/filemanager/filemanager")
+        if not FileManager.instance then
+            local dir = placeholder_path:match("(.*/)")
+            FileManager:showFiles(dir)
+        else
+            FileManager.instance:onRefresh()
+        end
+        return
+    end
+
+    logger.info("OPDS: Verified - temp file is a real book (not placeholder)")
+
     -- Delete the placeholder file
     logger.info("OPDS: Deleting placeholder file:", placeholder_path)
     local delete_ok = os.remove(placeholder_path)
@@ -341,15 +366,40 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
 
     logger.info("OPDS: Successfully renamed temp file to:", filepath)
 
-    -- Verify the downloaded file exists
+    -- Verify the downloaded file exists and has content
     local final_attr = lfs.attributes(filepath)
-    logger.info("OPDS: Verifying final file - exists:", final_attr ~= nil, "mode:", final_attr and final_attr.mode)
+    logger.info("OPDS: Verifying final file - exists:", final_attr ~= nil, "mode:", final_attr and final_attr.mode, "size:", final_attr and final_attr.size)
 
     if not final_attr or final_attr.mode ~= "file" then
         logger.err("OPDS: Downloaded file not found at:", filepath)
         UIHelpers.showError(_("Download succeeded but file not found"))
         return
     end
+
+    -- CRITICAL: Verify the file is NOT still a placeholder
+    local PlaceholderGenerator = require("placeholder_generator")
+    local still_placeholder = PlaceholderGenerator:isPlaceholder(filepath)
+    logger.info("OPDS: Checking if final file is placeholder:", still_placeholder)
+
+    if still_placeholder then
+        logger.err("OPDS: ERROR - Downloaded file is still a placeholder!")
+        logger.err("OPDS: This means the real book didn't replace the placeholder properly")
+        logger.err("OPDS: Temp file size was:", lfs.attributes(temp_filepath) and lfs.attributes(temp_filepath).size or "unknown")
+        logger.err("OPDS: Final file size is:", final_attr.size)
+        UIHelpers.showError(_("Download succeeded but file replacement failed.\n\nThe book is still a placeholder."))
+
+        -- Return to file manager
+        local FileManager = require("apps/filemanager/filemanager")
+        if not FileManager.instance then
+            local dir = placeholder_path:match("(.*/)")
+            FileManager:showFiles(dir)
+        else
+            FileManager.instance:onRefresh()
+        end
+        return
+    end
+
+    logger.info("OPDS: Verified - final file is a real book (not placeholder)")
 
     -- Clear placeholder cache
     if self.placeholder_badge then

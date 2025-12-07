@@ -146,12 +146,30 @@ end
 function PlaceholderBadge:registerPatch()
     local placeholder_gen = self.placeholder_generator
 
+    -- Check if userpatch is available
+    local has_userpatch, userpatch_module = pcall(require, "userpatch")
+    if not has_userpatch then
+        logger.warn("PlaceholderBadge: userpatch module not available - badges will not work")
+        logger.warn("PlaceholderBadge: This is normal if you're not using a modified KOReader build")
+        return false
+    end
+
     -- Register patch function that will be called when CoverBrowser loads
-    userpatch.registerPatchPluginFunc("coverbrowser", function(plugin)
-        patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
+    local ok = pcall(function()
+        userpatch_module.registerPatchPluginFunc("coverbrowser", function(plugin)
+            logger.info("PlaceholderBadge: CoverBrowser loaded, applying patch now")
+            patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
+        end)
     end)
 
-    logger.info("PlaceholderBadge: Registered CoverBrowser patch")
+    if ok then
+        logger.info("PlaceholderBadge: Successfully registered CoverBrowser patch")
+        logger.info("PlaceholderBadge: Badge will appear when CoverBrowser plugin is enabled and in mosaic view")
+        return true
+    else
+        logger.warn("PlaceholderBadge: Failed to register patch with userpatch")
+        return false
+    end
 end
 
 -- Check if file is a placeholder (for external use)
