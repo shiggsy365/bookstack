@@ -68,6 +68,10 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
             is_placeholder = placeholder_gen:isPlaceholder(self.filepath)
             placeholder_cache[self.filepath] = is_placeholder
 
+            if is_placeholder then
+                logger.dbg("PlaceholderBadge: Found placeholder, adding badge:", self.filepath)
+            end
+
             -- Simple cache size management
             local cache_size = 0
             for _ in pairs(placeholder_cache) do
@@ -87,26 +91,27 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         -- Get the cover image widget
         local target = self[1][1][1]
         if not target or not target.dimen then
+            logger.dbg("PlaceholderBadge: No target or dimen for badge")
             return
         end
 
-        -- Badge configuration (similar to percent badge)
-        local BADGE_W  = Screen:scaleBySize(60)  -- badge width
-        local BADGE_H  = Screen:scaleBySize(28)  -- badge height
-        local INSET_X  = Screen:scaleBySize(5)   -- push inward from the left edge
-        local INSET_Y  = Screen:scaleBySize(5)   -- push down from the top
-        local TEXT_PAD = Screen:scaleBySize(4)   -- breathing room inside the badge
+        -- Badge configuration (more visible than before)
+        local BADGE_W  = Screen:scaleBySize(70)  -- badge width - larger
+        local BADGE_H  = Screen:scaleBySize(35)  -- badge height - larger
+        local INSET_X  = Screen:scaleBySize(3)   -- push inward from the left edge
+        local INSET_Y  = Screen:scaleBySize(3)   -- push down from the top
+        local TEXT_PAD = Screen:scaleBySize(6)   -- breathing room inside the badge
 
-        -- Use a down arrow character or cloud symbol
-        local cloud_text = "⬇"  -- Down arrow, or use "☁" for cloud
+        -- Use a down arrow character (more visible than cloud)
+        local cloud_text = "⬇"  -- Down arrow
 
-        local font_size = Screen:scaleBySize(18)
+        local font_size = Screen:scaleBySize(22)  -- Larger font
         local cloud_widget = TextWidget:new{
             text = cloud_text,
             font_size = font_size,
             face = Font:getFace("cfont", font_size),
             alignment = "center",
-            fgcolor = Blitbuffer.COLOR_WHITE,
+            fgcolor = Blitbuffer.COLOR_BLACK,  -- Black for better contrast
             bold = true,
         }
 
@@ -118,10 +123,11 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         local by = fy + INSET_Y
         bx, by = math.floor(bx), math.floor(by)
 
-        -- Create a blue background frame for the badge
+        -- Create a light blue/cyan background frame for the badge (more visible)
         local badge_bg = FrameContainer:new{
             background = Blitbuffer.COLOR_LIGHT_GRAY,
-            bordersize = 0,
+            bordersize = Size.border.thin,
+            border = Blitbuffer.COLOR_DARK_GRAY,
             padding = TEXT_PAD,
             width = BADGE_W,
             height = BADGE_H,
@@ -130,6 +136,7 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
 
         -- Paint the badge
         badge_bg:paintTo(bb, bx, by)
+        logger.dbg("PlaceholderBadge: Painted badge at", bx, by, "for", self.filepath)
     end
 
     logger.info("PlaceholderBadge: Successfully patched CoverBrowser")
