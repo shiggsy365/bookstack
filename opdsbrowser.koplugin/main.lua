@@ -76,6 +76,199 @@ function OPDSBrowser:init()
     logger.info("OPDS Browser: Initialized with improved architecture")
 end
 
+-- Hook for when a document is opened
+function OPDSBrowser:onReaderReady()
+    logger.dbg("OPDSBrowser: onReaderReady triggered")
+    
+    -- Get the currently opened document
+    local ReaderUI = require("apps/reader/readerui")
+    if not ReaderUI.instance or not ReaderUI.instance.document then
+        return
+    end
+    
+    local current_file = ReaderUI.instance.document.file
+    logger.dbg("OPDSBrowser: Document opened:", current_file)
+    
+    -- Check if this is a placeholder
+    if PlaceholderGenerator:isPlaceholder(current_file) then
+        logger.info("OPDSBrowser: Detected placeholder file:", current_file)
+        -- Delay slightly to let the reader UI fully initialize
+        UIManager:scheduleIn(0.5, function()
+            self:handlePlaceholderAutoDownload(current_file)
+        end)
+    end
+end
+
+-- Handle auto-download from placeholder
+function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
+    -- Get book info from placeholder database
+    local book_info = self.library_sync:getBookInfo(filepath)
+    
+    if not book_info then
+        logger.warn("OPDSBrowser: Placeholder not found in database:", filepath)
+        UIHelpers.showError(_("Placeholder information not found.\n\nPlease use the manual download option."))
+        return
+    end
+    
+    logger.info("OPDSBrowser: Auto-downloading book:", book_info.title)
+    
+    -- Show confirmation dialog
+    UIHelpers.createConfirmDialog(
+        _("Download Book"),
+        T(_("This is a placeholder for:\n\n%1\nby %2\n\nDownload the book now?"), 
+          book_info.title, book_info.author or "Unknown Author"),
+        function()
+            self:downloadFromPlaceholderAuto(filepath, book_info)
+        end
+    )
+end
+
+-- Download from placeholder with auto-replacement
+function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
+    if not self:ensureNetwork() then return end
+    
+    -- Ensure download directory exists
+    local dir_exists = lfs.attributes(self.download_dir, "mode") == "directory"
+    if not dir_exists then
+        local ok = lfs.mkdir(self.download_dir)
+        if not ok then
+            UIHelpers.showError(_("Failed to create download directory"))
+            return
+        end
+    end
+
+    -- Extract book ID
+    local book_id = book_info.book_id
+    if book_id then
+        book_id = book_id:match("book:(%d+)$") or book_id
+    end
+    
+    if not book_id or book_id == "" then
+        logger.err("OPDS: No book ID found in placeholder info")
+        UIHelpers.showError(_("Cannot download: Book ID not found"))
+        return
+    end
+
+    -- Determine file extension
+    local extension = ".epub"
+    if book_info.download_url and book_info.download_url:lower():match("kepub") then
+        extension = ".kepub.epub"
+    end
+
+    -- Generate safe filename
+    local title = book_info.title or "Unknown"
+    local filename = title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. extension
+    local filepath = self.download_dir .. "/" .. filename
+    
+    -- Construct download URL
+    local download_url = self.opds_url .. "/" .. book_id .. "/download"
+    
+    logger.info("OPDS: Auto-downloading:", book_info.title, "to", filepath)
+
+    local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
+    UIManager:show(loading)
+    
+    -- Download with progress
+    local user = (self.opds_username and self.opds_username ~= "") and self.opds_username or nil
+    local pass = (self.opds_password and self.opds_password ~= "") and self.opds_password or nil
+    
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    local mime = require("mime")
+    
+    local response_body = {}
+    local headers = {
+        ["Cache-Control"] = "no-cache, no-store, must-revalidate",
+        ["Pragma"] = "no-cache",
+        ["Expires"] = "0"
+    }
+    
+    if user and pass then
+        local credentials = mime.b64(user .. ":" .. pass)
+        headers["Authorization"] = "Basic " .. credentials
+    end
+    
+    local res, code, response_headers = https.request{
+        url = download_url,
+        method = "GET",
+        headers = headers,
+        sink = ltn12.sink.table(response_body)
+    }
+    
+    UIManager:close(loading)
+    
+    if not res or code ~= 200 then
+        logger.err("OPDS: Download failed with code:", code)
+        UIHelpers.showError(T(_("Download failed: HTTP %1\n\nPlaceholder will remain."), code or "error"))
+        return
+    end
+    
+    local data = table.concat(response_body)
+    logger.info("OPDS: Downloaded", #data, "bytes")
+    
+    if #data < 100 then
+        UIHelpers.showError(_("Downloaded file appears invalid (too small)\n\nPlaceholder will remain."))
+        return
+    end
+    
+    -- Write to file
+    local file, err = io.open(filepath, "wb")
+    if not file then
+        logger.err("OPDS: Failed to open file for writing:", err)
+        UIHelpers.showError(T(_("Failed to create file: %1\n\nPlaceholder will remain."), err or "unknown"))
+        return
+    end
+    
+    file:write(data)
+    file:close()
+    
+    -- Clear cached metadata for the new file
+    pcall(function()
+        local DocSettings = require("docsettings")
+        DocSettings:open(filepath):purge()
+    end)
+    
+    logger.info("OPDS: Successfully downloaded book, replacing placeholder")
+    
+    -- Close the current document (placeholder)
+    local ReaderUI = require("apps/reader/readerui")
+    if ReaderUI.instance then
+        UIManager:scheduleIn(0.2, function()
+            ReaderUI.instance:onClose()
+            
+            -- Delete the placeholder
+            UIManager:scheduleIn(0.2, function()
+                local ok = os.remove(placeholder_path)
+                if ok then
+                    logger.info("OPDS: Deleted placeholder:", placeholder_path)
+                else
+                    logger.warn("OPDS: Failed to delete placeholder:", placeholder_path)
+                end
+                
+                -- Remove from placeholder database
+                self.library_sync.placeholder_db[placeholder_path] = nil
+                self.library_sync:savePlaceholderDB()
+                
+                -- Show success and open the new book
+                UIHelpers.showSuccess(T(_("Downloaded: %1\n\nOpening book..."), book_info.title))
+                
+                -- Open the downloaded book
+                UIManager:scheduleIn(0.5, function()
+                    ReaderUI:showReader(filepath)
+                    
+                    -- Refresh file manager
+                    UIManager:scheduleIn(0.5, function()
+                        local FileManager = require("apps/filemanager/filemanager")
+                        if FileManager.instance then
+                            FileManager.instance:onRefresh()
+                        end
+                    end)
+                end)
+            end)
+        end)
+    end
+end
+
 function OPDSBrowser:addToMainMenu(menu_items)
     menu_items.opdsbrowser = {
         text = _("Cloud Book Library"),

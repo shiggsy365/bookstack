@@ -39,6 +39,14 @@ function LibrarySyncManager:createFolderStructure()
         return false
     end
     
+    -- Create library directory (where placeholders are stored)
+    local library_path = self.base_library_path .. "/library"
+    ok, err = lfs.mkdir(library_path)
+    if not ok and err ~= "File exists" then
+        logger.err("LibrarySyncManager: Failed to create library directory:", library_path, err)
+        return false
+    end
+    
     -- Create Authors directory
     local authors_path = self.base_library_path .. "/Authors"
     ok, err = lfs.mkdir(authors_path)
