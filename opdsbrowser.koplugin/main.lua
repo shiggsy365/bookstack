@@ -282,7 +282,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
             ReaderUI.instance = nil
             
             -- Small delay before opening file manager
-            UIManager:scheduleIn(0.5, function()
+            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
                 -- Switch to file manager at the book's directory
                 local FileManager = require("apps/filemanager/filemanager")
                 
@@ -296,7 +296,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
                 end
                 
                 -- Additional delay to ensure UI is ready, then refresh again
-                UIManager:scheduleIn(0.3, function()
+                UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_FINAL_REFRESH_DELAY, function()
                     if FileManager.instance then
                         FileManager.instance:onRefresh()
                         logger.info("OPDS: File browser refreshed, showing downloaded book")
