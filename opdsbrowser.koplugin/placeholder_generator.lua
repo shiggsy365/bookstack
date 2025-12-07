@@ -13,7 +13,10 @@ local CONTENT_OPF_PATH = "OEBPS/content.opf"
 
 -- Download cover image data for embedding in EPUB
 local function download_cover_image(cover_url)
+    logger.info("PlaceholderGenerator: download_cover_image called with URL:", cover_url or "nil")
+    
     if not cover_url or cover_url == "" then 
+        logger.warn("PlaceholderGenerator: No cover URL provided")
         return nil, nil, nil 
     end
     
@@ -22,6 +25,8 @@ local function download_cover_image(cover_url)
         logger.warn("PlaceholderGenerator: ssl.https not available")
         return nil, nil, nil
     end
+    
+    logger.info("PlaceholderGenerator: Attempting to download cover from:", cover_url)
     
     local ltn12 = require("ltn12")
     local response_body = {}
@@ -33,6 +38,8 @@ local function download_cover_image(cover_url)
         headers = { ["Cache-Control"] = "no-cache" }
     }
     
+    logger.info("PlaceholderGenerator: Cover download response code:", code)
+    
     if not res or code ~= 200 then
         logger.warn("PlaceholderGenerator: Failed to download cover:", code)
         return nil, nil, nil
@@ -40,6 +47,8 @@ local function download_cover_image(cover_url)
     
     local data = table.concat(response_body)
     local size = #data
+    
+    logger.info("PlaceholderGenerator: Cover download size:", size, "bytes")
     
     -- Only use if size <= MAX_COVER_SIZE
     if size > MAX_COVER_SIZE then
@@ -63,7 +72,7 @@ local function download_cover_image(cover_url)
         media_type = "image/webp"
     end
     
-    logger.info("PlaceholderGenerator: Downloaded cover:", size, "bytes, type:", media_type)
+    logger.info("PlaceholderGenerator: Cover downloaded successfully:", size, "bytes, type:", media_type)
     
     return data, ext, media_type
 end
@@ -86,6 +95,10 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     local cover_data, cover_ext, cover_media_type = download_cover_image(cover_url)
     local has_cover = (cover_data ~= nil)
     local cover_filename = "cover." .. (cover_ext or "jpg")
+    
+    logger.info("PlaceholderGenerator: Cover URL:", cover_url)
+    logger.info("PlaceholderGenerator: Cover data:", cover_data ~= nil, "ext:", cover_ext, "type:", cover_media_type)
+    logger.info("PlaceholderGenerator: has_cover:", has_cover)
     
     -- Build container.xml
     local container_xml = [[<?xml version="1.0" encoding="UTF-8"?>
@@ -211,15 +224,19 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     
     -- Add cover image if we have it (compressed, binary data)
     if has_cover then
-        logger.info("PlaceholderGenerator: Adding cover image, size:", #cover_data, "bytes")
-        if not writer:addFileFromMemory("OEBPS/" .. cover_filename, cover_data) then
-            logger.warn("PlaceholderGenerator: Failed to write cover image")
+        logger.info("PlaceholderGenerator: Adding cover to EPUB, filename:", cover_filename, "size:", #cover_data, "bytes")
+        local cover_path_in_epub = "OEBPS/" .. cover_filename
+        logger.info("PlaceholderGenerator: Cover path in EPUB:", cover_path_in_epub)
+        
+        if not writer:addFileFromMemory(cover_path_in_epub, cover_data) then
+            logger.err("PlaceholderGenerator: Failed to write cover image to EPUB")
             -- Continue anyway, cover is optional
         else
-            logger.info("PlaceholderGenerator: Successfully added cover image:", cover_filename)
+            logger.info("PlaceholderGenerator: Successfully added cover image to EPUB")
         end
     else
-        logger.warn("PlaceholderGenerator: No cover image available for:", book_info.title)
+        logger.warn("PlaceholderGenerator: No cover image to add for:", book_info.title)
+        logger.warn("PlaceholderGenerator: cover_url was:", Utils.safe_string(book_info.cover_url, "empty"))
     end
     
     -- Close the archive
