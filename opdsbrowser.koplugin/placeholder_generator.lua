@@ -174,7 +174,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
 </body>
 </html>]]
     
-    -- Create EPUB zip file using mupdf_wrapper
+    -- Create EPUB zip file using mupdf ZIP API
     -- IMPORTANT: mimetype MUST be first and uncompressed for EPUB spec compliance
     local zw = mupdf.zipWriterOpen(output_path)
     if not zw then
