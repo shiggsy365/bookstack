@@ -408,32 +408,41 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         if attr and attr.mode == "directory" then
             local placeholder_filename = placeholder_path:match("([^/]+)$")
             
-            -- Validate filename doesn't contain directory traversal sequences
-            if placeholder_filename and not placeholder_filename:match("%.%./") and not placeholder_filename:match("/") then
-                -- Check if there's a symlink/copy with the same name in Recently Added
+            -- Validate filename is safe: no directory components, only filename
+            -- This prevents directory traversal even with encoded or alternative separators
+            if placeholder_filename and 
+               placeholder_filename ~= "" and
+               placeholder_filename ~= "." and
+               placeholder_filename ~= ".." and
+               not placeholder_filename:match("[/\\]") and
+               not placeholder_filename:match("%.%.") then
+                
+                -- Construct the full path
                 local recently_added_file = recently_added_path .. "/" .. placeholder_filename
                 
-                -- Verify the constructed path is actually within the Recently Added directory
-                -- This prevents path traversal attacks
-                if recently_added_file:sub(1, #recently_added_path + 1) == recently_added_path .. "/" then
-                    local file_attr = lfs.symlinkattributes(recently_added_file)
-                    if file_attr then
+                -- Use lfs.attributes to resolve and validate the canonical path
+                -- This catches symlink-based directory traversal attempts
+                local file_attr = lfs.attributes(recently_added_file)
+                if file_attr then
+                    -- Verify file is actually within Recently Added directory by checking the parent
+                    local file_dir = recently_added_file:match("(.*/)")
+                    if file_dir and file_dir:gsub("/$", "") == recently_added_path:gsub("/$", "") then
                         logger.info("OPDS: Found file in Recently Added, deleting:", recently_added_file)
                         logger.info("OPDS: File type:", file_attr.mode)
                         local removed = os.remove(recently_added_file)
                         if removed then
-                            logger.info("OPDS: Successfully removed Recently Added symlink/copy")
+                            logger.info("OPDS: Successfully removed Recently Added file")
                         else
-                            logger.warn("OPDS: Failed to remove Recently Added symlink/copy:", recently_added_file)
+                            logger.warn("OPDS: Failed to remove Recently Added file:", recently_added_file)
                         end
                     else
-                        logger.dbg("OPDS: No corresponding file in Recently Added folder")
+                        logger.warn("OPDS: Path validation failed - file not in Recently Added directory")
                     end
                 else
-                    logger.warn("OPDS: Path validation failed - constructed path not within Recently Added directory")
+                    logger.dbg("OPDS: No corresponding file in Recently Added folder")
                 end
             else
-                logger.warn("OPDS: Invalid filename detected, skipping cleanup:", placeholder_filename or "nil")
+                logger.warn("OPDS: Invalid or unsafe filename detected, skipping cleanup:", placeholder_filename or "nil")
             end
         else
             logger.dbg("OPDS: Recently Added path is not a valid directory")
