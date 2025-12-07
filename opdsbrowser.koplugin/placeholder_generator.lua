@@ -165,36 +165,92 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         cover_guide
     )
     
-    -- Build cover.xhtml
+    -- Build cover.xhtml with book details
+    local book_summary = Utils.html_escape(Utils.safe_string(book_info.summary, "No description available."))
+
     local cover_xhtml
     if has_cover then
-        -- Include the cover image in the cover page
+        -- Include cover image and book details
         cover_xhtml = string.format([[<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <title>Cover</title>
+  <title>%s</title>
   <style type="text/css">
-    body { margin: 0; padding: 0; text-align: center; }
-    img { max-width: 100%%; max-height: 100%%; }
+    body { margin: 20px; font-family: serif; }
+    .cover { text-align: center; margin-bottom: 20px; }
+    img { max-width: 100%%; max-height: 400px; }
+    h1 { font-size: 1.5em; margin: 10px 0; }
+    .author { font-style: italic; color: #666; margin-bottom: 20px; }
+    .series { color: #0066cc; margin-bottom: 10px; }
+    .description { line-height: 1.6; text-align: justify; }
+    .notice { background: #ffffcc; padding: 10px; margin: 20px 0; border-left: 4px solid #ffcc00; }
   </style>
 </head>
 <body>
-  <img src="%s" alt="Cover"/>
+  <div class="cover">
+    <img src="%s" alt="Cover"/>
+  </div>
+  <h1>%s</h1>
+  <div class="author">by %s</div>
+  %s
+  <div class="notice">
+    <strong>Auto-Download Placeholder</strong><br/>
+    This book will automatically download when you open it.
+  </div>
+  <div class="description">
+    %s
+  </div>
 </body>
-</html>]], cover_filename)
+</html>]],
+            Utils.html_escape(book_title),
+            cover_filename,
+            Utils.html_escape(book_title),
+            Utils.html_escape(book_author),
+            series ~= "" and string.format('<div class="series">%s%s</div>',
+                Utils.html_escape(series),
+                series_index ~= "" and " #" .. Utils.html_escape(series_index) or ""
+            ) or "",
+            book_summary
+        )
     else
-        -- Blank placeholder (no cover available)
-        cover_xhtml = [[<?xml version="1.0" encoding="UTF-8"?>
+        -- No cover, just show book details
+        cover_xhtml = string.format([[<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <title>Auto-Download Placeholder</title>
+  <title>%s</title>
+  <style type="text/css">
+    body { margin: 20px; font-family: serif; }
+    h1 { font-size: 1.5em; margin: 10px 0; }
+    .author { font-style: italic; color: #666; margin-bottom: 20px; }
+    .series { color: #0066cc; margin-bottom: 10px; }
+    .description { line-height: 1.6; text-align: justify; }
+    .notice { background: #ffffcc; padding: 10px; margin: 20px 0; border-left: 4px solid #ffcc00; }
+  </style>
 </head>
 <body>
-  <p>This is a placeholder book. It will auto-download when opened.</p>
+  <h1>%s</h1>
+  <div class="author">by %s</div>
+  %s
+  <div class="notice">
+    <strong>Auto-Download Placeholder</strong><br/>
+    This book will automatically download when you open it.
+  </div>
+  <div class="description">
+    %s
+  </div>
 </body>
-</html>]]
+</html>]],
+            Utils.html_escape(book_title),
+            Utils.html_escape(book_title),
+            Utils.html_escape(book_author),
+            series ~= "" and string.format('<div class="series">%s%s</div>',
+                Utils.html_escape(series),
+                series_index ~= "" and " #" .. Utils.html_escape(series_index) or ""
+            ) or "",
+            book_summary
+        )
     end
     
     -- Create EPUB zip file using Archiver.Writer API

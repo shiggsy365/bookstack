@@ -256,8 +256,8 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end)
 
     logger.info("OPDS: Successfully downloaded book, replaced placeholder")
-    
-    -- Switch to the downloaded book
+
+    -- Close current document and return to file manager
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
         -- Verify the downloaded file exists
@@ -267,18 +267,24 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
             return
         end
 
-        -- Switch to the new document
+        -- Show success message
+        UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+
+        -- Close the reader and return to file manager
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            ReaderUI.instance:switchDocument(filepath)
+            logger.info("OPDS: Closing reader and returning to file manager")
 
-            -- Show brief success message
-            UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+            -- Close the current document
+            ReaderUI.instance:onClose()
 
-            -- Refresh file manager in background
+            -- Refresh file manager to update metadata
             UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
                 local FileManager = require("apps/filemanager/filemanager")
                 if FileManager.instance then
+                    logger.info("OPDS: Refreshing file manager")
                     FileManager.instance:onRefresh()
+                else
+                    logger.warn("OPDS: FileManager instance not available")
                 end
             end)
         end)
