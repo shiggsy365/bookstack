@@ -23,6 +23,8 @@ local OPDSClient = require("opds_client")
 local HardcoverClient = require("hardcover_client")
 local EphemeraClient = require("ephemera_client")
 local HttpClient = require("http_client_new")
+local PlaceholderGenerator = require("placeholder_generator")
+local LibrarySyncManager = require("library_sync_manager")
 
 local OPDSBrowser = WidgetContainer:extend{
     name = "opdsbrowser",
@@ -59,6 +61,15 @@ function OPDSBrowser:init()
     self.ephemera_client = EphemeraClient:new()
     self.ephemera_client:setBaseURL(self.ephemera_url)
     
+    -- Initialize library sync
+    -- Use download_dir as base, create Library subfolder
+    local base_download_dir = settings.download_dir or "/mnt/us/books"
+    -- Remove trailing slash if present
+    base_download_dir = base_download_dir:gsub("/$", "")
+    local library_path = settings.library_sync_path or (base_download_dir .. "/Library")
+    LibrarySyncManager:init(library_path)
+    self.library_sync = LibrarySyncManager
+    
     -- Queue refresh
     self.queue_refresh_action = nil
     
@@ -82,6 +93,19 @@ function OPDSBrowser:addToMainMenu(menu_items)
             { text = _("Library - Search"), 
               callback = function() self:searchLibrary() end, 
               enabled_func = function() return self.opds_url ~= "" end },
+            
+            { text = "────────────────────", enabled_func = function() return false end },
+            
+            -- Library Sync section
+            { text = _("Library Sync - Build Placeholder Library"), 
+              callback = function() self:buildPlaceholderLibrary() end, 
+              enabled_func = function() return self.opds_url ~= "" end },
+            { text = _("Library Sync - View Statistics"), 
+              callback = function() self:showLibrarySyncStats() end },
+            { text = _("Library Sync - Clear All Placeholders"), 
+              callback = function() self:clearPlaceholderLibrary() end },
+            { text = _("Library Sync - Download from Placeholder"), 
+              callback = function() self:downloadFromCurrentPlaceholder() end },
             
             { text = "────────────────────", enabled_func = function() return false end },
             
@@ -136,6 +160,7 @@ function OPDSBrowser:showSettings()
         { text = publisher_setting, hint = _("Use Publisher as Series? (YES/NO)"), input_type = "string" },
         { text = library_check_setting, hint = _("Check 'In Library' for Hardcover? (YES/NO)"), input_type = "string" },
         { text = tostring(self.library_check_page_limit), hint = _("Max pages to check (5=250 books, 0=unlimited)"), input_type = "number" },
+        { text = self.library_sync.base_library_path, hint = _("Library Sync Path"), input_type = "string" },
     }
     
     local extra_text = T(_("Hardcover API: %1\n\nTo configure Hardcover, edit:\nkoreader/settings/opdsbrowser.lua"), hardcover_status)
@@ -183,6 +208,14 @@ function OPDSBrowser:saveSettings(fields)
     self.enable_library_check = Utils.safe_boolean(fields[7], true)
     self.library_check_page_limit = Utils.safe_number(fields[8], Constants.DEFAULT_PAGE_LIMIT)
     
+    -- Update library sync path (use download_dir/Library unless user specified custom path)
+    local new_library_path = Utils.trim(fields[9] or "")
+    if new_library_path == "" or new_library_path == self.library_sync.base_library_path then
+        -- Use default: download_dir/Library
+        new_library_path = self.download_dir .. "/Library"
+    end
+    LibrarySyncManager:init(new_library_path)
+    
     -- Update settings
     SettingsManager:setAll({
         opds_url = self.opds_url,
@@ -193,6 +226,7 @@ function OPDSBrowser:saveSettings(fields)
         use_publisher_as_series = self.use_publisher_as_series,
         enable_library_check = self.enable_library_check,
         library_check_page_limit = self.library_check_page_limit,
+        library_sync_path = new_library_path,
     })
     
     -- Update clients
@@ -1408,6 +1442,159 @@ function OPDSBrowser:showBookmarks()
     self.bookmarks_menu = UIHelpers.createMenu(_("Bookmarks"), items)
     UIManager:show(self.bookmarks_menu)
 end
+
+-- ============================================================================
+-- LIBRARY SYNC FUNCTIONS
+-- ============================================================================
+
+-- Build placeholder library
+function OPDSBrowser:buildPlaceholderLibrary()
+    if not self:ensureNetwork() then return end
+    
+    UIHelpers.createConfirmDialog(
+        _("Build Placeholder Library"),
+        _("This will fetch all books from your OPDS library and create placeholder files.\n\nThis may take several minutes.\n\nContinue?"),
+        function()
+            self:performLibrarySync()
+        end
+    )
+end
+
+function OPDSBrowser:performLibrarySync()
+    local loading = UIHelpers.showLoading(_("Fetching library catalog..."))
+    UIManager:show(loading)
+    
+    local full_url = self.opds_url .. "/catalog"
+    local all_xml = self.opds_client:fetchAllPages(full_url, Constants.DEFAULT_PAGE_SIZE, 0)
+    
+    if not all_xml then
+        UIManager:close(loading)
+        UIHelpers.showError(_("Failed to fetch library catalog"))
+        return
+    end
+
+    local books = self.opds_client:parseBookloreOPDSFeed(all_xml, self.use_publisher_as_series)
+    
+    if #books == 0 then
+        UIManager:close(loading)
+        UIHelpers.showInfo(_("No books found in library"))
+        return
+    end
+    
+    UIHelpers.updateProgressMessage(loading, T(_("Creating placeholders for %1 books..."), #books))
+    UIManager:setDirty("all", "ui")
+    
+    local progress_count = 0
+    local ok, result = self.library_sync:syncLibrary(books, function(current, total)
+        progress_count = progress_count + 1
+        -- Update every 5 books instead of every 10 for more responsive UI
+        if progress_count % 5 == 0 then
+            UIHelpers.updateProgressMessage(loading, T(_("Creating placeholders... %1/%2"), current, total))
+            UIManager:setDirty("all", "ui")
+            -- Force UI update to prevent freezing
+            UIManager:forceRePaint()
+        end
+    end)
+    
+    UIManager:close(loading)
+    
+    if not ok then
+        UIHelpers.showError(T(_("Sync failed: %1"), result))
+        return
+    end
+    
+    local summary = T(
+        _("Library Sync Complete!\n\n") ..
+        _("Created: %1\n") ..
+        _("Skipped: %2\n") ..
+        _("Failed: %3\n") ..
+        _("Total: %4\n\n") ..
+        _("Location: %5"),
+        result.created, result.skipped, result.failed, result.total,
+        self.library_sync.base_library_path
+    )
+    
+    UIHelpers.showInfo(summary, 10)
+    
+    UIManager:scheduleIn(0.5, function()
+        local FileManager = require("apps/filemanager/filemanager")
+        if FileManager.instance then
+            FileManager.instance:onRefresh()
+        end
+    end)
+end
+
+function OPDSBrowser:showLibrarySyncStats()
+    local stats = self.library_sync:getStats()
+    
+    local details = T(
+        _("Library Sync Statistics\n\n") ..
+        _("Placeholders: %1\n") ..
+        _("DB Entries: %2\n") ..
+        _("Path: %3"),
+        stats.total_placeholders, stats.db_entries, stats.base_path
+    )
+    
+    local buttons = {
+        {{ text = _("Rebuild"), callback = function()
+            UIManager:close(self.stats_viewer)
+            self:buildPlaceholderLibrary()
+        end }},
+        {{ text = _("Close"), callback = function()
+            UIManager:close(self.stats_viewer)
+        end }},
+    }
+    
+    self.stats_viewer = UIHelpers.createTextViewer(_("Library Sync"), details, buttons)
+    UIManager:show(self.stats_viewer)
+end
+
+function OPDSBrowser:clearPlaceholderLibrary()
+    UIHelpers.createConfirmDialog(
+        _("Clear Library"),
+        _("Delete all placeholders?\n\nThis cannot be undone."),
+        function()
+            local loading = UIHelpers.showLoading(_("Clearing..."))
+            UIManager:show(loading)
+            self.library_sync:clearLibrary()
+            UIManager:close(loading)
+            UIHelpers.showSuccess(_("Cleared"))
+            
+            UIManager:scheduleIn(0.5, function()
+                local FileManager = require("apps/filemanager/filemanager")
+                if FileManager.instance then FileManager.instance:onRefresh() end
+            end)
+        end
+    )
+end
+
+function OPDSBrowser:downloadFromCurrentPlaceholder()
+    local ReaderUI = require("apps/reader/readerui")
+    local current_file = nil
+    
+    if ReaderUI.instance and ReaderUI.instance.document then
+        current_file = ReaderUI.instance.document.file
+    end
+    
+    if not current_file then
+        UIHelpers.showError(_("No document open"))
+        return
+    end
+    
+    local book_info = self.library_sync:getBookInfo(current_file)
+    
+    if not book_info then
+        UIHelpers.showError(_("Not a placeholder file"))
+        return
+    end
+    
+    logger.info("Downloading from placeholder:", book_info.title)
+    self:downloadBook(book_info)
+end
+
+-- ============================================================================
+-- END LIBRARY SYNC FUNCTIONS
+-- ============================================================================
 
 -- Cleanup functions
 function OPDSBrowser:onCloseDocument()
