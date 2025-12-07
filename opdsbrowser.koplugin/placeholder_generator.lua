@@ -14,6 +14,9 @@ local PlaceholderGenerator = {}
 -- Maximum cover image size to embed in EPUB (100KB)
 local MAX_COVER_SIZE = 100 * 1024
 
+-- EPUB internal paths
+local CONTENT_OPF_PATH = "OEBPS/content.opf"
+
 -- Download cover image data for embedding in EPUB
 local function download_cover_image(cover_url)
     if not cover_url or cover_url == "" then 
@@ -71,7 +74,7 @@ local function download_cover_image(cover_url)
     return data, ext, media_type
 end
 
--- Create a placeholder file (HTML format, no zip required)
+-- Create a minimal EPUB placeholder file with embedded cover
 function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     logger.info("PlaceholderGenerator: Creating EPUB placeholder for:", book_info.title)
 
@@ -189,6 +192,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     <dc:creator>%s</dc:creator>
     <dc:identifier id="bookid">%s</dc:identifier>
     <dc:language>en</dc:language>
+    <!-- Marker to identify this as a placeholder EPUB (checked by isPlaceholder()) -->
     <meta property="opdsbrowser:placeholder">true</meta>
     <meta property="opdsbrowser:book_id">%s</meta>
     <meta property="opdsbrowser:download_url">%s</meta>%s
@@ -305,18 +309,28 @@ function PlaceholderGenerator:isPlaceholder(filepath)
     -- A minimal EPUB with embedded cover should be < 200KB
     if attr.size < 200000 then
         -- Check if it's a valid EPUB by reading the content.opf for our marker
-        -- We need to extract and read the OEBPS/content.opf file from the zip
         local unzip_cmd = string.format('unzip -p %s %s 2>/dev/null', 
             shell_escape(filepath), 
-            shell_escape("OEBPS/content.opf"))
+            shell_escape(CONTENT_OPF_PATH))
         local handle = io.popen(unzip_cmd)
-        if handle then
-            local content = handle:read("*a") or ""
-            handle:close()
-            -- Check for our placeholder marker
-            if content:match("opdsbrowser:placeholder") then
-                return true
-            end
+        if not handle then
+            logger.warn("PlaceholderGenerator: Failed to execute unzip command for:", filepath)
+            return false
+        end
+        
+        local success, content = pcall(function()
+            return handle:read("*a") or ""
+        end)
+        handle:close()
+        
+        if not success then
+            logger.warn("PlaceholderGenerator: Failed to read content from:", filepath)
+            return false
+        end
+        
+        -- Check for our placeholder marker (set in createMinimalEPUB)
+        if content:match("opdsbrowser:placeholder") then
+            return true
         end
     end
 
