@@ -25,6 +25,7 @@ local EphemeraClient = require("ephemera_client")
 local HttpClient = require("http_client_new")
 local PlaceholderGenerator = require("placeholder_generator")
 local LibrarySyncManager = require("library_sync_manager")
+local PlaceholderBadge = require("placeholder_badge")
 
 local OPDSBrowser = WidgetContainer:extend{
     name = "opdsbrowser",
@@ -69,10 +70,19 @@ function OPDSBrowser:init()
     local library_path = settings.library_sync_path or (base_download_dir .. "/Library")
     LibrarySyncManager:init(library_path)
     self.library_sync = LibrarySyncManager
-    
+
+    -- Initialize placeholder badge system
+    self.placeholder_badge = PlaceholderBadge
+    local badge_ok = self.placeholder_badge:init(PlaceholderGenerator)
+    if badge_ok then
+        logger.info("OPDS Browser: Cloud badge overlay system initialized")
+    else
+        logger.warn("OPDS Browser: Cloud badge overlay system not available")
+    end
+
     -- Queue refresh
     self.queue_refresh_action = nil
-    
+
     logger.info("OPDS Browser: Initialized with improved architecture")
 end
 
@@ -283,6 +293,13 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
 
     logger.info("OPDS: Successfully downloaded book, replaced placeholder")
 
+    -- Clear placeholder cache for the old placeholder path
+    -- This ensures the cloud badge is removed on next file browser refresh
+    if self.placeholder_badge then
+        self.placeholder_badge:clearCache(placeholder_path)
+        self.placeholder_badge:clearCache(filepath)
+    end
+
     -- Verify the downloaded file exists
     if lfs.attributes(filepath, "mode") ~= "file" then
         logger.err("OPDS: Downloaded file not found at:", filepath)
@@ -291,42 +308,27 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end
 
     -- Show success message
-    UIHelpers.showSuccess(T(_("Downloaded: %1\n\nOpening book..."), book_info.title))
+    UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
 
-    -- Close the current document (placeholder) and open the downloaded book
-    local ReaderUI = require("apps/reader/readerui")
-    if ReaderUI.instance then
-        -- Schedule the close operation with proper event handling
-        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            logger.info("OPDS: Closing placeholder and opening downloaded book")
-            
-            -- Close the reader view properly
-            UIManager:close(ReaderUI.instance)
-            ReaderUI.instance = nil
-            
-            -- Small delay before opening the downloaded book
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_OPEN_DELAY, function()
-                -- Open the downloaded book
-                logger.info("OPDS: Opening downloaded book:", filepath)
-                
-                -- Use ReaderUI to open the book
-                ReaderUI:showReader(filepath)
-                
-                -- Schedule file manager refresh for when user closes the book
-                -- This ensures the metadata is updated in the file browser
-                UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_FINAL_REFRESH_DELAY, function()
-                    local FileManager = require("apps/filemanager/filemanager")
-                    if FileManager.instance then
-                        FileManager.instance:onRefresh()
-                        logger.info("OPDS: File browser metadata refreshed")
-                    end
-                end)
-            end)
-        end)
-    else
-        -- No reader instance, just show success
-        logger.info("OPDS: No reader instance, download complete")
-    end
+    -- Return to file manager to show the downloaded book
+    -- Note: ReaderUI was already closed before download started (line 126)
+    -- So we just need to ensure file manager is shown to prevent empty UI
+    UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
+        logger.info("OPDS: Returning to file browser after download")
+
+        local FileManager = require("apps/filemanager/filemanager")
+        local download_dir = filepath:match("(.*/)")
+
+        -- Ensure file manager is shown
+        if not FileManager.instance then
+            logger.info("OPDS: Starting file manager at:", download_dir)
+            FileManager:showFiles(download_dir)
+        else
+            logger.info("OPDS: Refreshing file manager at:", download_dir)
+            FileManager.instance:reinit(download_dir)
+            FileManager.instance:onRefresh()
+        end
+    end)
 end
 
 function OPDSBrowser:addToMainMenu(menu_items)

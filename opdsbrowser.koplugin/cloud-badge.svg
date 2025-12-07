@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- White background circle for better visibility -->
+  <circle cx="32" cy="32" r="30" fill="white" fill-opacity="0.9"/>
+  <!-- Cloud icon in blue -->
+  <path fill="#5AB8FF" d="M50,35c0-6.3-4.6-11.5-10.6-12.4c-1.6-6.5-7.5-11.3-14.5-11.3c-7.1,0-13,4.9-14.5,11.5 C4.9,24.2,0,29.5,0,35.9c0,6.9,5.6,12.6,12.6,12.6h24.2C44.3,48.4,50,42.7,50,35z"/>
+  <!-- Simplified cloud with white highlight for depth -->
+  <path fill="white" fill-opacity="0.3" d="M25,15c-6.5,0-12.1,4.4-13.5,10.7c-0.1,0.4-0.4,0.7-0.8,0.8C5.6,27.8,2,32.5,2,37.9 c0,6.4,5.2,11.5,11.5,11.5h24.1c6.3,0,11.4-5.2,11.4-11.5c0-5.6-4.2-10.5-9.8-11.4c-0.4-0.1-0.7-0.4-0.8-0.8 C36.8,19.2,31.3,15,25,15z"/>
+</svg>
