@@ -269,10 +269,20 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         -- Show success message
         UIHelpers.showSuccess(T(_("Downloaded: %1\n\nSwitching to full book..."), book_info.title))
  
-        -- Switch to the downloaded document
+        -- Close the document and refresh folder view to show metadata
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            logger.info("OPDS: Switching to downloaded book")
-            ReaderUI. instance:switchDocument(filepath)
+            logger.info("OPDS: Closing document and refreshing folder")
+            
+            -- Close the reader
+            ReaderUI.instance:onClose()
+            
+            -- Wait a moment, then refresh file manager to show new cover
+            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
+                local FileManager = require("apps/filemanager/filemanager")
+                if FileManager.instance then
+                    FileManager.instance:onRefresh()
+                end
+            end)
         end)
     else
         UIHelpers.showError(_("Document not available to switch"))
@@ -1477,6 +1487,9 @@ function OPDSBrowser:performLibrarySync()
     -- Update "Recently Added" collection with 20 newest books
     self:updateRecentlyAddedCollection(books)
 
+    -- Update "Currently Reading" collection
+    self:updateCurrentlyReadingCollection()
+
     UIManager:scheduleIn(0.5, function()
         local FileManager = require("apps/filemanager/filemanager")
         if FileManager.instance then
@@ -1514,11 +1527,16 @@ function OPDSBrowser:updateRecentlyAddedCollection(books)
         return
     end
 
-    -- Load ReadCollection plugin
+    -- Load ReadCollection plugin - ensure it's properly initialized
     local ok, ReadCollection = pcall(require, "apps/filemanager/readcollection")
     if not ok then
         logger.warn("OPDS: ReadCollection plugin not available")
         return
+    end
+    
+    -- Initialize collections if needed
+    if not ReadCollection.coll then
+        ReadCollection.coll = {}
     end
 
     -- Get or create the "Recently Added" collection
@@ -1529,6 +1547,7 @@ function OPDSBrowser:updateRecentlyAddedCollection(books)
     collections[coll_name] = {}
 
     -- Add book filepaths to collection
+    local added_count = 0
     for _, book in ipairs(recent_books) do
         -- Generate filepath for the placeholder
         local target_dir = self.library_sync:getBookDirectory(book)
@@ -1539,14 +1558,72 @@ function OPDSBrowser:updateRecentlyAddedCollection(books)
             -- Check if file exists
             if lfs.attributes(filepath, "mode") == "file" then
                 table.insert(collections[coll_name], filepath)
+                added_count = added_count + 1
                 logger.dbg("OPDS: Added to collection:", filepath)
+            else
+                logger.dbg("OPDS: File not found:", filepath)
             end
         end
     end
 
-    logger.info("OPDS: Added", #collections[coll_name], "books to 'Recently Added' collection")
+    logger.info("OPDS: Added", added_count, "books to 'Recently Added' collection")
 
-    -- Save the collection
+    -- Force save the collection
+    ReadCollection:saveCollections()
+end
+
+-- Create "Currently Reading" collection from ReadHistory
+function OPDSBrowser:updateCurrentlyReadingCollection()
+    logger.info("OPDS: Updating 'Currently Reading' collection")
+    
+    -- Load ReadHistory
+    local ok, ReadHistory = pcall(require, "readhistory")
+    if not ok then
+        logger.warn("OPDS: ReadHistory not available")
+        return
+    end
+    
+    -- Load ReadCollection plugin
+    local ok2, ReadCollection = pcall(require, "apps/filemanager/readcollection")
+    if not ok2 then
+        logger.warn("OPDS: ReadCollection plugin not available")
+        return
+    end
+    
+    -- Initialize collections if needed
+    if not ReadCollection.coll then
+        ReadCollection.coll = {}
+    end
+    
+    local coll_name = "Currently Reading"
+    local collections = ReadCollection.coll
+    collections[coll_name] = {}
+    
+    -- Check if ReadHistory has items
+    if not ReadHistory.hist or #ReadHistory.hist == 0 then
+        logger.info("OPDS: No items in ReadHistory")
+        ReadCollection:saveCollections()
+        return
+    end
+    
+    -- Get reading history
+    for _, item in ipairs(ReadHistory.hist) do
+        local filepath = item.file
+        -- Check if file still exists and has reading status
+        if lfs.attributes(filepath, "mode") == "file" then
+            local DocSettings = require("docsettings")
+            local doc_settings = DocSettings:open(filepath)
+            local summary = doc_settings:readSetting("summary")
+            
+            -- Include if status is "reading" (not "complete")
+            if summary and summary.status and summary.status == "reading" then
+                table.insert(collections[coll_name], filepath)
+                logger.dbg("OPDS: Added to Currently Reading:", filepath)
+            end
+        end
+    end
+    
+    logger.info("OPDS: Added", #collections[coll_name], "books to 'Currently Reading' collection")
     ReadCollection:saveCollections()
 end
 
