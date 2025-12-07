@@ -231,7 +231,7 @@ function LibrarySyncManager:getStats()
                 if attr then
                     if attr.mode == "directory" then
                         count_files(path)
-                    elseif attr.mode == "file" and file:match("%.html$") then
+                    elseif attr.mode == "file" and file:match("%.epub$") then
                         count = count + 1
                     end
                 end

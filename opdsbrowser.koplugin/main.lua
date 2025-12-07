@@ -145,8 +145,8 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         extension = ".kepub.epub"
     end
 
-    -- Use same directory as placeholder, just change extension from .html to .epub
-    local filepath = placeholder_path:gsub("%.html$", extension)
+    -- Use same directory as placeholder, just change extension from .epub to desired extension
+    local filepath = placeholder_path:gsub("%.epub$", extension)
     
     -- Construct download URL
     local download_url = self.opds_url .. "/" .. book_id .. "/download"
