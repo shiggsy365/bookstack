@@ -157,10 +157,9 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <title>Loading...</title>
+  <title>Auto-Download Placeholder</title>
 </head>
 <body>
-  <p></p>
 </body>
 </html>]]
     
