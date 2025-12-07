@@ -86,6 +86,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     local book_id = Utils.safe_string(book_info.id, "")
     local series = Utils.safe_string(book_info.series, "")
     local series_index = Utils.safe_string(book_info.series_index, "")
+    local description = Utils.safe_string(book_info.summary, "")
 
     -- Ensure output path ends with .epub
     output_path = output_path:gsub("%.html$", ".epub")
@@ -122,6 +123,13 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         end
     end
     
+    -- Build description metadata
+    local description_meta = ""
+    if description ~= "" then
+        description_meta = string.format([[
+    <dc:description>%s</dc:description>]], Utils.html_escape(description))
+    end
+    
     -- Build manifest entries
     local cover_manifest = ""
     local cover_guide = ""
@@ -140,7 +148,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     <dc:title>%s</dc:title>
     <dc:creator>%s</dc:creator>
     <dc:identifier id="bookid">%s</dc:identifier>
-    <dc:language>en</dc:language>
+    <dc:language>en</dc:language>%s
     <!-- Marker to identify this as a placeholder EPUB (checked by isPlaceholder()) -->
     <meta property="opdsbrowser:placeholder">true</meta>
     <meta property="opdsbrowser:book_id">%s</meta>
@@ -158,6 +166,7 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         Utils.html_escape(book_title),
         Utils.html_escape(book_author),
         Utils.html_escape(book_id),
+        description_meta,
         Utils.html_escape(book_id),
         Utils.html_escape(Utils.safe_string(book_info.download_url, "")),
         series_meta,
