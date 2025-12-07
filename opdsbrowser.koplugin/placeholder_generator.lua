@@ -9,6 +9,8 @@ local function shell_escape(str)
     return "'" .. str:gsub("'", "'\\''") .. "'"
 end
 
+local PlaceholderGenerator = {}
+
 -- Maximum cover image size to embed in EPUB (100KB)
 local MAX_COVER_SIZE = 100 * 1024
 
@@ -175,8 +177,8 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         cover_manifest = string.format([[
     <item id="cover-image" href="%s" media-type="%s" properties="cover-image"/>]], 
             cover_filename, cover_media_type or "image/jpeg")
-        cover_guide = string.format([[
-  <reference type="cover" title="Cover" href="%s"/>]], cover_filename)
+        cover_guide = [[
+  <reference type="cover" title="Cover" href="cover.xhtml"/>]]
     end
     
     -- Write content.opf
@@ -244,10 +246,11 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     xhtml_file:close()
     
     -- Create EPUB zip file
-    -- First, add mimetype uncompressed (-X)
-    -- Then add other files compressed
+    -- First, add mimetype uncompressed (-X -0 means no compression, store only)
+    -- Then add other files compressed (-r for recursive)
+    -- Both commands run from temp_dir, so paths are relative to it
     local zip_cmd = string.format(
-        'cd %s && zip -X0 %s mimetype && zip -r %s META-INF OEBPS',
+        'cd %s && zip -X -0 %s mimetype && zip -r %s META-INF OEBPS',
         shell_escape(temp_dir),
         shell_escape(output_path),
         shell_escape(output_path)
