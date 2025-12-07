@@ -359,26 +359,24 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
 
     logger.info("OPDS: Successfully downloaded book, opening:", filepath)
 
-    -- Open the downloaded book
+    -- Open the downloaded book IMMEDIATELY (no delay to prevent empty UI)
     local ReaderUI = require("apps/reader/readerui")
-    UIManager:scheduleIn(0.2, function()
-        ReaderUI:showReader(filepath)
+    ReaderUI:showReader(filepath)
 
-        -- Background: Clear cached metadata and refresh file manager
-        UIManager:scheduleIn(1, function()
-            -- Clear doc settings for the new file
-            pcall(function()
-                local DocSettings = require("docsettings")
-                DocSettings:open(filepath):purge()
-            end)
-
-            -- Refresh file manager in background
-            local FileManager = require("apps/filemanager/filemanager")
-            if FileManager.instance then
-                FileManager.instance:onRefresh()
-                logger.info("OPDS: Background metadata refresh complete")
-            end
+    -- Background: Clear cached metadata and refresh file manager
+    UIManager:scheduleIn(1, function()
+        -- Clear doc settings for the new file
+        pcall(function()
+            local DocSettings = require("docsettings")
+            DocSettings:open(filepath):purge()
         end)
+
+        -- Refresh file manager in background
+        local FileManager = require("apps/filemanager/filemanager")
+        if FileManager.instance then
+            FileManager.instance:onRefresh()
+            logger.info("OPDS: Background metadata refresh complete")
+        end
     end)
 end
 
