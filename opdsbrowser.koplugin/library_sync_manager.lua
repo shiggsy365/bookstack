@@ -9,11 +9,13 @@ local LibrarySyncManager = {
     settings_file = DataStorage:getSettingsDir() .. "/opdsbrowser_library_sync.lua",
     settings = nil,
     base_library_path = nil,
+    authors_path = nil,
     placeholder_db = {}, -- Maps filepath -> book_info
 }
 
 function LibrarySyncManager:init(base_path)
     self.base_library_path = base_path or "/mnt/us/opdslibrary"
+    self.authors_path = self.base_library_path .. "/authors"
     self.settings = LuaSettings:open(self.settings_file)
     self:loadPlaceholderDB()
     logger.info("LibrarySyncManager: Initialized with base path:", self.base_library_path)
@@ -30,6 +32,11 @@ function LibrarySyncManager:savePlaceholderDB()
     logger.info("LibrarySyncManager: Saved placeholder database")
 end
 
+-- Sanitize a string for use as a directory/file name
+function LibrarySyncManager:sanitizeFilename(str)
+    return str:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', '_')
+end
+
 -- Create the folder structure
 function LibrarySyncManager:createFolderStructure()
     -- Create base Library directory
@@ -40,10 +47,9 @@ function LibrarySyncManager:createFolderStructure()
     end
     
     -- Create authors directory (new structure - all books go under authors)
-    local authors_path = self.base_library_path .. "/authors"
-    ok, err = lfs.mkdir(authors_path)
+    ok, err = lfs.mkdir(self.authors_path)
     if not ok and err ~= "File exists" then
-        logger.err("LibrarySyncManager: Failed to create authors directory:", authors_path, err)
+        logger.err("LibrarySyncManager: Failed to create authors directory:", self.authors_path, err)
         return false
     end
     
@@ -53,13 +59,11 @@ end
 
 -- Get the target directory for a book based on author/series
 function LibrarySyncManager:getBookDirectory(book)
-    local authors_path = self.base_library_path .. "/authors"
-    
     -- Sanitize author name
     local author = Utils.safe_string(book.author, "Unknown Author")
-    local safe_author = author:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', '_')
+    local safe_author = self:sanitizeFilename(author)
     
-    local author_dir = authors_path .. "/" .. safe_author
+    local author_dir = self.authors_path .. "/" .. safe_author
     
     -- Create author directory if needed
     local ok, err = lfs.mkdir(author_dir)
@@ -74,7 +78,7 @@ function LibrarySyncManager:getBookDirectory(book)
     local target_dir
     if series ~= "" then
         -- Book is part of a series - create series subfolder
-        local safe_series = series:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', '_')
+        local safe_series = self:sanitizeFilename(series)
         target_dir = author_dir .. "/" .. safe_series
     else
         -- Standalone book - use 'standalones' subfolder
@@ -235,9 +239,8 @@ function LibrarySyncManager:getStats()
         end
     end
     
-    local authors_path = self.base_library_path .. "/authors"
-    if lfs.attributes(authors_path, "mode") == "directory" then
-        count_files(authors_path)
+    if lfs.attributes(self.authors_path, "mode") == "directory" then
+        count_files(self.authors_path)
     end
     
     return {

@@ -224,6 +224,13 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     -- Close the current document (placeholder) and open downloaded book in-place
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
+        -- Verify the downloaded EPUB exists before proceeding
+        if lfs.attributes(filepath, "mode") ~= "file" then
+            logger.err("OPDS: Downloaded file not found at:", filepath)
+            UIHelpers.showError(_("Download succeeded but file not found"))
+            return
+        end
+        
         -- Delete the placeholder first
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_DELETE_DELAY, function()
             local ok = os.remove(placeholder_path)
@@ -238,10 +245,16 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
             
             -- Close placeholder and open downloaded book immediately
             UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-                ReaderUI.instance:switchDocument(filepath)
-                
-                -- Show brief success message
-                UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+                -- Double-check file exists before switching
+                if lfs.attributes(filepath, "mode") == "file" then
+                    ReaderUI.instance:switchDocument(filepath)
+                    
+                    -- Show brief success message
+                    UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
+                else
+                    logger.err("OPDS: Cannot switch to document, file missing:", filepath)
+                    UIHelpers.showError(_("Downloaded book file is missing"))
+                end
                 
                 -- Refresh file manager in background
                 UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
