@@ -77,8 +77,9 @@ function OPDSBrowser:init()
 end
 
 -- Hook for when a document is opened
-function OPDSBrowser:onReaderReady()
+function OPDSBrowser:onReaderReady(config)
     logger.dbg("OPDSBrowser: onReaderReady triggered")
+    logger.info("OPDSBrowser: onReaderReady called with config:", config ~= nil)
     
     -- Get the currently opened document
     local ReaderUI = require("apps/reader/readerui")
@@ -101,6 +102,8 @@ end
 
 -- Handle auto-download from placeholder
 function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
+    logger.info("OPDSBrowser: handlePlaceholderAutoDownload called for:", filepath)
+    
     -- Get book info from placeholder database
     local book_info = self.library_sync:getBookInfo(filepath)
     
@@ -110,13 +113,19 @@ function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
         return
     end
     
-    logger.info("OPDSBrowser: Auto-downloading book:", book_info.title)
+    logger.info("OPDSBrowser: Starting auto-download for:", book_info.title)
     
-    -- Show brief notification but don't wait for confirmation
-    UIHelpers.showInfo(T(_("Auto-downloading: %1"), book_info.title), 2)
-    
-    -- Immediately start download without confirmation
-    self:downloadFromPlaceholderAuto(filepath, book_info)
+    -- Close the current document FIRST before downloading
+    UIManager:scheduleIn(0.1, function()
+        -- Show brief notification (non-blocking)
+        UIManager:show(require("ui/widget/notification"):new{
+            text = T(_("Auto-downloading: %1"), book_info.title),
+            timeout = 2,
+        })
+        
+        -- Immediately start download without confirmation
+        self:downloadFromPlaceholderAuto(filepath, book_info)
+    end)
 end
 
 -- Download from placeholder with auto-replacement
