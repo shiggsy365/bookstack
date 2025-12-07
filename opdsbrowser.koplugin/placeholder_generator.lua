@@ -152,18 +152,15 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
         cover_guide
     )
     
-    -- Build cover.xhtml (blank page)
+    -- Build cover.xhtml (completely blank - user should never see this)
     local cover_xhtml = [[<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <title>Placeholder</title>
+  <title>Loading...</title>
 </head>
 <body>
-  <div style="text-align: center; padding: 2em;">
-    <p style="font-size: 1.2em; color: #666;">This is a library placeholder.</p>
-    <p>Open the OPDS Browser plugin menu to download this book.</p>
-  </div>
+  <p></p>
 </body>
 </html>]]
     
@@ -215,10 +212,15 @@ function PlaceholderGenerator:createMinimalEPUB(book_info, output_path)
     
     -- Add cover image if we have it (compressed, binary data)
     if has_cover then
+        logger.info("PlaceholderGenerator: Adding cover image, size:", #cover_data, "bytes")
         if not writer:addFileFromMemory("OEBPS/" .. cover_filename, cover_data) then
             logger.warn("PlaceholderGenerator: Failed to write cover image")
             -- Continue anyway, cover is optional
+        else
+            logger.info("PlaceholderGenerator: Successfully added cover image:", cover_filename)
         end
+    else
+        logger.warn("PlaceholderGenerator: No cover image available for:", book_info.title)
     end
     
     -- Close the archive
