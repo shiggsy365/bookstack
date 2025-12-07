@@ -256,8 +256,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end)
 
     logger.info("OPDS: Successfully downloaded book, replaced placeholder")
-
-    -- Close current document and return to file manager
+    -- Switch to the downloaded book
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
         -- Verify the downloaded file exists
@@ -266,27 +265,19 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
             UIHelpers.showError(_("Download succeeded but file not found"))
             return
         end
-
+ 
         -- Show success message
-        UIHelpers.showSuccess(T(_("Downloaded: %1"), book_info.title))
-
-        -- Close the reader and return to file manager
+        UIHelpers.showSuccess(T(_("Downloaded: %1\n\nSwitching to full book..."), book_info.title))
+ 
+        -- Switch to the downloaded document
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            logger.info("OPDS: Closing reader and returning to file manager")
+            logger.info("OPDS: Switching to downloaded book")
+            ReaderUI.instance:switchDocument(filepath)
 
-            -- Close the current document
-            ReaderUI.instance:onClose()
 
-            -- Refresh file manager to update metadata
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
-                local FileManager = require("apps/filemanager/filemanager")
-                if FileManager.instance then
-                    logger.info("OPDS: Refreshing file manager")
-                    FileManager.instance:onRefresh()
-                else
-                    logger.warn("OPDS: FileManager instance not available")
-                end
-            end)
+
+
+    
         end)
     end
 end
@@ -296,7 +287,7 @@ function OPDSBrowser:addToMainMenu(menu_items)
         text = _("Cloud Book Library"),
         sub_item_table = {
             -- Library Sync section
-            { text = _("Library Sync - Build Placeholder Library"),
+            { text = _("Library Sync - OPDS"),
               callback = function() self:buildPlaceholderLibrary() end,
               enabled_func = function() return self.opds_url ~= "" end },
 
