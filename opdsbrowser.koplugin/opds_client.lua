@@ -214,13 +214,25 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
                 cover_link = entry:match('<link href="([^"]+)" type="image/png"')
             end
         end
+        if not cover_link then
+            -- Try generic image link without specific type
+            cover_link = entry:match('<link[^>]+type="image/[^"]*"[^>]+href="([^"]+)"')
+        end
         
         if cover_link then
             -- Resolve relative URLs against base_url
             book.cover_url = Utils.resolve_url(self.base_url, cover_link)
-            logger.dbg("OPDS: Extracted cover URL:", book.cover_url)
+            logger.info("OPDS: Extracted cover URL for", book.title, ":", book.cover_url)
         else
-            logger.dbg("OPDS: No cover URL found for:", book.title)
+            logger.warn("OPDS: No cover URL found for:", book.title)
+            -- Log all link elements for debugging
+            local link_count = 0
+            for link in entry:gmatch('<link[^>]*>') do
+                link_count = link_count + 1
+                if link_count <= 3 then -- Only log first 3 to avoid spam
+                    logger.dbg("OPDS: Available link:", link)
+                end
+            end
         end
 
         if book.download_url then
