@@ -291,45 +291,34 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end
 
     -- Show success message
-    UIHelpers.showSuccess(T(_("Downloaded: %1\n\nReturning to file browser..."), book_info.title))
+    UIHelpers.showSuccess(T(_("Downloaded: %1\n\nOpening book..."), book_info.title))
 
-    -- Close the current document (placeholder) and return to file manager
+    -- Close the current document (placeholder) and open the downloaded book
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI.instance then
         -- Schedule the close operation with proper event handling
         UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_CLOSE_DELAY, function()
-            logger.info("OPDS: Closing placeholder and returning to file browser")
-            
-            -- Get the directory of the downloaded file for navigation
-            local download_dir = filepath:match("(.*/)")
-            if not download_dir or download_dir == "" then
-                logger.warn("OPDS: Could not extract directory from filepath:", filepath)
-                download_dir = "/mnt/us/books" -- Fallback to default
-            end
+            logger.info("OPDS: Closing placeholder and opening downloaded book")
             
             -- Close the reader view properly
             UIManager:close(ReaderUI.instance)
             ReaderUI.instance = nil
             
-            -- Small delay before opening file manager
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_REFRESH_DELAY, function()
-                -- Switch to file manager at the book's directory
-                local FileManager = require("apps/filemanager/filemanager")
+            -- Small delay before opening the downloaded book
+            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_OPEN_DELAY, function()
+                -- Open the downloaded book
+                logger.info("OPDS: Opening downloaded book:", filepath)
                 
-                -- If file manager isn't running, start it
-                if not FileManager.instance then
-                    FileManager:showFiles(download_dir)
-                else
-                    -- Navigate to the directory and refresh
-                    FileManager.instance:reinit(download_dir)
-                    FileManager.instance:onRefresh()
-                end
+                -- Use ReaderUI to open the book
+                ReaderUI:showReader(filepath)
                 
-                -- Additional delay to ensure UI is ready, then refresh again
+                -- Schedule file manager refresh for when user closes the book
+                -- This ensures the metadata is updated in the file browser
                 UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_FINAL_REFRESH_DELAY, function()
+                    local FileManager = require("apps/filemanager/filemanager")
                     if FileManager.instance then
                         FileManager.instance:onRefresh()
-                        logger.info("OPDS: File browser refreshed, showing downloaded book")
+                        logger.info("OPDS: File browser metadata refreshed")
                     end
                 end)
             end)
@@ -1524,9 +1513,11 @@ function OPDSBrowser:performLibrarySync()
         _("Skipped: %3\n") ..
         _("Failed: %4\n") ..
         _("Orphans removed: %5\n") ..
-        _("Total: %6\n\n") ..
-        _("Location: %7"),
-        result.created, result.updated, result.skipped, result.failed, result.deleted_orphans, result.total,
+        _("Recently Added: %6\n") ..
+        _("Total: %7\n\n") ..
+        _("Location: %8"),
+        result.created, result.updated, result.skipped, result.failed, result.deleted_orphans, 
+        result.recently_added or 0, result.total,
         self.library_sync.base_library_path
     )
     

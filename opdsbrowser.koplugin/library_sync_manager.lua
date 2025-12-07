@@ -10,12 +10,14 @@ local LibrarySyncManager = {
     settings = nil,
     base_library_path = nil,
     authors_path = nil,
+    recently_added_path = nil,
     placeholder_db = {}, -- Maps filepath -> book_info
 }
 
 function LibrarySyncManager:init(base_path)
     self.base_library_path = base_path or "/mnt/us/opdslibrary"
     self.authors_path = self.base_library_path .. "/authors"
+    self.recently_added_path = self.base_library_path .. "/Recently Added"
     self.settings = LuaSettings:open(self.settings_file)
     self:loadPlaceholderDB()
     logger.info("LibrarySyncManager: Initialized with base path:", self.base_library_path)
@@ -37,6 +39,18 @@ function LibrarySyncManager:sanitizeFilename(str)
     return str:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', '_')
 end
 
+-- Sanitize author name for directory (preserves spaces, removes illegal chars)
+function LibrarySyncManager:sanitizeAuthorName(str)
+    -- Remove illegal filesystem characters but keep spaces
+    -- Replace only the illegal characters with nothing or dash
+    str = str:gsub('[/:*?"<>|\\]', '-')
+    -- Collapse multiple spaces to single space
+    str = str:gsub('%s+', ' ')
+    -- Trim leading/trailing spaces
+    str = str:gsub('^%s+', ''):gsub('%s+$', '')
+    return str
+end
+
 -- Create the folder structure
 function LibrarySyncManager:createFolderStructure()
     -- Create base Library directory
@@ -53,15 +67,22 @@ function LibrarySyncManager:createFolderStructure()
         return false
     end
     
+    -- Create Recently Added directory
+    ok, err = lfs.mkdir(self.recently_added_path)
+    if not ok and err ~= "File exists" then
+        logger.err("LibrarySyncManager: Failed to create Recently Added directory:", self.recently_added_path, err)
+        return false
+    end
+    
     logger.info("LibrarySyncManager: Created folder structure at:", self.base_library_path)
     return true
 end
 
 -- Get the target directory for a book based on author/series
 function LibrarySyncManager:getBookDirectory(book)
-    -- Sanitize author name
+    -- Sanitize author name (preserving spaces for readability)
     local author = Utils.safe_string(book.author, "Unknown Author")
-    local safe_author = self:sanitizeFilename(author)
+    local safe_author = self:sanitizeAuthorName(author)
     
     local author_dir = self.authors_path .. "/" .. safe_author
     
@@ -362,7 +383,11 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
     -- Final save
     self:savePlaceholderDB()
     
-    logger.info("LibrarySyncManager: Sync complete - Created:", created, "Updated:", updated, "Skipped:", skipped, "Failed:", failed, "Orphans removed:", deleted_orphans)
+    -- Populate Recently Added folder
+    logger.info("LibrarySyncManager: Populating Recently Added folder")
+    local recently_added, recently_failed = self:populateRecentlyAdded(books)
+    
+    logger.info("LibrarySyncManager: Sync complete - Created:", created, "Updated:", updated, "Skipped:", skipped, "Failed:", failed, "Orphans removed:", deleted_orphans, "Recently Added:", recently_added)
     
     return true, {
         created = created,
@@ -370,6 +395,7 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
         skipped = skipped,
         failed = failed,
         deleted_orphans = deleted_orphans,
+        recently_added = recently_added,
         total = total_books
     }
 end
@@ -427,6 +453,95 @@ function LibrarySyncManager:getStats()
         db_entries = Utils.table_count(self.placeholder_db),
         base_path = self.base_library_path,
     }
+end
+
+-- Populate Recently Added folder with symlinks to recently added books
+function LibrarySyncManager:populateRecentlyAdded(books)
+    logger.info("LibrarySyncManager: Populating Recently Added folder")
+    
+    -- Clear existing Recently Added folder
+    local function clear_directory(dir)
+        if lfs.attributes(dir, "mode") ~= "directory" then
+            return
+        end
+        
+        for file in lfs.dir(dir) do
+            if file ~= "." and file ~= ".." then
+                local path = dir .. "/" .. file
+                local attr = lfs.attributes(path)
+                if attr and attr.mode == "file" then
+                    os.remove(path)
+                    logger.dbg("LibrarySyncManager: Removed old file:", path)
+                end
+            end
+        end
+    end
+    
+    clear_directory(self.recently_added_path)
+    
+    -- Sort books by updated timestamp (most recent first)
+    local books_with_dates = {}
+    for _, book in ipairs(books) do
+        if book.updated and book.updated ~= "" then
+            table.insert(books_with_dates, book)
+        end
+    end
+    
+    table.sort(books_with_dates, function(a, b)
+        return a.updated > b.updated
+    end)
+    
+    -- Take top 50 most recent books
+    local recent_count = math.min(50, #books_with_dates)
+    logger.info("LibrarySyncManager: Found", recent_count, "recent books")
+    
+    local added = 0
+    local failed = 0
+    
+    for i = 1, recent_count do
+        local book = books_with_dates[i]
+        
+        -- Find the original placeholder file
+        local target_dir = self:getBookDirectory(book)
+        if target_dir then
+            local filename = self:generateFilename(book)
+            local original_path = target_dir .. "/" .. filename
+            
+            -- Check if original file exists
+            if lfs.attributes(original_path, "mode") == "file" then
+                -- Create symlink in Recently Added folder
+                local symlink_path = self.recently_added_path .. "/" .. filename
+                
+                -- Use ln -s to create symlink (works on most e-readers)
+                local cmd = string.format('ln -sf "%s" "%s"', original_path, symlink_path)
+                local result = os.execute(cmd)
+                
+                if result == 0 or result == true then
+                    added = added + 1
+                    logger.dbg("LibrarySyncManager: Created symlink:", symlink_path)
+                else
+                    -- If symlink fails, try creating a copy instead
+                    local copy_cmd = string.format('cp "%s" "%s"', original_path, symlink_path)
+                    local copy_result = os.execute(copy_cmd)
+                    if copy_result == 0 or copy_result == true then
+                        added = added + 1
+                        logger.dbg("LibrarySyncManager: Created copy:", symlink_path)
+                    else
+                        failed = failed + 1
+                        logger.warn("LibrarySyncManager: Failed to create link/copy for:", filename)
+                    end
+                end
+            else
+                logger.dbg("LibrarySyncManager: Original file not found:", original_path)
+                failed = failed + 1
+            end
+        else
+            failed = failed + 1
+        end
+    end
+    
+    logger.info("LibrarySyncManager: Recently Added populated - Added:", added, "Failed:", failed)
+    return added, failed
 end
 
 return LibrarySyncManager
