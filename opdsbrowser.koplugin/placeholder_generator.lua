@@ -283,7 +283,11 @@ function PlaceholderGenerator:isPlaceholder(filepath)
             return reader:extractToMemory(CONTENT_OPF_PATH)
         end)
         
-        pcall(function() reader:close() end)
+        -- Always close the reader, log any errors
+        local ok_close, close_err = pcall(function() reader:close() end)
+        if not ok_close then
+            logger.warn("PlaceholderGenerator: Error closing reader:", close_err)
+        end
         
         if not ok_extract or not content then
             logger.warn("PlaceholderGenerator: Failed to extract content.opf from:", filepath)
