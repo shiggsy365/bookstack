@@ -112,15 +112,11 @@ function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
     
     logger.info("OPDSBrowser: Auto-downloading book:", book_info.title)
     
-    -- Show confirmation dialog
-    UIHelpers.createConfirmDialog(
-        _("Download Book"),
-        T(_("This is a placeholder for:\n\n%1\nby %2\n\nDownload the book now?"), 
-          book_info.title, book_info.author or "Unknown Author"),
-        function()
-            self:downloadFromPlaceholderAuto(filepath, book_info)
-        end
-    )
+    -- Show brief notification but don't wait for confirmation
+    UIHelpers.showInfo(T(_("Auto-downloading: %1"), book_info.title), 2)
+    
+    -- Immediately start download without confirmation
+    self:downloadFromPlaceholderAuto(filepath, book_info)
 end
 
 -- Download from placeholder with auto-replacement
