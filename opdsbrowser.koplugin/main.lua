@@ -78,56 +78,30 @@ end
 
 -- Hook for when a document is opened
 function OPDSBrowser:onReaderReady(config)
-    logger.dbg("OPDSBrowser: onReaderReady triggered")
-    logger.info("OPDSBrowser: onReaderReady called with config:", config ~= nil)
+    logger.info("OPDSBrowser: onReaderReady called")
 
-    -- Delay the check to ensure ReaderUI is fully initialized
-    -- onReaderReady fires before ReaderUI.instance.document is actually available
-    local self_ref = self -- Capture self reference for closure
-    UIManager:scheduleIn(0.5, function()
-        self_ref:checkAndHandlePlaceholder()
-    end)
-end
+    -- Use a delayed check since ReaderUI.instance.document may not be ready yet
+    UIManager:scheduleIn(1, function()
+        local ReaderUI = require("apps/reader/readerui")
+        if not ReaderUI.instance or not ReaderUI.instance.document then
+            logger.info("OPDSBrowser: No document loaded after delay")
+            return
+        end
 
--- Separate function to check and handle placeholder (called after delay)
-function OPDSBrowser:checkAndHandlePlaceholder()
-    logger.info("OPDSBrowser: Delayed check starting...")
+        local current_file = ReaderUI.instance.document.file
+        logger.info("OPDSBrowser: Checking file:", current_file)
 
-    -- Get the currently opened document
-    local ReaderUI = require("apps/reader/readerui")
-    if not ReaderUI.instance or not ReaderUI.instance.document then
-        logger.info("OPDSBrowser: No ReaderUI instance or document (after delay)")
-        return
-    end
-
-    local current_file = ReaderUI.instance.document.file
-    logger.info("OPDSBrowser: Document opened, checking if placeholder:", current_file)
-
-    -- Check if this is a placeholder
-    local is_placeholder = PlaceholderGenerator:isPlaceholder(current_file)
-    logger.info("OPDSBrowser: isPlaceholder returned:", is_placeholder)
-
-    if is_placeholder then
-        logger.info("OPDSBrowser: Detected placeholder file:", current_file)
-        -- Delay slightly to let the reader UI fully initialize
-        local self_ref = self
-        UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_UI_DELAY, function()
-            self_ref:handlePlaceholderAutoDownload(current_file)
-        end)
-    else
-        logger.info("OPDSBrowser: Not a placeholder, checking database for:", current_file)
-        -- Also try to check the placeholder database directly
+        -- Check placeholder database directly (faster than parsing EPUB)
         local book_info = self.library_sync:getBookInfo(current_file)
         if book_info then
-            logger.info("OPDSBrowser: Found in placeholder database! Forcing auto-download")
-            local self_ref = self
-            UIManager:scheduleIn(Constants.AUTO_DOWNLOAD_UI_DELAY, function()
-                self_ref:handlePlaceholderAutoDownload(current_file)
+            logger.info("OPDSBrowser: Found placeholder in database, triggering auto-download")
+            UIManager:scheduleIn(0.5, function()
+                self:handlePlaceholderAutoDownload(current_file)
             end)
         else
-            logger.info("OPDSBrowser: Not in placeholder database either")
+            logger.info("OPDSBrowser: Not a placeholder")
         end
-    end
+    end)
 end
 
 -- Handle auto-download from placeholder
