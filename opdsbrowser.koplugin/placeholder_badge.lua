@@ -234,16 +234,19 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         -- This ensures visibility on both light and dark book covers
         -- Use a solid color that contrasts well
         local badge_color = Blitbuffer.COLOR_DARK_GRAY
+        local badge_color_name = "DARK_GRAY"
         
         -- Try to use a blue color if available (more visible and distinctive)
         -- Fallback to dark gray if blue is not available
         if Blitbuffer.COLOR_BLUE ~= nil then
             badge_color = Blitbuffer.COLOR_BLUE
+            badge_color_name = "BLUE"
         elseif Blitbuffer.COLOR_DARK_BLUE ~= nil then
             badge_color = Blitbuffer.COLOR_DARK_BLUE
+            badge_color_name = "DARK_BLUE"
         end
         
-        logger.info("PlaceholderBadge: Using badge background color")
+        logger.info("PlaceholderBadge: Using badge background color:", badge_color_name)
         
         local badge_bg = FrameContainer:new{
             background = badge_color,

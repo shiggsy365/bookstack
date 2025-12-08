@@ -239,53 +239,21 @@ function OPDSBrowser:onMenuHold(item)
 end
 
 -- Hook for when a file is selected (tapped) in FileManager
--- NOTE: This is a placeholder for potential future enhancement
+-- NOTE: This function is kept for documentation purposes only
 -- KOReader does not currently support onFileSelect at the plugin level
--- For now, users must use long-press menu (onMenuHold) to download placeholders
 -- 
--- This function is kept for documentation and potential future use if KOReader
--- adds support for file selection interception at the plugin level
+-- CURRENT PRIMARY METHOD: Use onMenuHold (long-press menu) to download placeholders
 --
--- If you want to enable this, you would need to modify KOReader core to call
--- this hook when files are selected in FileManager
+-- This function exists for potential future enhancement if KOReader adds support
+-- for file selection interception at the plugin level. If you want to enable this,
+-- you would need to modify KOReader core to call this hook when files are selected.
+--
+-- For implementation details, see the DISABLED CODE section in git history
+-- or refer to onMenuHold which has the working implementation.
 function OPDSBrowser:onFileSelect(filepath)
-    logger.dbg("OPDS Browser: onFileSelect called (not currently supported by KOReader)")
-    logger.dbg("OPDS Browser: File:", filepath)
-    
-    -- This code is disabled because onFileSelect is not a standard KOReader hook
-    -- Keeping it here for future reference if the hook becomes available
+    -- This hook is not currently supported by KOReader at the plugin level
+    -- Users must use long-press menu (onMenuHold) instead
     return false
-    
-    --[[ DISABLED CODE - Would work if onFileSelect hook existed:
-    
-    -- Only process if we're in FileManager
-    if self.ui.name ~= "FileManager" then
-        return false
-    end
-    
-    -- Only process EPUB files
-    if not filepath:match("%.epub$") then
-        return false
-    end
-    
-    -- Check if this is a placeholder file
-    local book_info = self.library_sync:getBookInfo(filepath)
-    if not book_info then
-        return false
-    end
-    
-    logger.info("=========================================")
-    logger.info("OPDS Browser: INTERCEPTED PLACEHOLDER SELECTION!")
-    logger.info("OPDS Browser: Title:", book_info.title)
-    logger.info("OPDS Browser: Author:", book_info.author)
-    logger.info("=========================================")
-    
-    -- Intercept the selection and trigger download instead of opening
-    self:handlePlaceholderDownloadFromFileManager(filepath, book_info)
-    
-    -- Return true to prevent default behavior (opening the file)
-    return true
-    ]]--
 end
 
 -- Handle placeholder download triggered from FileManager
