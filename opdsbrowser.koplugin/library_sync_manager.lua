@@ -390,7 +390,11 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
     -- Populate Recently Added folder
     logger.info("LibrarySyncManager: Populating Recently Added folder")
     local recently_added, recently_failed = self:populateRecentlyAdded(books)
-    
+
+    -- Save database again after populating Recently Added (includes symlink/copy paths)
+    self:savePlaceholderDB()
+    logger.info("LibrarySyncManager: Saved database with Recently Added entries")
+
     logger.info("LibrarySyncManager: Sync complete - Created:", created, "Updated:", updated, "Skipped:", skipped, "Failed:", failed, "Orphans removed:", deleted_orphans, "Recently Added:", recently_added)
     
     return true, {
@@ -468,19 +472,24 @@ function LibrarySyncManager:populateRecentlyAdded(books)
         if lfs.attributes(dir, "mode") ~= "directory" then
             return
         end
-        
+
         for file in lfs.dir(dir) do
             if file ~= "." and file ~= ".." then
                 local path = dir .. "/" .. file
                 local attr = lfs.attributes(path)
                 if attr and attr.mode == "file" then
+                    -- Remove from database before deleting file
+                    if self.placeholder_db[path] then
+                        self.placeholder_db[path] = nil
+                        logger.dbg("LibrarySyncManager: Removed from database:", path)
+                    end
                     os.remove(path)
                     logger.dbg("LibrarySyncManager: Removed old file:", path)
                 end
             end
         end
     end
-    
+
     clear_directory(self.recently_added_path)
     
     -- Sort books by updated timestamp (most recent first)
@@ -534,6 +543,9 @@ function LibrarySyncManager:populateRecentlyAdded(books)
                 
                 if link_ok then
                     added = added + 1
+                    -- Store the symlink path in database too for quick lookups
+                    self.placeholder_db[symlink_path] = self.placeholder_db[original_path]
+                    logger.dbg("LibrarySyncManager: Added symlink to database:", symlink_path)
                 else
                     -- If symlink fails, try creating a hard link or copy instead
                     local copy_ok = false
@@ -583,6 +595,9 @@ function LibrarySyncManager:populateRecentlyAdded(books)
                     
                     if copy_ok then
                         added = added + 1
+                        -- Store the copy/link path in database too for quick lookups
+                        self.placeholder_db[symlink_path] = self.placeholder_db[original_path]
+                        logger.dbg("LibrarySyncManager: Added copy/hard link to database:", symlink_path)
                     else
                         failed = failed + 1
                         logger.warn("LibrarySyncManager: Failed to create link/copy for:", filename)
