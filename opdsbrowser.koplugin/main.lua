@@ -1130,9 +1130,6 @@ function OPDSBrowser:getMenuItems()
         { text = _("Library Sync - OPDS"),
           callback = function() self:buildPlaceholderLibrary() end,
           enabled_func = function() return self.opds_url ~= "" end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
         -- Ephemera section
         { text = _("Ephemera - Request New Book"),
           callback = function() self:requestBook() end,
@@ -1140,31 +1137,18 @@ function OPDSBrowser:getMenuItems()
         { text = _("Ephemera - View Download Queue"),
           callback = function() self:showDownloadQueue() end,
           enabled_func = function() return self.ephemera_client:isConfigured() end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
         -- Hardcover section
         { text = _("Hardcover - Search Author"),
           callback = function() self:hardcoverSearchAuthor() end,
           enabled_func = function() return self.hardcover_client:isConfigured() end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
         -- History section
         { text = _("History - Recent Searches"),
           callback = function() self:showSearchHistory() end },
         { text = _("History - Recently Viewed"),
           callback = function() self:showRecentBooks() end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
         -- Settings section
         { text = _("Plugin - Settings"),
           callback = function() self:showSettings() end },
-        { text = _("Plugin - Cache Info"),
-          callback = function() self:showCacheInfo() end },
-        { text = _("Plugin - Workflow Health Check"),
-          callback = function() self:showWorkflowHealth() end },
     }
 end
 
