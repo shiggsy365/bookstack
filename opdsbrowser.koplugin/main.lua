@@ -606,6 +606,8 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         local package_loaded = package.loaded
         if package_loaded then
             -- Look for known CoverBrowser module names
+            -- These are based on KOReader's plugin loading conventions
+            -- If CoverBrowser changes its module structure, these may need updating
             local coverbrowser_modules = {
                 "coverbrowser",
                 "plugins.coverbrowser.main",
@@ -665,12 +667,16 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     if CacheManager then
         -- Invalidate any OPDS metadata cache entries for this book
         -- Extract filename without extension (handles both .epub and .kepub.epub)
+        -- The pattern ([^/]+)$ extracts everything after the last / (the filename)
         local filename = placeholder_path:match("([^/]+)$") or ""
-        -- Remove .kepub.epub or .epub extension
-        local book_id_pattern = filename:gsub("%.kepub%.epub$", ""):gsub("%.epub$", "")
-        if book_id_pattern and book_id_pattern ~= "" then
-            CacheManager:invalidatePattern(book_id_pattern)
-            logger.info("OPDS: ✓ Invalidated OPDS cache entries matching:", book_id_pattern)
+        if filename ~= "" then
+            -- Remove file extensions: try .kepub.epub first, then .epub
+            -- The $ anchor ensures we only match at the end of the string
+            local book_id_pattern = filename:gsub("%.kepub%.epub$", ""):gsub("%.epub$", "")
+            if book_id_pattern ~= "" and book_id_pattern ~= filename then
+                CacheManager:invalidatePattern(book_id_pattern)
+                logger.info("OPDS: ✓ Invalidated OPDS cache entries matching:", book_id_pattern)
+            end
         end
     end
 

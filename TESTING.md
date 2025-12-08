@@ -96,6 +96,8 @@ Each ✓ indicates a cache was successfully cleared. If you see ✗, it means th
 ### Via SSH (if available)
 **Security Warning:** Only use SSH if you have properly secured your device with strong credentials. Avoid using root access when possible.
 
+**Note:** In the examples below, replace `user` with your actual username and `your-device-ip` with your device's actual IP address.
+
 ```bash
 # Example with regular user (recommended):
 ssh user@your-device-ip
