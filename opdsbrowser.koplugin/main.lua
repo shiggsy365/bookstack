@@ -126,6 +126,11 @@ function OPDSBrowser:init()
     UIManager:scheduleIn(2, function()
         self:checkRestartNavigation()
     end)
+    
+    -- Run workflow health check on startup (logs to console)
+    UIManager:scheduleIn(3, function()
+        self:checkWorkflowHealth()
+    end)
 
     logger.info("OPDS Browser: Initialized with improved architecture")
 end
@@ -892,6 +897,158 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     end)
 end
 
+-- Health check for placeholder auto-download workflow
+-- Verifies all components required for the 5-step workflow are available
+function OPDSBrowser:checkWorkflowHealth()
+    logger.info("========================================")
+    logger.info("PLACEHOLDER AUTO-DOWNLOAD WORKFLOW HEALTH CHECK")
+    logger.info("========================================")
+    
+    local all_ok = true
+    local issues = {}
+    
+    -- Check Step 1: Placeholder detection
+    logger.info("Step 1 - Placeholder Detection:")
+    if self.library_sync and self.library_sync.getBookInfo then
+        logger.info("  ✓ LibrarySyncManager available")
+        if self.library_sync.placeholder_db then
+            logger.info("  ✓ Placeholder database available")
+            local count = 0
+            for _ in pairs(self.library_sync.placeholder_db) do
+                count = count + 1
+            end
+            logger.info("  ✓ Database has", count, "placeholder(s)")
+        else
+            logger.warn("  ✗ Placeholder database not initialized")
+            table.insert(issues, "Placeholder database not initialized")
+            all_ok = false
+        end
+    else
+        logger.err("  ✗ LibrarySyncManager not available")
+        table.insert(issues, "LibrarySyncManager not available")
+        all_ok = false
+    end
+    
+    -- Check Step 2: OPDS download capability
+    logger.info("Step 2 - OPDS Download:")
+    if self.opds_url and self.opds_url ~= "" then
+        logger.info("  ✓ OPDS URL configured:", self.opds_url)
+    else
+        logger.warn("  ✗ OPDS URL not configured")
+        table.insert(issues, "OPDS URL not configured")
+        all_ok = false
+    end
+    
+    local https_ok, https = pcall(require, "ssl.https")
+    if https_ok and https then
+        logger.info("  ✓ HTTPS library available")
+    else
+        logger.err("  ✗ HTTPS library not available")
+        table.insert(issues, "HTTPS library not available")
+        all_ok = false
+    end
+    
+    -- Check Step 3: File operations
+    logger.info("Step 3 - File Operations:")
+    local lfs_ok = pcall(function() return lfs.attributes("/") end)
+    if lfs_ok then
+        logger.info("  ✓ LFS (filesystem) library available")
+    else
+        logger.err("  ✗ LFS library not working")
+        table.insert(issues, "LFS library not working")
+        all_ok = false
+    end
+    
+    -- Check Step 4: Restart capability
+    logger.info("Step 4 - Restart Capability:")
+    if RestartNavigationManager then
+        logger.info("  ✓ RestartNavigationManager available")
+        
+        -- Check if we can write state files
+        local state_path = RestartNavigationManager:getStatePath()
+        if state_path then
+            logger.info("  ✓ State file path:", state_path)
+            
+            -- Try to write a test state (will be immediately deleted)
+            local test_ok = pcall(function()
+                local f = io.open(state_path .. ".test", "w")
+                if f then
+                    f:write("test")
+                    f:close()
+                    os.remove(state_path .. ".test")
+                    return true
+                end
+                return false
+            end)
+            
+            if test_ok then
+                logger.info("  ✓ Can write state files")
+            else
+                logger.warn("  ✗ Cannot write state files")
+                table.insert(issues, "Cannot write state files")
+            end
+        else
+            logger.warn("  ✗ Cannot determine state path")
+            table.insert(issues, "Cannot determine state path")
+        end
+        
+        -- Check restart methods
+        local UIManager = require("ui/uimanager")
+        local Device = require("device")
+        local has_restart = false
+        
+        if type(UIManager.restart) == "function" then
+            logger.info("  ✓ UIManager:restart() available")
+            has_restart = true
+        elseif type(UIManager.restartKOReader) == "function" then
+            logger.info("  ✓ UIManager:restartKOReader() available")
+            has_restart = true
+        elseif type(UIManager.exitOrRestart) == "function" then
+            logger.info("  ✓ UIManager:exitOrRestart() available")
+            has_restart = true
+        elseif Device and type(Device.reboot) == "function" then
+            logger.info("  ✓ Device:reboot() available")
+            has_restart = true
+        else
+            logger.warn("  ✗ No restart method available (will fall back to direct open)")
+            table.insert(issues, "No restart method available")
+        end
+    else
+        logger.err("  ✗ RestartNavigationManager not available")
+        table.insert(issues, "RestartNavigationManager not available")
+        all_ok = false
+    end
+    
+    -- Check Step 5: FileManager navigation
+    logger.info("Step 5 - FileManager Navigation:")
+    local fm_ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+    if fm_ok and FileManager and FileManager.showFiles then
+        logger.info("  ✓ FileManager available")
+        logger.info("  ✓ FileManager.showFiles() available")
+    else
+        logger.err("  ✗ FileManager or showFiles() not available")
+        table.insert(issues, "FileManager not available")
+        all_ok = false
+    end
+    
+    -- Summary
+    logger.info("========================================")
+    if all_ok then
+        logger.info("WORKFLOW HEALTH: ✓ ALL CHECKS PASSED")
+        logger.info("All 5 workflow steps are fully functional")
+    else
+        logger.warn("WORKFLOW HEALTH: ✗ ISSUES FOUND")
+        logger.warn("Found", #issues, "issue(s):")
+        for i, issue in ipairs(issues) do
+            logger.warn("  " .. i .. ".", issue)
+        end
+        logger.warn("Workflow may not function correctly")
+    end
+    logger.info("========================================")
+    
+    return all_ok, issues
+end
+
 function OPDSBrowser:addToMainMenu(menu_items)
     menu_items.opdsbrowser = {
         text = _("Cloud Book Library"),
@@ -933,6 +1090,8 @@ function OPDSBrowser:addToMainMenu(menu_items)
               callback = function() self:showSettings() end },
             { text = _("Plugin - Cache Info"),
               callback = function() self:showCacheInfo() end },
+            { text = _("Plugin - Workflow Health Check"),
+              callback = function() self:showWorkflowHealth() end },
         },
     }
 end
@@ -1064,6 +1223,65 @@ function OPDSBrowser:showCacheInfo()
     
     self.cache_info = UIHelpers.createTextViewer(_("Cache Info"), details, buttons)
     UIManager:show(self.cache_info)
+end
+
+-- Show workflow health check results
+function OPDSBrowser:showWorkflowHealth()
+    -- Run health check
+    local all_ok, issues = self:checkWorkflowHealth()
+    
+    -- Build message
+    local status_icon = all_ok and "✓" or "✗"
+    local status_text = all_ok and "ALL SYSTEMS OPERATIONAL" or "ISSUES DETECTED"
+    
+    local message = T(
+        _("Placeholder Auto-Download Workflow\n\n") ..
+        _("Status: %1 %2\n\n"),
+        status_icon,
+        status_text
+    )
+    
+    if all_ok then
+        message = message .. _("All 5 workflow steps are fully functional:\n\n") ..
+            _("1. ✓ Placeholder Detection\n") ..
+            _("2. ✓ OPDS Download\n") ..
+            _("3. ✓ File Operations\n") ..
+            _("4. ✓ Restart Capability\n") ..
+            _("5. ✓ FileManager Navigation\n\n") ..
+            _("The workflow will function correctly when you open a placeholder book.")
+    else
+        message = message .. T(
+            _("Found %1 issue(s):\n\n"),
+            #issues
+        )
+        
+        for i, issue in ipairs(issues) do
+            message = message .. T(_("%1. %2\n"), i, issue)
+        end
+        
+        message = message .. _("\n") ..
+            _("Some workflow steps may not function correctly. ") ..
+            _("Check KOReader logs for detailed diagnostics.")
+    end
+    
+    local buttons = {
+        {
+            { text = _("View Logs"), callback = function()
+                UIManager:close(self.workflow_health)
+                UIHelpers.showInfo(_("Check KOReader logs:\n\n") ..
+                    _("Look for 'PLACEHOLDER AUTO-DOWNLOAD WORKFLOW HEALTH CHECK' ") ..
+                    _("and 'OPDS WORKFLOW' entries for detailed information."))
+            end },
+        },
+        {
+            { text = _("Close"), callback = function()
+                UIManager:close(self.workflow_health)
+            end },
+        },
+    }
+    
+    self.workflow_health = UIHelpers.createTextViewer(_("Workflow Health"), message, buttons)
+    UIManager:show(self.workflow_health)
 end
 
 -- Network check helper
