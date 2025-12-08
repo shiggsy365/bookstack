@@ -1,6 +1,10 @@
 services:
   booklore:
-    image: booklore/booklore:latest
+    build:
+      # using the develop branch as it supports series in OPDS
+      context: https://github.com/booklore-app/booklore.git#develop
+      dockerfile: Dockerfile
+      # image: booklore/booklore:develop
     container_name: booklore
     environment:
       - USER_ID=${PUID}
