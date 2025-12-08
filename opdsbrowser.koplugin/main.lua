@@ -553,11 +553,11 @@ function OPDSBrowser:onReaderReady(config)
                 self:handlePlaceholderAutoDownload(current_file)
             end)
         else
-            logger.info("OPDSBrowser: Not a placeholder, checking if it's a copy in Recently Added")
-            -- If not found by direct lookup and it's a file in Recently Added,
+            logger.info("OPDSBrowser: Not a placeholder, checking if it's a copy in special folders")
+            -- If not found by direct lookup and it's a file in Recently Added or Top Rated,
             -- fall back to checking the placeholder database for any matching book
-            if current_file:match("/Recently Added/") then
-                logger.info("OPDSBrowser: File is in Recently Added folder, attempting content-based check")
+            if current_file:match("/Recently Added/") or current_file:match("/Top Rated/") then
+                logger.info("OPDSBrowser: File is in special folder (Recently Added/Top Rated), attempting content-based check")
                 -- Check if it's a placeholder by examining the file content
                 if PlaceholderGenerator:isPlaceholder(current_file) then
                     logger.info("OPDSBrowser: Detected as placeholder via content check")
