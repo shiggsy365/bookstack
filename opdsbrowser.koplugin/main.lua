@@ -565,42 +565,69 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     pcall(function()
         local DocumentRegistry = require("documentregistry")
         if DocumentRegistry then
-            -- Remove cached entries for both paths
-            if DocumentRegistry.registry and DocumentRegistry.registry[placeholder_path] then
-                DocumentRegistry.registry[placeholder_path] = nil
-                logger.info("OPDS: ✓ Cleared DocumentRegistry cache for placeholder")
+            local cleared_registry = false
+            local cleared_provider = false
+            
+            -- Remove cached entries for both paths from registry
+            if DocumentRegistry.registry then
+                if DocumentRegistry.registry[placeholder_path] then
+                    DocumentRegistry.registry[placeholder_path] = nil
+                    cleared_registry = true
+                end
+                if DocumentRegistry.registry[filepath] then
+                    DocumentRegistry.registry[filepath] = nil
+                    cleared_registry = true
+                end
+                if cleared_registry then
+                    logger.info("OPDS: ✓ Cleared DocumentRegistry.registry cache")
+                end
             end
-            if DocumentRegistry.registry and DocumentRegistry.registry[filepath] then
-                DocumentRegistry.registry[filepath] = nil
-                logger.info("OPDS: ✓ Cleared DocumentRegistry cache for real book")
-            end
-            -- If DocumentRegistry has a cache table, clear those too
+            
+            -- If DocumentRegistry has a provider_cache, clear those too
             if DocumentRegistry.provider_cache then
-                DocumentRegistry.provider_cache[placeholder_path] = nil
-                DocumentRegistry.provider_cache[filepath] = nil
-                logger.info("OPDS: ✓ Cleared DocumentRegistry provider cache")
+                if DocumentRegistry.provider_cache[placeholder_path] then
+                    DocumentRegistry.provider_cache[placeholder_path] = nil
+                    cleared_provider = true
+                end
+                if DocumentRegistry.provider_cache[filepath] then
+                    DocumentRegistry.provider_cache[filepath] = nil
+                    cleared_provider = true
+                end
+                if cleared_provider then
+                    logger.info("OPDS: ✓ Cleared DocumentRegistry.provider_cache")
+                end
             end
         end
     end)
 
     -- 4. Clear CoverBrowser cache if it's loaded
     pcall(function()
-        -- Get CoverBrowser plugin if it exists
+        -- Try to clear CoverBrowser caches if the plugin is loaded
         local package_loaded = package.loaded
         if package_loaded then
-            -- Check for loaded CoverBrowser module
-            for module_name, module in pairs(package_loaded) do
-                if type(module_name) == "string" and module_name:match("coverbrowser") and type(module) == "table" then
-                    -- Try to clear its cache
+            -- Look for known CoverBrowser module names
+            local coverbrowser_modules = {
+                "coverbrowser",
+                "plugins.coverbrowser.main",
+            }
+            
+            for _, module_name in ipairs(coverbrowser_modules) do
+                local module = package_loaded[module_name]
+                if module and type(module) == "table" then
+                    local cleared_cache = false
+                    -- Try to clear its cache tables
                     if module.cache then
                         module.cache[placeholder_path] = nil
                         module.cache[filepath] = nil
-                        logger.info("OPDS: ✓ Cleared CoverBrowser cache for:", module_name)
+                        cleared_cache = true
                     end
                     if module.cover_cache then
                         module.cover_cache[placeholder_path] = nil
                         module.cover_cache[filepath] = nil
-                        logger.info("OPDS: ✓ Cleared CoverBrowser cover_cache for:", module_name)
+                        cleared_cache = true
+                    end
+                    if cleared_cache then
+                        logger.info("OPDS: ✓ Cleared CoverBrowser caches for:", module_name)
                     end
                 end
             end
@@ -637,9 +664,11 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     -- 7. Clear plugin's own OPDS cache for this book
     if CacheManager then
         -- Invalidate any OPDS metadata cache entries for this book
-        -- Extract filename without extension (works for .epub, .kepub.epub, etc.)
-        local book_id_pattern = placeholder_path:match("([^/]+)%.[^/%.]+$")
-        if book_id_pattern then
+        -- Extract filename without extension (handles both .epub and .kepub.epub)
+        local filename = placeholder_path:match("([^/]+)$") or ""
+        -- Remove .kepub.epub or .epub extension
+        local book_id_pattern = filename:gsub("%.kepub%.epub$", ""):gsub("%.epub$", "")
+        if book_id_pattern and book_id_pattern ~= "" then
             CacheManager:invalidatePattern(book_id_pattern)
             logger.info("OPDS: ✓ Invalidated OPDS cache entries matching:", book_id_pattern)
         end

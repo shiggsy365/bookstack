@@ -94,16 +94,21 @@ Each ✓ indicates a cache was successfully cleared. If you see ✗, it means th
 4. Search for "CACHE INVALIDATION" to find relevant entries
 
 ### Via SSH (if available)
-**Note:** Only use SSH if you have properly secured your device with strong credentials. Using root access can be a security risk.
+**Security Warning:** Only use SSH if you have properly secured your device with strong credentials. Avoid using root access when possible.
 
 ```bash
-# Replace 'root' with your actual username and use appropriate credentials
+# Example with regular user (recommended):
 ssh user@your-device-ip
 tail -f /path/to/koreader/crash.log | grep -A 20 "CACHE INVALIDATION"
 
-# Common paths:
+# Example with root (if necessary, ensure device is secured):
+ssh root@your-device-ip
+tail -f /path/to/koreader/crash.log | grep -A 20 "CACHE INVALIDATION"
+
+# Common KOReader log paths by device:
 # - Kindle: /mnt/us/.adds/koreader/crash.log
 # - Kobo: /mnt/onboard/.adds/koreader/crash.log
+# - Android: /sdcard/koreader/crash.log
 ```
 
 ## Known Issues and Edge Cases
