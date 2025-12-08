@@ -26,6 +26,7 @@ local HttpClient = require("http_client_new")
 local PlaceholderGenerator = require("placeholder_generator")
 local LibrarySyncManager = require("library_sync_manager")
 local PlaceholderBadge = require("placeholder_badge")
+local RestartNavigationManager = require("restart_navigation_manager")
 
 local OPDSBrowser = WidgetContainer:extend{
     name = "opdsbrowser",
@@ -85,7 +86,41 @@ function OPDSBrowser:init()
     -- Queue refresh
     self.queue_refresh_action = nil
 
+    -- Check for pending navigation from restart (must be done after UI is ready)
+    UIManager:scheduleIn(2, function()
+        self:checkRestartNavigation()
+    end)
+
     logger.info("OPDS Browser: Initialized with improved architecture")
+end
+
+-- Check and handle pending navigation from restart
+function OPDSBrowser:checkRestartNavigation()
+    logger.info("OPDS Browser: Checking for restart navigation state")
+    
+    local state = RestartNavigationManager:loadNavigationState()
+    if not state then
+        logger.info("OPDS Browser: No restart navigation pending")
+        return
+    end
+    
+    logger.info("OPDS Browser: Found restart navigation state, navigating to:", state.folder_path)
+    
+    -- Navigate to the folder
+    local success = RestartNavigationManager:navigateToFolder(state.folder_path)
+    
+    if success then
+        logger.info("OPDS Browser: Successfully navigated to folder after restart")
+        
+        -- Show a brief notification to the user
+        UIHelpers.showInfo(_("Navigated to downloaded book folder"))
+    else
+        logger.err("OPDS Browser: Failed to navigate to folder after restart")
+        UIHelpers.showError(_("Failed to navigate to folder"))
+    end
+    
+    -- Clear the state file (consumed)
+    RestartNavigationManager:clearNavigationState()
 end
 
 -- Hook for when a document is opened
@@ -681,14 +716,74 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     end
 
     logger.info("OPDS: ==================== CACHE INVALIDATION COMPLETE ====================")
-    logger.info("OPDS: Successfully downloaded and cached book, opening:", filepath)
+    logger.info("OPDS: Successfully downloaded book:", filepath)
 
-    -- Open the downloaded book IMMEDIATELY (no delay to prevent empty UI)
-    local ReaderUI = require("apps/reader/readerui")
-    ReaderUI:showReader(filepath)
+    -- ============================================================================
+    -- RESTART KOREADER AND NAVIGATE TO FOLDER
+    -- This ensures all caches are completely cleared and UI shows the real book
+    -- ============================================================================
+    
+    -- Extract folder path from filepath
+    local folder_path = filepath:match("(.*/)")
+    
+    if folder_path then
+        logger.info("OPDS: ==================== RESTART NAVIGATION START ====================")
+        logger.info("OPDS: Saving navigation state for post-restart")
+        logger.info("OPDS: Target folder:", folder_path)
+        logger.info("OPDS: Downloaded book:", filepath)
+        
+        -- Save navigation state
+        local save_ok = RestartNavigationManager:saveNavigationState(folder_path, filepath)
+        
+        if save_ok then
+            logger.info("OPDS: Navigation state saved successfully")
+            
+            -- Show user message before restart
+            local restart_msg = UIHelpers.showLoading(
+                _("Download complete!\n\nRestarting KOReader to clear cache and show book...")
+            )
+            UIManager:show(restart_msg)
+            UIManager:forceRePaint()
+            
+            -- Small delay to show message, then restart
+            UIManager:scheduleIn(2, function()
+                UIManager:close(restart_msg)
+                
+                logger.info("OPDS: Triggering KOReader restart")
+                local restart_ok = RestartNavigationManager:restartKOReader()
+                
+                if not restart_ok then
+                    -- Restart failed, fall back to old behavior (open book directly)
+                    logger.err("OPDS: Restart failed, falling back to direct book open")
+                    UIHelpers.showError(_("Restart failed. Opening book directly."))
+                    
+                    -- Clean up state file
+                    RestartNavigationManager:clearNavigationState()
+                    
+                    -- Open book directly
+                    local ReaderUI = require("apps/reader/readerui")
+                    ReaderUI:showReader(filepath)
+                end
+            end)
+        else
+            logger.err("OPDS: Failed to save navigation state, opening book directly")
+            
+            -- Fall back to opening book directly
+            local ReaderUI = require("apps/reader/readerui")
+            ReaderUI:showReader(filepath)
+        end
+        
+        logger.info("OPDS: ==================== RESTART NAVIGATION COMPLETE ====================")
+    else
+        logger.err("OPDS: Could not extract folder path from:", filepath)
+        
+        -- Fall back to opening book directly
+        local ReaderUI = require("apps/reader/readerui")
+        ReaderUI:showReader(filepath)
+    end
 
-    -- Background: Refresh file manager and force full cache clearing
-    UIManager:scheduleIn(1, function()
+    -- Background: Refresh file manager (in case restart fails)
+    UIManager:scheduleIn(3, function()
         -- Refresh file manager in background
         local FileManager = require("apps/filemanager/filemanager")
         if FileManager.instance then
