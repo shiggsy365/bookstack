@@ -98,6 +98,8 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
 
         book.title = entry:match("<title>(.-)</title>") or "Unknown Title"
         book.title = Utils.html_unescape(book.title)
+        -- Fix apostrophe issues in title (replace &apos; with ')
+        book.title = book.title:gsub("&apos;", "'")
 
         local author_name = entry:match("<author><name>(.-)</name></author>")
         book.author = author_name and Utils.html_unescape(author_name) or "Unknown Author"
@@ -172,6 +174,11 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
                     logger.dbg("OPDS: Extracted series from summary (no number):", book.series)
                 end
             end
+        end
+
+        -- Clean series name: replace underscores with spaces
+        if book.series ~= "" then
+            book.series = book.series:gsub("_", " ")
         end
 
         -- Clean summary
