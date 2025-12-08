@@ -130,20 +130,6 @@ Use hostnames or IPs reachable from your KOReader device (for example the LAN IP
 
 ## **Usage**
 
-### **Library Browsing (OPDS via Booklore)**
-
-* **Browse by Author**: View all authors in your library alphabetically, then drill down to their books  
-* **Recently Added**: See the most recently added books to your library  
-* **Random Choice**: Get a random book suggestion from your library  
-* **Search**: Search your library by title, author, or keywords
-
-When browsing books, the plugin automatically:
-
-* Extracts series information based on your configuration  
-* Sorts books by series first, then standalone titles  
-* Shows series name and number in the book list  
-* Displays complete metadata including series info in book details
-
 ### **Hardcover Integration**
 
 * **Search Author**: Find authors on Hardcover with "Known for" information  
@@ -168,7 +154,6 @@ The Hardcover integration intelligently caches data to minimize API calls and pr
 * Metadata is refreshed automatically after download  
 * File manager view updates to show newly downloaded books  
 * KOReader automatically restarts after successful download to ensure UI shows the real book immediately  
-* Cloud badge (☁) shows on placeholder book covers in mosaic view
 
 ## **Series Information Handling**
 
@@ -177,8 +162,8 @@ When importing books from OPDS, the plugin attempts to scrape series information
 1. **OPDS Metadata Fields (Standard)** It searches the OPDS feed for \<meta property="belongs-to-collection" id="series"\> and \<meta property="group-position"\>.  
    *Note: Group positions are normalised (e.g., 1.0 becomes 1, while 1.5 remains 1.5).*  
 2. **Publisher Field (Optional)** **Condition:** Only if the setting 'Use Publisher as Series' is set to **YES**.  
-   It checks the \<dc:publisher\> field for data formatted like "Series Name Number".  
-3. **Description Tags** It checks the book description for series information enclosed in pipes, for example: |Reacher 3| or |Series Name \#Number|.  
+   It checks the \<dc:publisher\> field for data formatted like "SeriesName Number".  
+3. **Description Tags** It checks the book description for series information enclosed in pipes, for example: |Reacher 3| or |SeriesName Number|.  
 4. **Hardcover API (Fallback)** If no series information is found using the methods above, the plugin will attempt to fetch dynamic series data from Hardcover.app (requires API token).
 
 ### **Book Sorting**
@@ -265,13 +250,6 @@ Check logs for both booklore and ephemera containers for errors.
   * Restart feature may not be available on your device/KOReader version  
   * Book will still open directly as fallback  
   * See [Restart Navigation Guide](https://www.google.com/search?q=RESTART_NAVIGATION.md) for details  
-* If cloud badges don't appear on placeholder books:  
-  * Ensure CoverBrowser plugin is enabled in KOReader settings  
-  * File Manager must be in Mosaic/Grid view mode  
-  * Requires custom KOReader build with userpatch support  
-  * Check logs for "PlaceholderBadge: userpatch module not available"  
-  * See [Cloud Badge Troubleshooting](https://www.google.com/search?q=CLOUD_BADGE_TROUBLESHOOTING.md) for full guide  
-  * Note: Placeholder detection and download work without badges
 
 ## **Security and networking notes**
 
