@@ -554,10 +554,10 @@ function OPDSBrowser:onReaderReady(config)
             end)
         else
             logger.info("OPDSBrowser: Not a placeholder, checking if it's a copy in special folders")
-            -- If not found by direct lookup and it's a file in Recently Added or Top Rated,
+            -- If not found by direct lookup and it's a file in special folders,
             -- fall back to checking the placeholder database for any matching book
-            if current_file:match("/Recently Added/") or current_file:match("/Top Rated/") then
-                logger.info("OPDSBrowser: File is in special folder (Recently Added/Top Rated), attempting content-based check")
+            if current_file:match("/Recently Added/") or current_file:match("/Current Reads/") then
+                logger.info("OPDSBrowser: File is in special folder (Recently Added/Current Reads), attempting content-based check")
                 -- Check if it's a placeholder by examining the file content
                 if PlaceholderGenerator:isPlaceholder(current_file) then
                     logger.info("OPDSBrowser: Detected as placeholder via content check")
@@ -571,6 +571,12 @@ function OPDSBrowser:onReaderReady(config)
                 logger.info("OPDSBrowser: Not a placeholder")
             end
         end
+
+        -- Update Current Reads folder whenever any book is opened (async, non-blocking)
+        UIManager:scheduleIn(2, function()
+            logger.dbg("OPDSBrowser: Updating Current Reads folder in background")
+            self.library_sync:updateCurrentReads()
+        end)
     end)
 end
 
