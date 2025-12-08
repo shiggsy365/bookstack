@@ -637,7 +637,8 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     -- 7. Clear plugin's own OPDS cache for this book
     if CacheManager then
         -- Invalidate any OPDS metadata cache entries for this book
-        local book_id_pattern = placeholder_path:match("([^/]+)%.epub$")
+        -- Extract filename without extension (works for .epub, .kepub.epub, etc.)
+        local book_id_pattern = placeholder_path:match("([^/]+)%.[^/%.]+$")
         if book_id_pattern then
             CacheManager:invalidatePattern(book_id_pattern)
             logger.info("OPDS: ✓ Invalidated OPDS cache entries matching:", book_id_pattern)
