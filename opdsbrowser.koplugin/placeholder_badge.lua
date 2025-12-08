@@ -64,10 +64,46 @@ function PlaceholderBadge:init(placeholder_generator)
 end
 
 -- Patch function to be called by userpatch
+-- inside patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
+    -- Resolve placeholder generator: use provided placeholder_gen, or fall back to require()
+    local resolved_placeholder_gen = placeholder_gen
+    if not resolved_placeholder_gen then
+        local ok, pg = pcall(require, "placeholder_generator")
+        if ok and pg then
+            resolved_placeholder_gen = pg
+            logger.info("PlaceholderBadge: Resolved placeholder generator via require()")
+        else
+            logger.warn("PlaceholderBadge: placeholder_generator not provided and require() failed - placeholder detection disabled")
+        end
+    else
+        logger.info("PlaceholderBadge: Using placeholder generator passed to patch")
+    end
+
+    -- Keep using resolved_placeholder_gen in the closure below.
+    -- (later, inside the patched paintTo, replace any use of 'placeholder_gen' with 'resolved_placeholder_gen')
+
+
+
 local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
     logger.info("PlaceholderBadge: ==================== APPLYING COVERBROWSER PATCH ====================")
     logger.info("PlaceholderBadge: Patching CoverBrowser for placeholder badges")
+    
+    
+    
+    local resolved_placeholder_gen = placeholder_gen
+        if not resolved_placeholder_gen then
+            local ok, pg = pcall(require, "placeholder_generator")
+            if ok and pg then
+                resolved_placeholder_gen = pg
+                logger.info("PlaceholderBadge: Resolved placeholder generator via require()")
+            else
+                logger.warn("PlaceholderBadge: placeholder_generator not provided and require() failed - placeholder detection disabled")
+            end
+        else
+            logger.info("PlaceholderBadge: Using placeholder generator passed to patch")
+        end
 
+    
     -- Grab Cover Grid mode and the individual Cover Grid items
     local MosaicMenu = require("mosaicmenu")
     logger.info("PlaceholderBadge: ✓ Loaded MosaicMenu")
@@ -142,7 +178,7 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         if is_placeholder == nil then
             -- Not in cache, check the file
             logger.dbg("PlaceholderBadge: Checking if placeholder (not in cache):", self.filepath)
-            is_placeholder = placeholder_gen:isPlaceholder(self.filepath)
+            is_placeholder = placeholder_gen_resolved:isPlaceholder(self.filepath)
             placeholder_cache[self.filepath] = is_placeholder
 
             if is_placeholder then
