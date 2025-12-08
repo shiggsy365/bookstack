@@ -121,6 +121,10 @@ function OPDSBrowser:init()
 
     -- Queue refresh
     self.queue_refresh_action = nil
+    
+    -- Register file selection hook for FileManager
+    -- This allows us to intercept placeholder file taps before they open
+    self:registerFileManagerHooks()
 
     -- Check for pending navigation from restart (must be done after UI is ready)
     UIManager:scheduleIn(2, function()
@@ -172,6 +176,354 @@ function OPDSBrowser:checkRestartNavigation()
     
     logger.info("========================================")
     logger.info("OPDS WORKFLOW: ALL STEPS COMPLETE")
+    logger.info("========================================")
+end
+
+-- Register FileManager hooks to intercept placeholder file selections
+function OPDSBrowser:registerFileManagerHooks()
+    logger.info("OPDS Browser: Registering FileManager hooks for placeholder interception")
+    
+    -- Note: In KOReader, we can't directly override the file tap behavior
+    -- but we can add a menu action that users can trigger via long-press (hold)
+    -- This is the standard way plugins add custom file actions
+    
+    -- The actual hook will be registered via onMenuHold which is called
+    -- when a user long-presses a file in FileManager
+    logger.info("OPDS Browser: FileManager hooks ready (onMenuHold)")
+end
+
+-- Handle menu hold (long-press) on a file in FileManager
+-- This is called by KOReader when user long-presses a file
+function OPDSBrowser:onMenuHold(item)
+    logger.info("OPDS Browser: onMenuHold called")
+    
+    -- Only process if we're in FileManager (not ReaderUI)
+    if self.ui.name ~= "FileManager" then
+        logger.dbg("OPDS Browser: Not in FileManager, ignoring")
+        return false
+    end
+    
+    -- Check if item is a file (not a directory)
+    if not item or not item.path or item.is_directory then
+        logger.dbg("OPDS Browser: Not a file, ignoring")
+        return false
+    end
+    
+    local filepath = item.path
+    logger.info("OPDS Browser: Checking if file is placeholder:", filepath)
+    
+    -- Check if file is a placeholder
+    local book_info = self.library_sync:getBookInfo(filepath)
+    if not book_info then
+        logger.dbg("OPDS Browser: Not a placeholder, ignoring")
+        return false
+    end
+    
+    logger.info("OPDS Browser: File IS a placeholder!")
+    logger.info("OPDS Browser: Book title:", book_info.title)
+    
+    -- Add our custom "Download from OPDS" action to the menu
+    -- Return a table of menu items to add to the long-press menu
+    return {
+        {
+            text = _("Download from OPDS"),
+            callback = function()
+                logger.info("OPDS Browser: User selected 'Download from OPDS'")
+                UIManager:close(self.file_menu_dialog)
+                self:handlePlaceholderDownloadFromFileManager(filepath, book_info)
+            end,
+        },
+    }
+end
+
+-- Hook for when a file is selected (tapped) in FileManager
+-- This is our main interception point for placeholder files
+function OPDSBrowser:onFileSelect(filepath)
+    logger.info("=========================================")
+    logger.info("OPDS Browser: onFileSelect called")
+    logger.info("OPDS Browser: File:", filepath)
+    logger.info("=========================================")
+    
+    -- Only process if we're in FileManager
+    if self.ui.name ~= "FileManager" then
+        logger.dbg("OPDS Browser: Not in FileManager, ignoring")
+        return false
+    end
+    
+    -- Only process EPUB files
+    if not filepath:match("%.epub$") then
+        logger.dbg("OPDS Browser: Not an EPUB file, ignoring")
+        return false
+    end
+    
+    -- Check if this is a placeholder file
+    local book_info = self.library_sync:getBookInfo(filepath)
+    if not book_info then
+        logger.dbg("OPDS Browser: Not a placeholder, allowing normal open")
+        return false
+    end
+    
+    logger.info("=========================================")
+    logger.info("OPDS Browser: INTERCEPTED PLACEHOLDER SELECTION!")
+    logger.info("OPDS Browser: Title:", book_info.title)
+    logger.info("OPDS Browser: Author:", book_info.author)
+    logger.info("=========================================")
+    
+    -- Intercept the selection and trigger download instead of opening
+    self:handlePlaceholderDownloadFromFileManager(filepath, book_info)
+    
+    -- Return true to prevent default behavior (opening the file)
+    return true
+end
+
+-- Handle placeholder download triggered from FileManager
+-- This is different from handlePlaceholderAutoDownload which is triggered from Reader
+function OPDSBrowser:handlePlaceholderDownloadFromFileManager(filepath, book_info)
+    logger.info("========================================")
+    logger.info("PLACEHOLDER FILE MANAGER DOWNLOAD WORKFLOW")
+    logger.info("========================================")
+    logger.info("OPDS Browser: Starting download from FileManager")
+    logger.info("OPDS Browser: File:", filepath)
+    logger.info("OPDS Browser: Title:", book_info.title)
+    
+    if not self:ensureNetwork() then
+        logger.err("OPDS Browser: Network not available")
+        return
+    end
+    
+    -- Show confirmation dialog
+    local ConfirmBox = require("ui/widget/confirmbox")
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Download '%1' from OPDS server?\n\nThis will replace the placeholder with the real book."), 
+                 book_info.title),
+        ok_text = _("Download"),
+        ok_callback = function()
+            -- Trigger the download with "refresh folder" mode
+            self:downloadPlaceholderAndRefresh(filepath, book_info)
+        end,
+    })
+end
+
+-- Download placeholder and refresh folder (don't open book)
+function OPDSBrowser:downloadPlaceholderAndRefresh(placeholder_path, book_info)
+    logger.info("========================================")
+    logger.info("DOWNLOAD AND REFRESH WORKFLOW")
+    logger.info("========================================")
+    
+    if not self:ensureNetwork() then
+        return
+    end
+    
+    -- Extract book ID
+    local book_id = book_info.book_id
+    if book_id then
+        book_id = book_id:match("book:(%d+)$") or book_id
+    end
+    
+    if not book_id or book_id == "" then
+        logger.err("OPDS: No book ID found in placeholder info")
+        UIHelpers.showError(_("Cannot download: Book ID not found"))
+        return
+    end
+
+    -- Determine file extension
+    local extension = ".epub"
+    if book_info.download_url and book_info.download_url:lower():match("kepub") then
+        extension = ".kepub.epub"
+    end
+
+    -- Create unique temp file name
+    local timestamp = os.time()
+    local temp_filepath = placeholder_path:gsub("%.epub$", string.format(".downloading_%d.tmp", timestamp))
+    local filepath = placeholder_path:gsub("%.epub$", extension)
+
+    -- Use download URL from book_info
+    local download_url = book_info.download_url
+    
+    if not download_url or download_url == "" then
+        logger.warn("OPDS: No download_url in book_info, constructing from book ID")
+        download_url = self.opds_url .. "/" .. book_id .. "/download"
+    end
+
+    logger.info("OPDS: Downloading:", book_info.title)
+    logger.info("OPDS: Download URL:", download_url)
+    logger.info("OPDS: Placeholder path:", placeholder_path)
+    logger.info("OPDS: Temp download path:", temp_filepath)
+    logger.info("OPDS: Final book path:", filepath)
+
+    local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
+    UIManager:show(loading)
+    
+    -- Download with authentication
+    local user = (self.opds_username and self.opds_username ~= "") and self.opds_username or nil
+    local pass = (self.opds_password and self.opds_password ~= "") and self.opds_password or nil
+    
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    local mime = require("mime")
+    
+    local response_body = {}
+    local headers = {
+        ["Cache-Control"] = "no-cache, no-store, must-revalidate",
+        ["Pragma"] = "no-cache",
+        ["Expires"] = "0"
+    }
+    
+    if user and pass then
+        local credentials = mime.b64(user .. ":" .. pass)
+        headers["Authorization"] = "Basic " .. credentials
+    end
+    
+    local res, code, response_headers = https.request{
+        url = download_url,
+        method = "GET",
+        headers = headers,
+        sink = ltn12.sink.table(response_body)
+    }
+    
+    UIManager:close(loading)
+    
+    if not res or code ~= 200 then
+        logger.err("OPDS: Download failed with code:", code)
+        UIHelpers.showError(T(_("Download failed: HTTP %1"), code or "error"))
+        return
+    end
+    
+    local data = table.concat(response_body)
+    logger.info("OPDS: Downloaded", #data, "bytes")
+
+    -- Validate file size
+    if #data < Constants.MIN_VALID_BOOK_SIZE then
+        logger.err("OPDS: File size:", #data, "bytes, minimum:", Constants.MIN_VALID_BOOK_SIZE)
+        UIHelpers.showError(_("Downloaded file appears invalid (too small)"))
+        return
+    end
+
+    -- Write to temporary file
+    local file, err = io.open(temp_filepath, "wb")
+    if not file then
+        logger.err("OPDS: Failed to open temp file for writing:", err)
+        UIHelpers.showError(T(_("Failed to create file: %1"), err or "unknown"))
+        return
+    end
+
+    file:write(data)
+    file:close()
+
+    logger.info("OPDS: Wrote", #data, "bytes to temp file:", temp_filepath)
+
+    -- Verify temp file
+    local temp_attr = lfs.attributes(temp_filepath)
+    if not temp_attr or temp_attr.mode ~= "file" then
+        logger.err("OPDS: Temp file was not created successfully")
+        UIHelpers.showError(_("Download succeeded but temp file not found"))
+        return
+    end
+
+    -- Replace placeholder with real book
+    self:_finishPlaceholderDownloadAndRefresh(placeholder_path, temp_filepath, filepath, book_info.title)
+end
+
+-- Finish placeholder download and refresh folder (don't open book)
+function OPDSBrowser:_finishPlaceholderDownloadAndRefresh(placeholder_path, temp_filepath, filepath, book_title)
+    logger.info("========================================")
+    logger.info("FINISHING DOWNLOAD AND REFRESH")
+    logger.info("========================================")
+    
+    -- Verify temp file is not a placeholder
+    local PlaceholderGenerator = require("placeholder_generator")
+    local temp_is_placeholder = PlaceholderGenerator:isPlaceholder(temp_filepath)
+    
+    if temp_is_placeholder then
+        logger.err("OPDS: Downloaded file is a placeholder!")
+        os.remove(temp_filepath)
+        UIHelpers.showError(_("Download failed: Server returned a placeholder instead of the book."))
+        return
+    end
+
+    logger.info("OPDS: Verified - temp file is a real book")
+
+    -- Delete placeholder file
+    logger.info("OPDS: Deleting placeholder file:", placeholder_path)
+    local delete_ok = os.remove(placeholder_path)
+    
+    if not delete_ok then
+        logger.err("OPDS: Failed to delete placeholder")
+        os.remove(temp_filepath)
+        UIHelpers.showError(_("Failed to delete placeholder file"))
+        return
+    end
+    
+    -- Remove from placeholder database
+    self.library_sync.placeholder_db[placeholder_path] = nil
+    self.library_sync:savePlaceholderDB()
+    logger.info("OPDS: Removed placeholder from database")
+
+    -- Clean up symlinks in Recently Added
+    local recently_added_path = self.library_sync.recently_added_path
+    if recently_added_path then
+        local placeholder_filename = placeholder_path:match("([^/]+)$")
+        if placeholder_filename then
+            local recently_added_file = recently_added_path .. "/" .. placeholder_filename
+            local file_attr = lfs.attributes(recently_added_file)
+            if file_attr then
+                os.remove(recently_added_file)
+                logger.info("OPDS: Removed Recently Added symlink")
+            end
+        end
+    end
+
+    -- Rename temp file to final location
+    logger.info("OPDS: Renaming temp file to final location:", filepath)
+    local rename_ok = os.rename(temp_filepath, filepath)
+    if not rename_ok then
+        logger.err("OPDS: Failed to rename temp file")
+        os.remove(temp_filepath)
+        UIHelpers.showError(_("Failed to rename downloaded file"))
+        return
+    end
+
+    logger.info("OPDS: File replacement complete")
+
+    -- Clear caches
+    if self.placeholder_badge then
+        self.placeholder_badge:clearCache(placeholder_path)
+        self.placeholder_badge:clearCache(filepath)
+    end
+    
+    -- Clear document settings
+    pcall(function()
+        local DocSettings = require("docsettings")
+        DocSettings:open(placeholder_path):purge()
+        DocSettings:open(filepath):purge()
+    end)
+
+    -- Show success message
+    UIHelpers.showSuccess(T(_("Downloaded: %1\n\nReturning to folder view..."), book_title or "Book"))
+
+    -- Extract folder path
+    local folder_path = filepath:match("(.*/)")
+    
+    if folder_path then
+        logger.info("OPDS: Refreshing folder view:", folder_path)
+        
+        -- Schedule folder refresh
+        UIManager:scheduleIn(0.5, function()
+            local FileManager = require("apps/filemanager/filemanager")
+            if FileManager.instance then
+                -- Refresh current folder
+                FileManager.instance:onRefresh()
+                logger.info("OPDS: FileManager refreshed")
+            else
+                -- FileManager not active, open folder
+                FileManager:showFiles(folder_path)
+                logger.info("OPDS: Opened folder:", folder_path)
+            end
+        end)
+    end
+    
+    logger.info("========================================")
+    logger.info("DOWNLOAD AND REFRESH COMPLETE")
     logger.info("========================================")
 end
 
