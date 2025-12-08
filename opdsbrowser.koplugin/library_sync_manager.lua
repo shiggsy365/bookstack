@@ -11,6 +11,7 @@ local LibrarySyncManager = {
     base_library_path = nil,
     authors_path = nil,
     recently_added_path = nil,
+    top_rated_path = nil,
     placeholder_db = {}, -- Maps filepath -> book_info
     opds_username = nil,
     opds_password = nil,
@@ -20,6 +21,7 @@ function LibrarySyncManager:init(base_path, username, password)
     self.base_library_path = base_path or "/mnt/us/opdslibrary"
     self.authors_path = self.base_library_path .. "/authors"
     self.recently_added_path = self.base_library_path .. "/Recently Added"
+    self.top_rated_path = self.base_library_path .. "/Top Rated"
     self.opds_username = username
     self.opds_password = password
     self.settings = LuaSettings:open(self.settings_file)
@@ -77,7 +79,14 @@ function LibrarySyncManager:createFolderStructure()
         logger.err("LibrarySyncManager: Failed to create Recently Added directory:", self.recently_added_path, err)
         return false
     end
-    
+
+    -- Create Top Rated directory
+    ok, err = lfs.mkdir(self.top_rated_path)
+    if not ok and err ~= "File exists" then
+        logger.err("LibrarySyncManager: Failed to create Top Rated directory:", self.top_rated_path, err)
+        return false
+    end
+
     logger.info("LibrarySyncManager: Created folder structure at:", self.base_library_path)
     return true
 end
@@ -391,11 +400,15 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
     logger.info("LibrarySyncManager: Populating Recently Added folder")
     local recently_added, recently_failed = self:populateRecentlyAdded(books)
 
-    -- Save database again after populating Recently Added (includes symlink/copy paths)
-    self:savePlaceholderDB()
-    logger.info("LibrarySyncManager: Saved database with Recently Added entries")
+    -- Populate Top Rated folder
+    logger.info("LibrarySyncManager: Populating Top Rated folder")
+    local top_rated, top_rated_failed = self:populateTopRated(books)
 
-    logger.info("LibrarySyncManager: Sync complete - Created:", created, "Updated:", updated, "Skipped:", skipped, "Failed:", failed, "Orphans removed:", deleted_orphans, "Recently Added:", recently_added)
+    -- Save database again after populating special folders (includes symlink/copy paths)
+    self:savePlaceholderDB()
+    logger.info("LibrarySyncManager: Saved database with Recently Added and Top Rated entries")
+
+    logger.info("LibrarySyncManager: Sync complete - Created:", created, "Updated:", updated, "Skipped:", skipped, "Failed:", failed, "Orphans removed:", deleted_orphans, "Recently Added:", recently_added, "Top Rated:", top_rated)
     
     return true, {
         created = created,
@@ -404,6 +417,7 @@ function LibrarySyncManager:syncLibrary(books, progress_callback)
         failed = failed,
         deleted_orphans = deleted_orphans,
         recently_added = recently_added,
+        top_rated = top_rated,
         total = total_books
     }
 end
@@ -613,6 +627,160 @@ function LibrarySyncManager:populateRecentlyAdded(books)
     end
     
     logger.info("LibrarySyncManager: Recently Added populated - Added:", added, "Failed:", failed)
+    return added, failed
+end
+
+-- Populate Top Rated folder with symlinks to highest rated books
+function LibrarySyncManager:populateTopRated(books)
+    logger.info("LibrarySyncManager: Populating Top Rated folder")
+
+    -- Clear existing Top Rated folder
+    local function clear_directory(dir)
+        if lfs.attributes(dir, "mode") ~= "directory" then
+            return
+        end
+
+        for file in lfs.dir(dir) do
+            if file ~= "." and file ~= ".." then
+                local path = dir .. "/" .. file
+                local attr = lfs.attributes(path)
+                if attr and attr.mode == "file" then
+                    -- Remove from database before deleting file
+                    if self.placeholder_db[path] then
+                        self.placeholder_db[path] = nil
+                        logger.dbg("LibrarySyncManager: Removed from database:", path)
+                    end
+                    os.remove(path)
+                    logger.dbg("LibrarySyncManager: Removed old file:", path)
+                end
+            end
+        end
+    end
+
+    clear_directory(self.top_rated_path)
+
+    -- Sort books by rating (highest first)
+    local books_with_ratings = {}
+    for _, book in ipairs(books) do
+        if book.rating and book.rating ~= "" then
+            local rating = tonumber(book.rating) or 0
+            if rating > 0 then
+                table.insert(books_with_ratings, book)
+            end
+        end
+    end
+
+    table.sort(books_with_ratings, function(a, b)
+        local rating_a = tonumber(a.rating) or 0
+        local rating_b = tonumber(b.rating) or 0
+        return rating_a > rating_b
+    end)
+
+    -- Take top 50 highest rated books
+    local top_count = math.min(50, #books_with_ratings)
+    logger.info("LibrarySyncManager: Found", top_count, "rated books")
+
+    local added = 0
+    local failed = 0
+
+    for i = 1, top_count do
+        local book = books_with_ratings[i]
+
+        -- Find the original placeholder file
+        local target_dir = self:getBookDirectory(book)
+        if target_dir then
+            local filename = self:generateFilename(book)
+            local original_path = target_dir .. "/" .. filename
+
+            -- Check if original file exists
+            if lfs.attributes(original_path, "mode") == "file" then
+                -- Create symlink in Top Rated folder
+                local symlink_path = self.top_rated_path .. "/" .. filename
+
+                -- Try to create symlink using lfs.link if available
+                local link_ok = false
+
+                -- First try using lfs.link (safer, no shell injection risk)
+                if lfs.link then
+                    local ok, result = pcall(lfs.link, original_path, symlink_path, true)
+                    if ok and result == true then
+                        link_ok = true
+                        logger.dbg("LibrarySyncManager: Created symlink with lfs.link:", symlink_path)
+                    elseif ok and result ~= true then
+                        logger.dbg("LibrarySyncManager: lfs.link (symlink) returned:", result)
+                    end
+                end
+
+                if link_ok then
+                    added = added + 1
+                    -- Store the symlink path in database too for quick lookups
+                    self.placeholder_db[symlink_path] = self.placeholder_db[original_path]
+                    logger.dbg("LibrarySyncManager: Added symlink to database:", symlink_path)
+                else
+                    -- If symlink fails, try creating a hard link or copy instead
+                    local copy_ok = false
+
+                    -- Try hard link first (no space cost)
+                    if lfs.link then
+                        local ok, result = pcall(lfs.link, original_path, symlink_path)
+                        if ok and result == true then
+                            copy_ok = true
+                            logger.dbg("LibrarySyncManager: Created hard link with lfs.link:", symlink_path)
+                        elseif ok and result ~= true then
+                            logger.dbg("LibrarySyncManager: lfs.link (hard) returned:", result)
+                        end
+                    end
+
+                    -- Fallback to file copy using pure Lua I/O (completely safe)
+                    if not copy_ok then
+                        local ok, err = pcall(function()
+                            local source_file = io.open(original_path, "rb")
+                            if not source_file then
+                                return false, "Cannot open source"
+                            end
+
+                            local content = source_file:read("*all")
+                            source_file:close()
+
+                            local dest_file = io.open(symlink_path, "wb")
+                            if not dest_file then
+                                return false, "Cannot open destination"
+                            end
+
+                            dest_file:write(content)
+                            dest_file:close()
+
+                            return true
+                        end)
+
+                        if ok and err == true then
+                            copy_ok = true
+                            logger.dbg("LibrarySyncManager: Created copy with Lua I/O:", symlink_path)
+                        elseif ok and err ~= true then
+                            logger.dbg("LibrarySyncManager: File copy failed:", err)
+                        end
+                    end
+
+                    if copy_ok then
+                        added = added + 1
+                        -- Store the copy/link path in database too for quick lookups
+                        self.placeholder_db[symlink_path] = self.placeholder_db[original_path]
+                        logger.dbg("LibrarySyncManager: Added copy/hard link to database:", symlink_path)
+                    else
+                        failed = failed + 1
+                        logger.warn("LibrarySyncManager: Failed to create link/copy for:", filename)
+                    end
+                end
+            else
+                logger.dbg("LibrarySyncManager: Original file not found:", original_path)
+                failed = failed + 1
+            end
+        else
+            failed = failed + 1
+        end
+    end
+
+    logger.info("LibrarySyncManager: Top Rated populated - Added:", added, "Failed:", failed)
     return added, failed
 end
 
