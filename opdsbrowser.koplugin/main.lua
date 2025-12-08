@@ -534,41 +534,142 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
 
     logger.info("OPDS: Verified - final file is a real book (not placeholder)")
 
-    -- Clear all relevant caches
-    logger.info("OPDS: Clearing caches for placeholder and final file")
+    -- ============================================================================
+    -- CRITICAL: Clear ALL caches related to the replaced book
+    -- This ensures the UI shows the real book immediately without requiring restart
+    -- ============================================================================
+    logger.info("OPDS: ==================== CACHE INVALIDATION START ====================")
+    logger.info("OPDS: Clearing ALL caches for placeholder:", placeholder_path)
+    logger.info("OPDS: Clearing ALL caches for real book:", filepath)
     
-    -- Clear placeholder badge cache
+    -- 1. Clear placeholder badge cache (visual indicator on cover)
     if self.placeholder_badge then
         self.placeholder_badge:clearCache(placeholder_path)
         self.placeholder_badge:clearCache(filepath)
-        logger.info("OPDS: Cleared placeholder badge cache")
+        logger.info("OPDS: ✓ Cleared placeholder badge cache")
+    else
+        logger.info("OPDS: ✗ Placeholder badge not available")
     end
     
-    -- Clear document settings for both old and new paths
+    -- 2. Clear document settings for both old and new paths
     pcall(function()
         local DocSettings = require("docsettings")
         -- Clear placeholder settings
         DocSettings:open(placeholder_path):purge()
         -- Clear final file settings (in case it existed before)
         DocSettings:open(filepath):purge()
-        logger.info("OPDS: Cleared document settings cache")
+        logger.info("OPDS: ✓ Cleared DocSettings cache for both paths")
     end)
 
-    logger.info("OPDS: Successfully downloaded book, opening:", filepath)
+    -- 3. Clear DocumentRegistry cache (KOReader's internal metadata cache)
+    pcall(function()
+        local DocumentRegistry = require("documentregistry")
+        if DocumentRegistry then
+            -- Remove cached entries for both paths
+            if DocumentRegistry.registry and DocumentRegistry.registry[placeholder_path] then
+                DocumentRegistry.registry[placeholder_path] = nil
+                logger.info("OPDS: ✓ Cleared DocumentRegistry cache for placeholder")
+            end
+            if DocumentRegistry.registry and DocumentRegistry.registry[filepath] then
+                DocumentRegistry.registry[filepath] = nil
+                logger.info("OPDS: ✓ Cleared DocumentRegistry cache for real book")
+            end
+            -- If DocumentRegistry has a cache table, clear those too
+            if DocumentRegistry.provider_cache then
+                DocumentRegistry.provider_cache[placeholder_path] = nil
+                DocumentRegistry.provider_cache[filepath] = nil
+                logger.info("OPDS: ✓ Cleared DocumentRegistry provider cache")
+            end
+        end
+    end)
+
+    -- 4. Clear CoverBrowser cache if it's loaded
+    pcall(function()
+        -- Get CoverBrowser plugin if it exists
+        local package_loaded = package.loaded
+        if package_loaded then
+            -- Check for loaded CoverBrowser module
+            for module_name, module in pairs(package_loaded) do
+                if type(module_name) == "string" and module_name:match("coverbrowser") and type(module) == "table" then
+                    -- Try to clear its cache
+                    if module.cache then
+                        module.cache[placeholder_path] = nil
+                        module.cache[filepath] = nil
+                        logger.info("OPDS: ✓ Cleared CoverBrowser cache for:", module_name)
+                    end
+                    if module.cover_cache then
+                        module.cover_cache[placeholder_path] = nil
+                        module.cover_cache[filepath] = nil
+                        logger.info("OPDS: ✓ Cleared CoverBrowser cover_cache for:", module_name)
+                    end
+                end
+            end
+        end
+    end)
+
+    -- 5. Clear FileManager collection cache if loaded
+    pcall(function()
+        local FileManagerCollection = require("apps/filemanager/filemanagercollection")
+        if FileManagerCollection and FileManagerCollection.coll then
+            -- Refresh collection data
+            if type(FileManagerCollection.coll.reload) == "function" then
+                FileManagerCollection.coll:reload()
+                logger.info("OPDS: ✓ Reloaded FileManagerCollection")
+            end
+        end
+    end)
+
+    -- 6. Update placeholder database - remove the old entry
+    if self.library_sync and self.library_sync.placeholder_db then
+        if self.library_sync.placeholder_db[placeholder_path] then
+            self.library_sync.placeholder_db[placeholder_path] = nil
+            self.library_sync:savePlaceholderDB()
+            logger.info("OPDS: ✓ Removed placeholder from database")
+        end
+        -- Ensure the new file is NOT in the placeholder database
+        if self.library_sync.placeholder_db[filepath] then
+            self.library_sync.placeholder_db[filepath] = nil
+            self.library_sync:savePlaceholderDB()
+            logger.info("OPDS: ✓ Removed new file from placeholder database (if present)")
+        end
+    end
+
+    -- 7. Clear plugin's own OPDS cache for this book
+    if CacheManager then
+        -- Invalidate any OPDS metadata cache entries for this book
+        local book_id_pattern = placeholder_path:match("([^/]+)%.epub$")
+        if book_id_pattern then
+            CacheManager:invalidatePattern(book_id_pattern)
+            logger.info("OPDS: ✓ Invalidated OPDS cache entries matching:", book_id_pattern)
+        end
+    end
+
+    logger.info("OPDS: ==================== CACHE INVALIDATION COMPLETE ====================")
+    logger.info("OPDS: Successfully downloaded and cached book, opening:", filepath)
 
     -- Open the downloaded book IMMEDIATELY (no delay to prevent empty UI)
     local ReaderUI = require("apps/reader/readerui")
     ReaderUI:showReader(filepath)
 
-    -- Background: Refresh file manager and force cache clearing
+    -- Background: Refresh file manager and force full cache clearing
     UIManager:scheduleIn(1, function()
         -- Refresh file manager in background
         local FileManager = require("apps/filemanager/filemanager")
         if FileManager.instance then
             -- Force a full refresh to clear any cached file information
             FileManager.instance:onRefresh()
-            logger.info("OPDS: Background file manager refresh complete")
+            logger.info("OPDS: ✓ Background FileManager refresh complete")
+            
+            -- If FileManagerHistory exists, refresh it too
+            pcall(function()
+                if FileManager.instance.history then
+                    FileManager.instance.history:reload()
+                    logger.info("OPDS: ✓ Refreshed FileManager history")
+                end
+            end)
         end
+        
+        logger.info("OPDS: ==================== UI REFRESH COMPLETE ====================")
     end)
 end
 
