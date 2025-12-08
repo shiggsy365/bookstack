@@ -14,6 +14,10 @@ local UIHelpers = {}
 function UIHelpers.createMenu(title, items, options)
     options = options or {}
     
+    -- Ensure menu height accommodates content without overflowing, 
+    -- but provide defaults if not specified.
+    -- If items are many, Menu widget should handle scrolling if height is constrained.
+    
     return Menu:new{
         title = title or _("Menu"),
         item_table = items,
@@ -22,7 +26,10 @@ function UIHelpers.createMenu(title, items, options)
         title_bar_fm_style = options.title_bar_fm_style ~= false,
         onMenuHold = options.onMenuHold or function() return true end,
         width = options.width or Screen:getWidth(),
+        -- Use provided height or default to screen height to ensure scrolling works
         height = options.height or Screen:getHeight(),
+        -- Ensure context menu can scroll if content exceeds height
+        scrollable = true, 
     }
 end
 
@@ -88,6 +95,9 @@ function UIHelpers.createMultiInputDialog(title, fields, callback, extra_text)
     dialog = MultiInputDialog:new{
         title = title,
         fields = fields,
+        -- Ensure the dialog is scrollable if there are many fields
+        scrollable = true,
+        height = Screen:getHeight() * 0.9, -- Limit height to fit screen
         buttons = {
             {
                 {
