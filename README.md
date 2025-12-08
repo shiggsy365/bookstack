@@ -163,6 +163,16 @@ The Hardcover integration intelligently caches data to minimize API calls and pr
 - Metadata is refreshed automatically after download
 - File manager view updates to show newly downloaded books
 
+### Placeholder Auto-Download with Restart Navigation
+- Placeholder books automatically download when opened
+- **NEW:** KOReader automatically restarts after successful download
+- **NEW:** Automatically navigates to the folder containing the downloaded book
+- All caches fully cleared to ensure UI shows the real book immediately
+- Seamless user experience - no manual navigation needed
+- Cloud badge (☁) shows on placeholder book covers in mosaic view
+- See [Restart Navigation Guide](RESTART_NAVIGATION.md) for details
+- See [Cloud Badge Troubleshooting](CLOUD_BADGE_TROUBLESHOOTING.md) for badge issues
+
 ## Series Information Handling
 
 The plugin offers flexible series information extraction to accommodate different library configurations and preferences.
@@ -315,6 +325,20 @@ All Hardcover data is intelligently cached for 5 minutes to minimize API calls w
   - Check that the download directory exists and is writable
   - Verify authentication credentials if your Booklore instance requires them
   - Check KOReader logs for specific error messages
+
+- If KOReader restart after download doesn't work:
+  - Check logs for "RestartNavigation: No restart method available!"
+  - Restart feature may not be available on your device/KOReader version
+  - Book will still open directly as fallback
+  - See [Restart Navigation Guide](RESTART_NAVIGATION.md) for details
+
+- If cloud badges don't appear on placeholder books:
+  - Ensure CoverBrowser plugin is enabled in KOReader settings
+  - File Manager must be in Mosaic/Grid view mode
+  - Requires custom KOReader build with userpatch support
+  - Check logs for "PlaceholderBadge: userpatch module not available"
+  - See [Cloud Badge Troubleshooting](CLOUD_BADGE_TROUBLESHOOTING.md) for full guide
+  - Note: Placeholder detection and download work without badges
 
 ## Security and networking notes
 - If exposing services to the internet, secure them appropriately:
