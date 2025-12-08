@@ -37,7 +37,7 @@
 --
 local BD = require("ui/bidi")
 local DataStorage = require("datastorage")
-local Dispatcher = require("dispatcher") -- Added Dispatcher import
+-- Removed Dispatcher import as we are not using it for action registration anymore
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -109,25 +109,12 @@ function OPDSBrowser:init()
     -- 5. Register to Main Menu (Now safe because clients exist)
     self.ui.menu:registerToMainMenu(self)
 
-    -- 6. Register Dispatcher actions (For user patches/gestures)
-    -- We keep registerAction for UI visibility, but remove the failing handlers
-    Dispatcher:registerAction("opds_open_menu", {
-        category = "none",
-        event = "opds_open_menu",
-        title = _("Open Cloud Book Library"),
-        separator = true,
-    })
-    
-    Dispatcher:registerAction("opds_sync_library", {
-        category = "none",
-        event = "opds_sync_library",
-        title = _("Sync Cloud Library"),
-        separator = true,
-    })
-    
-    -- EXPOSE GLOBAL INSTANCE
-    -- This allows user patches to call methods directly: _G.opds_plugin_instance:methodName()
+    -- 6. EXPOSE GLOBAL INSTANCE
+    -- This is the critical fix. Instead of using Dispatcher:registerActionHandler (which failed),
+    -- we expose the instance globally so user patches can call methods directly.
+    -- Usage in patch: if _G.opds_plugin_instance then _G.opds_plugin_instance:showMainMenu() end
     _G.opds_plugin_instance = self
+    logger.info("OPDS Browser: Plugin instance exposed as _G.opds_plugin_instance")
 
     -- Queue refresh
     self.queue_refresh_action = nil
