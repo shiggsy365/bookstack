@@ -1130,6 +1130,9 @@ function OPDSBrowser:getMenuItems()
         { text = _("Library Sync - OPDS"),
           callback = function() self:buildPlaceholderLibrary() end,
           enabled_func = function() return self.opds_url ~= "" end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
         -- Ephemera section
         { text = _("Ephemera - Request New Book"),
           callback = function() self:requestBook() end,
@@ -1137,18 +1140,31 @@ function OPDSBrowser:getMenuItems()
         { text = _("Ephemera - View Download Queue"),
           callback = function() self:showDownloadQueue() end,
           enabled_func = function() return self.ephemera_client:isConfigured() end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
         -- Hardcover section
         { text = _("Hardcover - Search Author"),
           callback = function() self:hardcoverSearchAuthor() end,
           enabled_func = function() return self.hardcover_client:isConfigured() end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
         -- History section
         { text = _("History - Recent Searches"),
           callback = function() self:showSearchHistory() end },
         { text = _("History - Recently Viewed"),
           callback = function() self:showRecentBooks() end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
         -- Settings section
         { text = _("Plugin - Settings"),
           callback = function() self:showSettings() end },
+        { text = _("Plugin - Cache Info"),
+          callback = function() self:showCacheInfo() end },
+        { text = _("Plugin - Workflow Health Check"),
+          callback = function() self:showWorkflowHealth() end },
     }
 end
 
@@ -1173,18 +1189,69 @@ function OPDSBrowser:showSettings()
     local library_check_setting = self.enable_library_check and "YES" or "NO"
 
     local fields = {
-        { text = self.opds_url, hint = _("Base URL (e.g., https://example.com/api/v1/opds)"), input_type = "string" },
-        { text = self.opds_username, hint = _("OPDS Username (optional)"), input_type = "string" },
-        { text = self.opds_password, hint = _("OPDS Password (optional)"), input_type = "string" },
-        { text = self.ephemera_url, hint = _("Ephemera URL (e.g., http://example.com:8286)"), input_type = "string" },
-        { text = self.download_dir, hint = _("Download Directory"), input_type = "string" },
-        { text = publisher_setting, hint = _("Use Publisher as Series? (YES/NO)"), input_type = "string" },
-        { text = library_check_setting, hint = _("Check 'In Library' for Hardcover? (YES/NO)"), input_type = "string" },
-        { text = tostring(self.library_check_page_limit), hint = _("Max pages to check (5=250 books, 0=unlimited)"), input_type = "number" },
-        { text = self.library_sync.base_library_path, hint = _("Library Sync Path"), input_type = "string" },
+        {
+            text = self.opds_url,
+            hint = _("Base URL (e.g., https://example.com/api/v1/opds)"),
+            input_type = "string",
+            description = _("OPDS URL")
+        },
+        {
+            text = self.opds_username,
+            hint = _("OPDS Username (optional)"),
+            input_type = "string",
+            description = _("OPDS Username")
+        },
+        {
+            text = self.opds_password,
+            hint = _("OPDS Password (optional)"),
+            input_type = "string",
+            description = _("OPDS Password")
+        },
+        {
+            text = self.ephemera_url,
+            hint = _("Ephemera URL (e.g., http://example.com:8286)"),
+            input_type = "string",
+            description = _("Ephemera URL")
+        },
+        {
+            text = self.download_dir,
+            hint = _("Download Directory"),
+            input_type = "string",
+            description = _("Download Directory")
+        },
+        {
+            text = self.hardcover_token,
+            hint = _("Bearer Token (e.g., Bearer abc123xyz...)"),
+            input_type = "string",
+            description = _("Hardcover API Key")
+        },
+        {
+            text = publisher_setting,
+            hint = _("Use Publisher as Series? (YES/NO)"),
+            input_type = "string",
+            description = _("Publisher as Series")
+        },
+        {
+            text = library_check_setting,
+            hint = _("Check 'In Library' for Hardcover? (YES/NO)"),
+            input_type = "string",
+            description = _("Check Library Status")
+        },
+        {
+            text = tostring(self.library_check_page_limit),
+            hint = _("Max pages to check (5=250 books, 0=unlimited)"),
+            input_type = "number",
+            description = _("Library Check Page Limit")
+        },
+        {
+            text = self.library_sync.base_library_path,
+            hint = _("Library Sync Path"),
+            input_type = "string",
+            description = _("Sync Path")
+        },
     }
     
-    local extra_text = T(_("Hardcover API: %1\n\nTo configure Hardcover, edit:\nkoreader/settings/opdsbrowser.lua"), hardcover_status)
+    local extra_text = T(_("Hardcover API Status: %1"), hardcover_status)
     
     UIHelpers.createMultiInputDialog(
         _("Book Download Settings"),
@@ -1225,12 +1292,13 @@ function OPDSBrowser:saveSettings(fields)
     self.opds_password = Utils.trim(fields[3] or "")
     self.ephemera_url = new_ephemera_url
     self.download_dir = Utils.trim(fields[5] or self.download_dir)
-    self.use_publisher_as_series = Utils.safe_boolean(fields[6], false)
-    self.enable_library_check = Utils.safe_boolean(fields[7], true)
-    self.library_check_page_limit = Utils.safe_number(fields[8], Constants.DEFAULT_PAGE_LIMIT)
+    self.hardcover_token = Utils.trim(fields[6] or "")
+    self.use_publisher_as_series = Utils.safe_boolean(fields[7], false)
+    self.enable_library_check = Utils.safe_boolean(fields[8], true)
+    self.library_check_page_limit = Utils.safe_number(fields[9], Constants.DEFAULT_PAGE_LIMIT)
     
     -- Update library sync path (use download_dir/Library unless user specified custom path)
-    local new_library_path = Utils.trim(fields[9] or "")
+    local new_library_path = Utils.trim(fields[10] or "")
     if new_library_path == "" or new_library_path == self.library_sync.base_library_path then
         -- Use default: download_dir/Library
         new_library_path = self.download_dir .. "/Library"
@@ -1244,6 +1312,7 @@ function OPDSBrowser:saveSettings(fields)
         opds_password = self.opds_password,
         ephemera_url = self.ephemera_url,
         download_dir = self.download_dir,
+        hardcover_token = self.hardcover_token,
         use_publisher_as_series = self.use_publisher_as_series,
         enable_library_check = self.enable_library_check,
         library_check_page_limit = self.library_check_page_limit,
@@ -1657,19 +1726,39 @@ end
 function OPDSBrowser:startQueueRefresh()
     self:stopQueueRefresh()
     self.queue_refresh_action = function()
-        if not self.queue_menu_open then
+        -- FIX: Prevent re-opening menu if it was closed
+        if not self.queue_menu_open or not self.queue_menu then
             self:stopQueueRefresh()
             return
         end
+        
+        -- Check if menu is still active in UIManager
+        -- This handles the case where user closed it via swipe/tap outside
+        -- but our flag didn't catch it
+        local is_visible = false
+        if self.queue_menu.onShow then -- Simple check if widget is valid
+             -- Real visibility check would be better but complex in KOReader
+             is_visible = true 
+        end
+        
+        -- If we can't reliably check visibility, we rely on the flag
+        -- But if the queue request fails, we stop anyway
+        
         local ok, queue = self.ephemera_client:getQueue()
         if ok then
-            if self.queue_menu then
+            if self.queue_menu and self.queue_menu_open then
+                -- Close old menu and reopen with new data
+                -- This is a bit brute force but standard for KOReader menus
                 UIManager:close(self.queue_menu)
                 self.queue_menu = nil
+                self:displayDownloadQueue(queue)
+            else
+                self:stopQueueRefresh()
             end
-            self:displayDownloadQueue(queue)
         else
             logger.err("OPDSBrowser: Failed to refresh queue:", queue)
+            -- Don't stop refreshing on transient network errors, maybe?
+            -- For now, keep trying
         end
     end
     UIManager:scheduleIn(Constants.QUEUE_REFRESH_INTERVAL, self.queue_refresh_action)
