@@ -99,14 +99,18 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
     local patch_call_count = 0
     local placeholder_found_count = 0
     local badge_rendered_count = 0
+    local badge_render_failures = 0
 
     -- Override paintTo method to add cloud badges to placeholders
     function MosaicMenuItem:paintTo(bb, x, y)
         patch_call_count = patch_call_count + 1
         
-        -- Log every 50th call to avoid spam
-        if patch_call_count % 50 == 0 then
-            logger.info("PlaceholderBadge: Patch called", patch_call_count, "times,", placeholder_found_count, "placeholders found,", badge_rendered_count, "badges rendered")
+        -- Log every 25th call to provide better feedback (reduced from 50)
+        if patch_call_count % 25 == 0 then
+            logger.info("PlaceholderBadge: Patch statistics - calls:", patch_call_count, 
+                       "placeholders found:", placeholder_found_count, 
+                       "badges rendered:", badge_rendered_count,
+                       "render failures:", badge_render_failures)
         end
         
         -- Call the original paintTo method to draw the cover normally
@@ -114,6 +118,9 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
 
         -- Only add badge to actual files (not directories)
         if self.is_directory or not self.filepath then
+            if patch_call_count % 25 == 0 then
+                logger.dbg("PlaceholderBadge: Skipping directory or no filepath")
+            end
             return
         end
 
@@ -125,16 +132,21 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         -- Check if this is a placeholder (with caching)
         local is_placeholder = placeholder_cache[self.filepath]
         if is_placeholder == nil then
+            -- Not in cache, check the file
+            logger.dbg("PlaceholderBadge: Checking if placeholder (not in cache):", self.filepath)
             is_placeholder = placeholder_gen:isPlaceholder(self.filepath)
             placeholder_cache[self.filepath] = is_placeholder
 
             if is_placeholder then
                 placeholder_found_count = placeholder_found_count + 1
-                logger.info("PlaceholderBadge: *** PLACEHOLDER DETECTED ***")
+                logger.info("PlaceholderBadge: ========================================")
+                logger.info("PlaceholderBadge: *** PLACEHOLDER DETECTED (new) ***")
                 logger.info("PlaceholderBadge: File:", self.filepath)
-                logger.info("PlaceholderBadge: Will add cloud badge to cover")
+                logger.info("PlaceholderBadge: Total placeholders found:", placeholder_found_count)
+                logger.info("PlaceholderBadge: Will attempt to render cloud badge")
+                logger.info("PlaceholderBadge: ========================================")
             else
-                logger.dbg("PlaceholderBadge: Not a placeholder:", self.filepath)
+                logger.dbg("PlaceholderBadge: Not a placeholder (verified):", self.filepath)
             end
 
             -- Simple cache size management
@@ -143,9 +155,16 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
                 cache_size = cache_size + 1
             end
             if cache_size > cache_max_size then
-                logger.dbg("PlaceholderBadge: Clearing cache (max size reached)")
+                logger.info("PlaceholderBadge: Cache size limit reached, clearing cache")
+                logger.info("PlaceholderBadge: Old cache size:", cache_size)
                 placeholder_cache = {}
                 placeholder_cache[self.filepath] = is_placeholder
+                logger.info("PlaceholderBadge: Cache cleared and reset")
+            end
+        else
+            -- Already in cache
+            if is_placeholder then
+                logger.dbg("PlaceholderBadge: Placeholder (from cache):", self.filepath)
             end
         end
 
@@ -156,7 +175,9 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         -- Get the cover image widget
         local target = self[1][1][1]
         if not target or not target.dimen then
-            logger.warn("PlaceholderBadge: *** NO TARGET OR DIMEN FOR BADGE ***")
+            logger.warn("PlaceholderBadge: ========================================")
+            logger.warn("PlaceholderBadge: *** BADGE RENDER FAILURE ***")
+            logger.warn("PlaceholderBadge: Reason: No target widget or dimensions")
             logger.warn("PlaceholderBadge: File:", self.filepath)
             logger.warn("PlaceholderBadge: self[1]:", type(self[1]))
             if self[1] then
@@ -165,35 +186,37 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
                     logger.warn("PlaceholderBadge: self[1][1][1]:", type(self[1][1][1]))
                 end
             end
+            logger.warn("PlaceholderBadge: ========================================")
+            badge_render_failures = badge_render_failures + 1
             return
         end
 
-        logger.info("PlaceholderBadge: Rendering badge for:", self.filepath)
+        logger.info("PlaceholderBadge: Starting badge render for:", self.filepath)
         logger.info("PlaceholderBadge: Target dimensions:", target.dimen.w, "x", target.dimen.h)
 
-        -- Badge configuration (more visible than before)
-        local BADGE_W  = Screen:scaleBySize(70)  -- badge width - larger
-        local BADGE_H  = Screen:scaleBySize(35)  -- badge height - larger
-        local INSET_X  = Screen:scaleBySize(3)   -- push inward from the left edge
-        local INSET_Y  = Screen:scaleBySize(3)   -- push down from the top
-        local TEXT_PAD = Screen:scaleBySize(6)   -- breathing room inside the badge
+        -- Badge configuration (optimized for maximum visibility)
+        local BADGE_W  = Screen:scaleBySize(80)  -- badge width - even larger for visibility
+        local BADGE_H  = Screen:scaleBySize(40)  -- badge height - even larger
+        local INSET_X  = Screen:scaleBySize(5)   -- push inward from the left edge
+        local INSET_Y  = Screen:scaleBySize(5)   -- push down from the top
+        local TEXT_PAD = Screen:scaleBySize(8)   -- breathing room inside the badge
 
-        -- Try to use cloud icon (multiple Unicode options for better compatibility)
-        -- ☁ (U+2601) - standard cloud
-        -- 🌥 (U+1F325) - cloud with sun (may not render on all devices)
-        -- ⬇ (U+2B07) - down arrow (current fallback)
-        -- ↓ (U+2193) - simple down arrow
-        local cloud_text = "☁"  -- Unicode cloud character
+        -- Use Unicode cloud character (☁ U+2601)
+        -- This is the most compatible cloud character across devices
+        -- Fallback options if needed in future:
+        --   🌥 (U+1F325) - cloud with sun (may not render on all devices)
+        --   ↓ (U+2193) - simple down arrow (universal fallback)
+        local cloud_text = "☁"
         
         logger.info("PlaceholderBadge: Using cloud character:", cloud_text)
 
-        local font_size = Screen:scaleBySize(24)  -- Larger font for cloud
+        local font_size = Screen:scaleBySize(28)  -- Larger font for better visibility
         local cloud_widget = TextWidget:new{
             text = cloud_text,
             font_size = font_size,
             face = Font:getFace("cfont", font_size),
             alignment = "center",
-            fgcolor = Blitbuffer.COLOR_BLACK,  -- Black for better contrast
+            fgcolor = Blitbuffer.COLOR_WHITE,  -- White text for contrast
             bold = true,
         }
 
@@ -207,26 +230,57 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
 
         logger.info("PlaceholderBadge: Badge position:", bx, by)
 
-        -- Create a light blue/cyan background frame for the badge (more visible)
-        -- Use COLOR_LIGHT_BLUE if available, otherwise LIGHT_GRAY
-        local badge_color = Blitbuffer.COLOR_LIGHT_BLUE or Blitbuffer.COLOR_LIGHT_GRAY
+        -- Create a semi-transparent blue background for the badge
+        -- This ensures visibility on both light and dark book covers
+        -- Use a solid color that contrasts well
+        local badge_color = Blitbuffer.COLOR_DARK_GRAY
+        local badge_color_name = "DARK_GRAY"
+        
+        -- Try to use a blue color if available (more visible and distinctive)
+        -- Fallback to dark gray if blue is not available
+        if Blitbuffer.COLOR_BLUE ~= nil then
+            badge_color = Blitbuffer.COLOR_BLUE
+            badge_color_name = "BLUE"
+        elseif Blitbuffer.COLOR_DARK_BLUE ~= nil then
+            badge_color = Blitbuffer.COLOR_DARK_BLUE
+            badge_color_name = "DARK_BLUE"
+        end
+        
+        logger.info("PlaceholderBadge: Using badge background color:", badge_color_name)
+        
         local badge_bg = FrameContainer:new{
             background = badge_color,
-            bordersize = Size.border.thin,
-            border = Blitbuffer.COLOR_DARK_GRAY,
+            bordersize = Size.border.thick,  -- Thicker border for visibility
+            border = Blitbuffer.COLOR_WHITE,  -- White border for contrast
             padding = TEXT_PAD,
             width = BADGE_W,
             height = BADGE_H,
             cloud_widget,
         }
 
-        -- Paint the badge
-        badge_bg:paintTo(bb, bx, by)
-        badge_rendered_count = badge_rendered_count + 1
-        logger.info("PlaceholderBadge: *** BADGE PAINTED SUCCESSFULLY ***")
-        logger.info("PlaceholderBadge: Position:", bx, by)
-        logger.info("PlaceholderBadge: Size:", BADGE_W, "x", BADGE_H)
-        logger.info("PlaceholderBadge: File:", self.filepath)
+        -- Paint the badge with error handling
+        local paint_ok, paint_err = pcall(function()
+            badge_bg:paintTo(bb, bx, by)
+        end)
+        
+        if paint_ok then
+            badge_rendered_count = badge_rendered_count + 1
+            logger.info("PlaceholderBadge: ========================================")
+            logger.info("PlaceholderBadge: *** BADGE PAINTED SUCCESSFULLY ***")
+            logger.info("PlaceholderBadge: Position:", bx, by)
+            logger.info("PlaceholderBadge: Size:", BADGE_W, "x", BADGE_H)
+            logger.info("PlaceholderBadge: Total badges rendered:", badge_rendered_count)
+            logger.info("PlaceholderBadge: File:", self.filepath)
+            logger.info("PlaceholderBadge: ========================================")
+        else
+            badge_render_failures = badge_render_failures + 1
+            logger.err("PlaceholderBadge: ========================================")
+            logger.err("PlaceholderBadge: *** BADGE PAINT FAILED ***")
+            logger.err("PlaceholderBadge: Error:", paint_err)
+            logger.err("PlaceholderBadge: File:", self.filepath)
+            logger.err("PlaceholderBadge: Total failures:", badge_render_failures)
+            logger.err("PlaceholderBadge: ========================================")
+        end
     end
 
     logger.info("PlaceholderBadge: ✓ Successfully patched MosaicMenuItem.paintTo")
