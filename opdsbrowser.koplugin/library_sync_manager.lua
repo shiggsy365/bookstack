@@ -40,7 +40,8 @@ end
 
 -- Sanitize a string for use as a directory/file name
 function LibrarySyncManager:sanitizeFilename(str)
-    return str:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', '_')
+    -- Replace illegal chars with _, but KEEP SPACES (collapse multiple to single)
+    return str:gsub('[/:*?"<>|\\]', '_'):gsub('%s+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
 end
 
 -- Sanitize author name for directory (preserves spaces, removes illegal chars)
