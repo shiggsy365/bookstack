@@ -5,15 +5,34 @@
 --  - Removed all symlink resolution logic and related path rewriting
 --  - Disabled cloud badge display (handled in separate module; ensure it's not initialized)
 --  - Kept Ephemera integration and placeholder download workflows (without special-folder triggers)
-
-local logger = require("logger")
+local BD = require("ui/bidi")
+local DataStorage = require("datastorage")
+local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
-local UIHelpers = require("ui/helpers")
+local WidgetContainer = require("ui/widget/container/widgetcontainer")
+local logger = require("logger")
+local socket = require("socket")
+local _ = require("gettext")
+local T = require("ffi/util").template
 local lfs = require("libs/libkoreader-lfs")
 local json = require("json")
-local Utils = require("utils")
+local url = require("socket.url")
+
+-- Plugin modules
 local Constants = require("constants")
+local Utils = require("utils")
+local UIHelpers = require("ui_helpers")        -- use your plugin's ui_helpers (underscore)
+local CacheManager = require("cache_manager")
+local SettingsManager = require("settings_manager")
+local HistoryManager = require("history_manager")
+local OPDSClient = require("opds_client")
+local HardcoverClient = require("hardcover_client")
+local EphemeraClient = require("ephemera_client")
 local HttpClient = require("http_client_new")
+local PlaceholderGenerator = require("placeholder_generator")
+local LibrarySyncManager = require("library_sync_manager")
+local PlaceholderBadge = require("placeholder_badge")
+local RestartNavigationManager = require("restart_navigation_manager")
 
 local OPDSBrowser = {}
 OPDSBrowser.__index = OPDSBrowser
