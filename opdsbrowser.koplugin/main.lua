@@ -189,10 +189,18 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     -- That's OK because we delete the placeholder first, then rename temp to this location
     local filepath = placeholder_path:gsub("%.epub$", extension)
 
-    -- Construct download URL
-    local download_url = self.opds_url .. "/" .. book_id .. "/download"
+    -- Use download URL from book_info (stored from OPDS feed)
+    -- This ensures we use the correct download endpoint from the server
+    local download_url = book_info.download_url
+    
+    if not download_url or download_url == "" then
+        -- Fallback: construct from base URL and book ID
+        logger.warn("OPDS: No download_url in book_info, constructing from book ID")
+        download_url = self.opds_url .. "/" .. book_id .. "/download"
+    end
 
     logger.info("OPDS: Auto-downloading:", book_info.title)
+    logger.info("OPDS: Download URL:", download_url)
     logger.info("OPDS: Placeholder path:", placeholder_path)
     logger.info("OPDS: Temp download path:", temp_filepath)
     logger.info("OPDS: Final book path:", filepath)
@@ -231,6 +239,8 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     
     if not res or code ~= 200 then
         logger.err("OPDS: Download failed with code:", code)
+        logger.err("OPDS: Download URL was:", download_url)
+        logger.err("OPDS: Response:", res)
         UIHelpers.showError(T(_("Download failed: HTTP %1\n\nPlaceholder will remain."), code or "error"))
         return
     end
@@ -359,6 +369,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
                 -- Remove from placeholder database
                 self.library_sync.placeholder_db[placeholder_path] = nil
                 self.library_sync:savePlaceholderDB()
+                logger.info("OPDS: Removed placeholder from database:", placeholder_path)
                 break
             end
         else
@@ -385,6 +396,57 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
             FileManager.instance:onRefresh()
         end
         return
+    end
+
+    -- Clean up any symlinks in "Recently Added" folder that point to this placeholder
+    logger.info("OPDS: Checking for symlinks in Recently Added folder")
+    local recently_added_path = self.library_sync.recently_added_path
+    
+    -- Validate recently_added_path exists and is a directory
+    if recently_added_path and type(recently_added_path) == "string" and recently_added_path ~= "" then
+        local attr = lfs.attributes(recently_added_path)
+        if attr and attr.mode == "directory" then
+            local placeholder_filename = placeholder_path:match("([^/]+)$")
+            
+            -- Validate filename is safe: no directory components, only filename
+            -- This prevents directory traversal even with encoded or alternative separators
+            if placeholder_filename and 
+               placeholder_filename ~= "" and
+               placeholder_filename ~= "." and
+               placeholder_filename ~= ".." and
+               not placeholder_filename:match("[/\\]") and
+               not placeholder_filename:match("%.%.") then
+                
+                -- Construct the full path
+                local recently_added_file = recently_added_path .. "/" .. placeholder_filename
+                
+                -- Use lfs.attributes to resolve and validate the canonical path
+                -- This catches symlink-based directory traversal attempts
+                local file_attr = lfs.attributes(recently_added_file)
+                if file_attr then
+                    -- Verify file is actually within Recently Added directory by checking the parent
+                    local file_dir = recently_added_file:match("(.*/)")
+                    if file_dir and file_dir:gsub("/$", "") == recently_added_path:gsub("/$", "") then
+                        logger.info("OPDS: Found file in Recently Added, deleting:", recently_added_file)
+                        logger.info("OPDS: File type:", file_attr.mode)
+                        local removed = os.remove(recently_added_file)
+                        if removed then
+                            logger.info("OPDS: Successfully removed Recently Added file")
+                        else
+                            logger.warn("OPDS: Failed to remove Recently Added file:", recently_added_file)
+                        end
+                    else
+                        logger.warn("OPDS: Path validation failed - file not in Recently Added directory")
+                    end
+                else
+                    logger.dbg("OPDS: No corresponding file in Recently Added folder")
+                end
+            else
+                logger.warn("OPDS: Invalid or unsafe filename detected, skipping cleanup:", placeholder_filename or "nil")
+            end
+        else
+            logger.dbg("OPDS: Recently Added path is not a valid directory")
+        end
     end
 
     -- Verify placeholder is truly gone before renaming
@@ -435,6 +497,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     end
 
     logger.info("OPDS: Successfully renamed temp file to:", filepath)
+    logger.info("OPDS: File replacement complete - placeholder deleted, real book in place")
 
     -- Verify the downloaded file exists and has content
     local final_attr = lfs.attributes(filepath)
