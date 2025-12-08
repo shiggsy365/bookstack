@@ -178,7 +178,7 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         if is_placeholder == nil then
             -- Not in cache, check the file
             logger.dbg("PlaceholderBadge: Checking if placeholder (not in cache):", self.filepath)
-            is_placeholder = placeholder_gen_resolved:isPlaceholder(self.filepath)
+            is_placeholder = resolved_placeholder_gen and resolved_placeholder_gen:isPlaceholder(self.filepath)
             placeholder_cache[self.filepath] = is_placeholder
 
             if is_placeholder then
