@@ -70,6 +70,46 @@ local OPDSBrowser = WidgetContainer:extend{
 
 function OPDSBrowser:init()
     self.ui.menu:registerToMainMenu(self)
+
+    -- Register the action
+    Dispatcher:registerAction("opds_sync_library", {
+        category = "none",
+        event = "opds_sync_library",
+        title = _("Sync OPDS Library"),
+        separator = true,
+    })
+
+    -- Register the handler
+    Dispatcher:registerActionHandler("opds_sync_library", function() 
+        self:buildPlaceholderLibrary() 
+    end)
+
+    Dispatcher:registerAction("opds_menu", {
+        category = "none",
+        event = "opds_sync_library",
+        title = _("Sync OPDS Library"),
+        separator = true,
+    })
+
+    -- Register the handler
+    Dispatcher:registerActionHandler("opds_sync_library", function() 
+        self:buildPlaceholderLibrary() 
+    end)
+
+-- 2. Register the Dispatcher action
+    -- This makes "Open Cloud Book Library" appear in KOReader's Gesture/Profile settings
+    Dispatcher:registerAction("opds_open_menu", {
+        category = "none",
+        event = "opds_open_menu",
+        title = _("Open Cloud Book Library"),
+        separator = true,
+    })
+    
+    -- 3. Register the handler
+    Dispatcher:registerActionHandler("opds_open_menu", function() 
+        self:showMainMenu()
+    end)
+
     
     -- Initialize managers
     SettingsManager:init()
@@ -167,6 +207,50 @@ function OPDSBrowser:checkRestartNavigation()
     logger.info("========================================")
     logger.info("OPDS WORKFLOW: ALL STEPS COMPLETE")
     logger.info("========================================")
+end
+
+function OPDSBrowser:getMenuItems()
+    return {
+        -- Library Sync section
+        { text = _("Library Sync - OPDS"),
+          callback = function() self:buildPlaceholderLibrary() end,
+          enabled_func = function() return self.opds_url ~= "" end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
+        -- Ephemera section
+        { text = _("Ephemera - Request New Book"),
+          callback = function() self:requestBook() end,
+          enabled_func = function() return self.ephemera_client:isConfigured() end },
+        { text = _("Ephemera - View Download Queue"),
+          callback = function() self:showDownloadQueue() end,
+          enabled_func = function() return self.ephemera_client:isConfigured() end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
+        -- Hardcover section
+        { text = _("Hardcover - Search Author"),
+          callback = function() self:hardcoverSearchAuthor() end,
+          enabled_func = function() return self.hardcover_client:isConfigured() end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
+        -- History section
+        { text = _("History - Recent Searches"),
+          callback = function() self:showSearchHistory() end },
+        { text = _("History - Recently Viewed"),
+          callback = function() self:showRecentBooks() end },
+
+        { text = "────────────────────", enabled_func = function() return false end },
+
+        -- Settings section
+        { text = _("Plugin - Settings"),
+          callback = function() self:showSettings() end },
+        { text = _("Plugin - Cache Info"),
+          callback = function() self:showCacheInfo() end },
+        { text = _("Plugin - Workflow Health Check"),
+          callback = function() self:showWorkflowHealth() end },
+    }
 end
 
 -- Register FileManager hooks to intercept placeholder file selections
@@ -1126,48 +1210,15 @@ end
 function OPDSBrowser:addToMainMenu(menu_items)
     menu_items.opdsbrowser = {
         text = _("Cloud Book Library"),
-        sub_item_table = {
-            -- Library Sync section
-            { text = _("Library Sync - OPDS"),
-              callback = function() self:buildPlaceholderLibrary() end,
-              enabled_func = function() return self.opds_url ~= "" end },
-
-            { text = "────────────────────", enabled_func = function() return false end },
-
-            -- Ephemera section
-            { text = _("Ephemera - Request New Book"),
-              callback = function() self:requestBook() end,
-              enabled_func = function() return self.ephemera_client:isConfigured() end },
-            { text = _("Ephemera - View Download Queue"),
-              callback = function() self:showDownloadQueue() end,
-              enabled_func = function() return self.ephemera_client:isConfigured() end },
-
-            { text = "────────────────────", enabled_func = function() return false end },
-
-            -- Hardcover section
-            { text = _("Hardcover - Search Author"),
-              callback = function() self:hardcoverSearchAuthor() end,
-              enabled_func = function() return self.hardcover_client:isConfigured() end },
-
-            { text = "────────────────────", enabled_func = function() return false end },
-
-            -- History section
-            { text = _("History - Recent Searches"),
-              callback = function() self:showSearchHistory() end },
-            { text = _("History - Recently Viewed"),
-              callback = function() self:showRecentBooks() end },
-
-            { text = "────────────────────", enabled_func = function() return false end },
-
-            -- Settings section
-            { text = _("Plugin - Settings"),
-              callback = function() self:showSettings() end },
-            { text = _("Plugin - Cache Info"),
-              callback = function() self:showCacheInfo() end },
-            { text = _("Plugin - Workflow Health Check"),
-              callback = function() self:showWorkflowHealth() end },
-        },
+        sub_item_table = self:getMenuItems(),
     }
+end
+
+function OPDSBrowser:showMainMenu()
+    local items = self:getMenuItems()
+    -- Uses your existing UIHelpers to create the menu style consistently
+    local menu = UIHelpers.createMenu(_("Cloud Book Library"), items)
+    UIManager:show(menu)
 end
 
 -- Settings
