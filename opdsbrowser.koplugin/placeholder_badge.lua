@@ -103,11 +103,12 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
     -- Override paintTo method to add cloud badges to placeholders
     function MosaicMenuItem:paintTo(bb, x, y)
         patch_call_count = patch_call_count + 1
-        
-        -- Log every 25th call to provide better feedback (reduced from 50)
-        if patch_call_count % 25 == 0 then
-            logger.info("PlaceholderBadge: Patch statistics - calls:", patch_call_count, 
-                       "placeholders found:", placeholder_found_count, 
+
+        -- Log first few calls and every 25th call to confirm patch is working
+        if patch_call_count <= 3 or patch_call_count % 25 == 0 then
+            logger.info("PlaceholderBadge: *** paintTo called (call #" .. patch_call_count .. ") ***")
+            logger.info("PlaceholderBadge: Patch statistics - calls:", patch_call_count,
+                       "placeholders found:", placeholder_found_count,
                        "badges rendered:", badge_rendered_count,
                        "render failures:", badge_render_failures)
         end
@@ -117,15 +118,23 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
 
         -- Only add badge to actual files (not directories)
         if self.is_directory or not self.filepath then
-            if patch_call_count % 25 == 0 then
-                logger.dbg("PlaceholderBadge: Skipping directory or no filepath")
+            if patch_call_count <= 3 or patch_call_count % 25 == 0 then
+                logger.info("PlaceholderBadge: Skipping directory or no filepath")
             end
             return
         end
 
         -- Only check EPUB files
         if not self.filepath:match("%.epub$") then
+            if patch_call_count <= 3 then
+                logger.info("PlaceholderBadge: Skipping non-EPUB file:", self.filepath)
+            end
             return
+        end
+
+        -- Log filepath for first few files to help debugging
+        if patch_call_count <= 5 then
+            logger.info("PlaceholderBadge: Processing EPUB file:", self.filepath)
         end
 
         -- Check if this is a placeholder (with caching)

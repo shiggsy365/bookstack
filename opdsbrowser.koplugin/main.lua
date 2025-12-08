@@ -559,7 +559,7 @@ function OPDSBrowser:onReaderReady(config)
             if current_file:match("/Recently Added/") then
                 logger.info("OPDSBrowser: File is in Recently Added folder, attempting content-based check")
                 -- Check if it's a placeholder by examining the file content
-                if self.placeholder_gen:isPlaceholder(current_file) then
+                if PlaceholderGenerator:isPlaceholder(current_file) then
                     logger.info("OPDSBrowser: Detected as placeholder via content check")
                     UIManager:scheduleIn(0.5, function()
                         self:handlePlaceholderAutoDownload(current_file)
