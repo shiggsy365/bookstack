@@ -158,21 +158,13 @@ The Hardcover integration intelligently caches data to minimize API calls and pr
 - From Hardcover book details, use "Search Ephemera" to find and request books
 
 ### Book Downloads
-- Download books directly from your Booklore library to your device
-- Books are automatically added to your configured download directory
+- Upon performing a library sync from the menu, all books in your booklore library have placeholders created on your device in the Home/Library folder
+- When a placeholder is opened, the book is downloaded from OPDS and replaces the placeholder
 - Metadata is refreshed automatically after download
 - File manager view updates to show newly downloaded books
-
-### Placeholder Auto-Download with Restart Navigation
-- Placeholder books automatically download when opened
-- **NEW:** KOReader automatically restarts after successful download
-- **NEW:** Automatically navigates to the folder containing the downloaded book
-- All caches fully cleared to ensure UI shows the real book immediately
-- Seamless user experience - no manual navigation needed
+- KOReader automatically restarts after successful download to ensure UI shows the real book immediately
 - Cloud badge (☁) shows on placeholder book covers in mosaic view
-- See [Restart Navigation Guide](RESTART_NAVIGATION.md) for details
-- See [Cloud Badge Troubleshooting](CLOUD_BADGE_TROUBLESHOOTING.md) for badge issues
-
+  
 ## Series Information Handling
 
 The plugin offers flexible series information extraction to accommodate different library configurations and preferences.
@@ -187,15 +179,15 @@ This setting determines how the plugin extracts series information from your OPD
 
 **Setting:** `YES`
 
-When enabled, the plugin extracts series information from the `<dc:publisher>` field in your OPDS feed.
+When enabled, the plugin extracts series information from the `<dc:publisher>` field in your OPDS feed. For this to work, you'll need to manually amend your metadata to show series in the publisher field eg 'Jack Reacher 24'
 
 **Example OPDS Entry:**
 ```xml
-<dc:publisher>Reacher 24</dc:publisher>
+<dc:publisher>Jack Reacher 24</dc:publisher>
 ```
 
 **Extracted Information:**
-- Series Name: "Reacher"
+- Series Name: "Jack Reacher"
 - Series Number: "24"
 
 **How It Works:**
@@ -229,10 +221,11 @@ When disabled, the plugin uses Hardcover.app's API to fetch series information.
 - Hardcover API token must be configured (see [Getting a Hardcover API Token](#getting-a-hardcover-api-token))
 - Network connectivity to api.hardcover.app
 - Books must exist in Hardcover's database for matching
+- Hard to maintain where a book may be in multiple series
 
 ### Fallback Behavior
 
-The plugin also supports extracting series from book summaries with the format `|Series Name #Number|` in the OPDS summary field. This acts as a fallback when:
+The plugin also supports extracting series from book summaries with the format `|Series Name #Number|` in the OPDS summary field. eg '|Jack Reacher #24|' - This acts as a fallback when:
 - Publisher field is empty (when using publisher mode)
 - Hardcover API doesn't have series information (when using Hardcover mode)
 
@@ -246,7 +239,7 @@ Regardless of which method you use, books are always sorted intelligently:
 **Example Display:**
 ```
 Jack Reacher Series:
-- Killing Floor - Reacher - Lee Child
+- Killing Floor - Reacher #1 - Lee Child
 - Die Trying - Reacher #2 - Lee Child
 - Tripwire - Reacher #3 - Lee Child
 
