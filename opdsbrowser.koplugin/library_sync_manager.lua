@@ -661,7 +661,7 @@ function LibrarySyncManager:populateCurrentReads()
 
     -- Access KOReader's reading history
     local ReadHistory = require("readhistory")
-    local history = ReadHistory:getFileList()
+    local history = ReadHistory.hist
 
     if not history or #history == 0 then
         logger.info("LibrarySyncManager: No reading history found")
