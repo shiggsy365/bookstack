@@ -1,243 +1,288 @@
-# Bookstack
+Bookstack
 
 Bookstack is a centralised book stack from book acquisition to e-reader. It lets you self-host Booklore as a central library and Ephemera as a book acquisition solution, and includes a merged docker-compose setup and a KOReader plugin so you can request books directly from your device and get enhanced OPDS server metadata and usability.
 
 This repository brings those pieces together:
-- A docker-compose that runs Booklore and Ephemera together as a single deployment.
-- A KOReader plugin that:
-  - Lets KOReader browse and download books from your Booklore library.
-  - Lets KOReader request books from Ephemera directly from the device.
-  - Integrates with Hardcover.app for enhanced book discovery, series information, and ratings.
+
+A docker-compose that runs Booklore and Ephemera together as a single deployment.
+
+A KOReader plugin that:
+
+Lets KOReader browse and download books from your Booklore library.
+
+Lets KOReader request books from Ephemera directly from the device.
+
+Integrates with Hardcover.app for enhanced book discovery, series information, and ratings.
 
 Thanks to the original projects:
-- Booklore — https://github.com/avilapa/booklore
-- Ephemera — https://github.com/OrwellianEpilogue/ephemera
-- KOReader — https://github.com/koreader/koreader
-- Hardcover — https://hardcover.app
 
-## Table of contents
-- [Features](#features)
-- [Requirements](#requirements)
-- [Quick start](#quick-start)
-- [Configuration (.env)](#configuration-env)
-- [Install and run (docker-compose)](#install-and-run-docker-compose)
-- [KOReader plugin install & configuration](#koreader-plugin-install--configuration)
-- [Usage](#usage)
-- [Series Information Handling](#series-information-handling)
-- [Hardcover Integration](#hardcover-integration)
-- [Troubleshooting](#troubleshooting)
-- [Security and networking notes](#security-and-networking-notes)
-- [Contributing & credits](#contributing--credits)
-- [License](#license)
+Booklore — https://github.com/avilapa/booklore
 
-## Features
-- Single docker-compose bringing Booklore and Ephemera up together
-- KOReader plugin to browse and download books from your Booklore library
-- KOReader plugin to search/request books via Ephemera from your device
-- OPDS integration with enhanced metadata and usability when browsing on KOReader
-- Flexible series information extraction with multiple sources
-- Hardcover.app integration for:
-  - Enhanced book discovery with author search
-  - Accurate series information and ordering
-  - Book ratings and descriptions
-  - Library ownership tracking (see which books you already own)
-  - Direct integration with Ephemera for requesting books
+Ephemera — https://github.com/OrwellianEpilogue/ephemera
 
-## Requirements
-- Docker & Docker Compose (v2 recommended)
-- A network-accessible host for the services (LAN or public IP / domain)
-- A KOReader-compatible device (e.g., supported e-ink reader with KOReader installed)
-- A .env file created from the template in this repository
-- (Optional) A Hardcover.app API token for enhanced features
+KOReader — https://github.com/koreader/koreader
 
-## Quick start
-1. Create a .env file using the template included in this repo:
-```bash
+Hardcover — https://hardcover.app
+
+Table of contents
+
+Features
+
+Requirements
+
+Quick start
+
+Configuration (.env)
+
+Install and run (docker-compose)
+
+KOReader plugin install & configuration
+
+Usage
+
+Series Information Handling
+
+Hardcover Integration
+
+Optional: Project Title Patch
+
+Troubleshooting
+
+Security and networking notes
+
+Contributing & credits
+
+License
+
+Features
+
+Single docker-compose bringing Booklore and Ephemera up together
+
+KOReader plugin to browse and download books from your Booklore library
+
+KOReader plugin to search/request books via Ephemera from your device
+
+OPDS integration with enhanced metadata and usability when browsing on KOReader
+
+Flexible series information extraction with multiple sources
+
+Hardcover.app integration for:
+
+Enhanced book discovery with author search
+
+Accurate series information and ordering
+
+Book ratings and descriptions
+
+Library ownership tracking (see which books you already own)
+
+Direct integration with Ephemera for requesting books
+
+Requirements
+
+Docker & Docker Compose (v2 recommended)
+
+A network-accessible host for the services (LAN or public IP / domain)
+
+A KOReader-compatible device (e.g., supported e-ink reader with KOReader installed)
+
+A .env file created from the template in this repository
+
+(Optional) A Hardcover.app API token for enhanced features
+
+Quick start
+
+Create a .env file using the template included in this repo:
+
    cp .env.template .env
-```
-   Edit .env to set your host addresses, ports, credentials and any other required variables.
 
-2. Copy the provided docker-compose.yml into your host environment (or use the one in this repo).
 
-3. Start the stack:
-```bash
+Edit .env to set your host addresses, ports, credentials and any other required variables.
+
+Copy the provided docker-compose.yml into your host environment (or use the one in this repo).
+
+Start the stack:
+
    docker compose up -d
-```
 
-4. Once services are up, install the KOReader plugin on your device (instructions below).
 
-5. Restart KOReader and configure the plugin with your network-facing addresses for Booklore and Ephemera.
+Once services are up, install the KOReader plugin on your device (instructions below).
 
-## Configuration (.env)
-This repo includes a template file (`.env.template`) — use it to generate your `.env`.
+Restart KOReader and configure the plugin with your network-facing addresses for Booklore and Ephemera.
+
+Configuration (.env)
+
+This repo includes a template file (.env.template) — use it to generate your .env.
 
 Typical variables you should set:
-- `BOOKLORE_HOST` (or URL)
-- `BOOKLORE_PORT`
-- `EPHEMERA_HOST` (or URL)
-- `EPHEMERA_PORT`
-- `PUID` / `PGID` (user/group IDs)
-- `TZ` (timezone)
-- Optional: any API keys or authentication variables required by the upstream projects
+
+BOOKLORE_HOST (or URL)
+
+BOOKLORE_PORT
+
+EPHEMERA_HOST (or URL)
+
+EPHEMERA_PORT
+
+PUID / PGID (user/group IDs)
+
+TZ (timezone)
+
+Optional: any API keys or authentication variables required by the upstream projects
 
 Use hostnames or IPs reachable from your KOReader device (for example the LAN IP of the host running Docker).
 
-## Install and run (docker-compose)
-1. Copy or open the docker-compose.yml in this repository.
+Install and run (docker-compose)
 
-2. Ensure your `.env` is in the same folder as `docker-compose.yml` or referenced correctly.
+Copy or open the docker-compose.yml in this repository.
 
-3. Start the services:
-```bash
+Ensure your .env is in the same folder as docker-compose.yml or referenced correctly.
+
+Start the services:
+
    docker compose up -d
-```
 
-4. Watch logs to make sure everything starts cleanly:
-```bash
+
+Watch logs to make sure everything starts cleanly:
+
    docker compose logs -f
-```
 
-## KOReader plugin — install & configure
-1. On your computer, locate the plugin folder in this repository (`opdsbrowser.koplugin/`).
 
-2. Copy that folder to the `plugins` folder on your KOReader device:
-   - e.g., mount the device storage and copy `opdsbrowser.koplugin` into `/koreader/plugins/` (device paths vary by device).
+KOReader plugin — install & configure
 
-3. Restart KOReader.
+On your computer, locate the plugin folder in this repository (opdsbrowser.koplugin/).
 
-4. In KOReader:
-   - Navigate to the menu and find "Cloud Book Library"
-   - Go to "Plugin - Settings"
-   - Enter the network-facing OPDS URL for your Booklore service (e.g., `https://booklore.example.com/api/v1/opds`)
-   - Enter OPDS username and password if configured
-   - Enter your Ephemera URL (e.g., `http://example.com:8286`)
-   - Enter your preferred download directory
-   - Configure series handling (see [Series Information Handling](#series-information-handling))
-   - (Optional) For Hardcover integration, edit `/koreader/settings/opdsbrowser.lua` and add your Bearer Token
+Copy that folder to the plugins folder on your KOReader device:
 
-5. Use the plugin UI on device to browse your library, search Hardcover, and request books via Ephemera.
+e.g., mount the device storage and copy opdsbrowser.koplugin into /koreader/plugins/ (device paths vary by device).
 
-### Getting a Hardcover API Token
-1. Visit https://hardcover.app and create an account (if you don't have one)
-2. Go to your account settings
-3. Navigate to the API section
-4. Generate a new API token
-5. Copy the token and add "Bearer " prefix (e.g., "Bearer abc123xyz...")
-6. Edit `/koreader/settings/opdsbrowser.lua` and add:
-```lua
+Restart KOReader.
+
+In KOReader:
+
+Navigate to the menu and find "Cloud Book Library"
+
+Go to "Plugin - Settings"
+
+Enter the network-facing OPDS URL for your Booklore service (e.g., https://booklore.example.com/api/v1/opds)
+
+Enter OPDS username and password if configured
+
+Enter your Ephemera URL (e.g., http://example.com:8286)
+
+Enter your preferred download directory
+
+Configure series handling (see Series Information Handling)
+
+(Optional) For Hardcover integration, edit /koreader/settings/opdsbrowser.lua and add your Bearer Token
+
+Use the plugin UI on device to browse your library, search Hardcover, and request books via Ephemera.
+
+Getting a Hardcover API Token
+
+Visit https://hardcover.app and create an account (if you don't have one)
+
+Go to your account settings
+
+Navigate to the API section
+
+Generate a new API token
+
+Copy the token and add "Bearer " prefix (e.g., "Bearer abc123xyz...")
+
+Edit /koreader/settings/opdsbrowser.lua and add:
+
    ["hardcover_token"] = "Bearer YOUR_TOKEN_HERE",
-```
 
-## Usage
 
-### Library Browsing (OPDS via Booklore)
-- **Browse by Author**: View all authors in your library alphabetically, then drill down to their books
-- **Recently Added**: See the most recently added books to your library
-- **Random Choice**: Get a random book suggestion from your library
-- **Search**: Search your library by title, author, or keywords
+Usage
+
+Library Browsing (OPDS via Booklore)
+
+Browse by Author: View all authors in your library alphabetically, then drill down to their books
+
+Recently Added: See the most recently added books to your library
+
+Random Choice: Get a random book suggestion from your library
+
+Search: Search your library by title, author, or keywords
 
 When browsing books, the plugin automatically:
-- Extracts series information based on your configuration
-- Sorts books by series first, then standalone titles
-- Shows series name and number in the book list
-- Displays complete metadata including series info in book details
 
-### Hardcover Integration
-- **Search Author**: Find authors on Hardcover with "Known for" information
-  - View all books by an author, sorted by popularity
-  - See accurate series information and ordering
-  - Check if books are already in your library (marked with ✓)
-  - View detailed information including ratings, descriptions, and series data
-  - Request books directly through Ephemera integration
+Extracts series information based on your configuration
+
+Sorts books by series first, then standalone titles
+
+Shows series name and number in the book list
+
+Displays complete metadata including series info in book details
+
+Hardcover Integration
+
+Search Author: Find authors on Hardcover with "Known for" information
+
+View all books by an author, sorted by popularity
+
+See accurate series information and ordering
+
+Check if books are already in your library (marked with ✓)
+
+View detailed information including ratings, descriptions, and series data
+
+Request books directly through Ephemera integration
 
 The Hardcover integration intelligently caches data to minimize API calls and provides fast, responsive browsing.
 
-### Ephemera Integration
-- **Request New Book**: Search Ephemera's sources and queue books for download
-- **View Download Queue**: Monitor active downloads, queued items, and completed books
-- From Hardcover book details, use "Search Ephemera" to find and request books
+Ephemera Integration
 
-### Book Downloads
-- Upon performing a library sync from the menu, all books in your booklore library have placeholders created on your device in the Home/Library folder
-- When a placeholder is opened, the book is downloaded from OPDS and replaces the placeholder
-- Metadata is refreshed automatically after download
-- File manager view updates to show newly downloaded books
-- KOReader automatically restarts after successful download to ensure UI shows the real book immediately
-- Cloud badge (☁) shows on placeholder book covers in mosaic view
-  
-## Series Information Handling
+Request New Book: Search Ephemera's sources and queue books for download
 
-The plugin offers flexible series information extraction to accommodate different library configurations and preferences.
+View Download Queue: Monitor active downloads, queued items, and completed books
 
-### Configuration
+From Hardcover book details, use "Search Ephemera" to find and request books
 
-In the plugin settings, you'll find an option: **"Use Publisher as Series? (YES/NO)"**
+Book Downloads
 
-This setting determines how the plugin extracts series information from your OPDS feed.
+Upon performing a library sync from the menu, all books in your booklore library have placeholders created on your device in the Home/Library folder
 
-### Option 1: Publisher Field (Recommended for Booklore)
+When a placeholder is opened, the book is downloaded from OPDS and replaces the placeholder
 
-**Setting:** `YES`
+Metadata is refreshed automatically after download
 
-When enabled, the plugin extracts series information from the `<dc:publisher>` field in your OPDS feed. For this to work, you'll need to manually amend your metadata to show series in the publisher field eg 'Jack Reacher 24'
+File manager view updates to show newly downloaded books
 
-**Example OPDS Entry:**
-```xml
-<dc:publisher>Jack Reacher 24</dc:publisher>
-```
+KOReader automatically restarts after successful download to ensure UI shows the real book immediately
 
-**Extracted Information:**
-- Series Name: "Jack Reacher"
-- Series Number: "24"
+Cloud badge (☁) shows on placeholder book covers in mosaic view
 
-**How It Works:**
-- The plugin looks for the publisher field in format: `Series Name Number`
-- Extracts the series name and index number automatically
-- Falls back to using the entire publisher field as series name if no number is found
+Series Information Handling
 
-**Use Cases:**
-- When your Booklore instance stores series information in the publisher field
-- When you want consistent, predictable series handling
-- When your library metadata follows this convention
+When importing books from OPDS, the plugin attempts to scrape series information using the following specific order of priority:
 
-### Option 2: Hardcover API (Dynamic Series Data)
+OPDS Metadata Fields (Standard) It searches the OPDS feed for <meta property="belongs-to-collection" id="series"> and <meta property="group-position">.
 
-**Setting:** `NO`
+Note: Group positions are normalised (e.g., 1.0 becomes 1, while 1.5 remains 1.5).
 
-When disabled, the plugin uses Hardcover.app's API to fetch series information.
+Publisher Field (Optional) Condition: Only if the setting 'Use Publisher as Series' is set to YES.
 
-**How It Works:**
-1. When browsing books by author, the plugin queries Hardcover for that author's bibliography
-2. Matches books by title between your library and Hardcover's database
-3. Extracts accurate series information including name and book number
-4. Results are cached for 5 minutes to minimize API calls
+It checks the <dc:publisher> field for data formatted like "Series Name Number".
 
-**Advantages:**
-- Always up-to-date series information from Hardcover's curated database
-- Works even if your library metadata lacks series information
-- Provides consistent series naming across your entire library
+Description Tags It checks the book description for series information enclosed in pipes, for example: |Reacher 3| or |Series Name #Number|.
 
-**Requirements:**
-- Hardcover API token must be configured (see [Getting a Hardcover API Token](#getting-a-hardcover-api-token))
-- Network connectivity to api.hardcover.app
-- Books must exist in Hardcover's database for matching
-- Hard to maintain where a book may be in multiple series
+Hardcover API (Fallback) If no series information is found using the methods above, the plugin will attempt to fetch dynamic series data from Hardcover.app (requires API token).
 
-### Fallback Behavior
+Book Sorting
 
-The plugin also supports extracting series from book summaries with the format `|Series Name #Number|` in the OPDS summary field. eg '|Jack Reacher #24|' - This acts as a fallback when:
-- Publisher field is empty (when using publisher mode)
-- Hardcover API doesn't have series information (when using Hardcover mode)
+Regardless of which method is used to find the series, books are always sorted intelligently:
 
-### Book Sorting
+Series books first - Grouped by series name
 
-Regardless of which method you use, books are always sorted intelligently:
-1. **Series books first** - Grouped by series name
-2. **Within each series** - Ordered by book number (numerically)
-3. **Standalone books last** - Sorted alphabetically by title
+Within each series - Ordered by book number (numerically)
 
-**Example Display:**
-```
+Standalone books last - Sorted alphabetically by title
+
+Example Display:
+
 Jack Reacher Series:
 - Killing Floor - Reacher #1 - Lee Child
 - Die Trying - Reacher #2 - Lee Child
@@ -245,115 +290,163 @@ Jack Reacher Series:
 
 Standalone:
 - The Affair - Lee Child
-```
 
-### Which Option Should I Choose?
 
-**Choose Publisher Field (YES) if:**
-- Your Booklore instance stores series in the publisher field
-- You want the fastest performance (no API calls needed)
-- You don't have a Hardcover API token
-- Your library metadata is well-maintained
+Hardcover Integration
 
-**Choose Hardcover API (NO) if:**
-- Your library lacks consistent series metadata
-- You want the most accurate and comprehensive series information
-- You have a Hardcover API token configured
-- You're willing to trade a small performance cost for better data quality
-
-### Changing the Setting
-
-1. Open KOReader menu → Cloud Book Library → Plugin - Settings
-2. Find the field "Use Publisher as Series? (YES/NO)"
-3. Enter `YES` to use publisher field, or `NO` to use Hardcover
-4. Save settings
-5. The change takes effect immediately for all future book browsing
-
-## Hardcover Integration
 The plugin includes deep integration with Hardcover.app for enhanced book discovery and metadata:
 
-- **Author Search**: Search Hardcover's database of authors and see their most popular works
-- **Book Discovery**: Browse complete bibliographies with accurate series information
-- **Library Checking**: Automatically checks which books you already own in your Booklore library
-- **Series Information**: Can be used as primary or fallback source for series data (see [Series Information Handling](#series-information-handling))
-- **Ratings & Reviews**: See community ratings and detailed descriptions
-- **Ephemera Integration**: Request missing books directly from Hardcover book details
+Author Search: Search Hardcover's database of authors and see their most popular works
+
+Book Discovery: Browse complete bibliographies with accurate series information
+
+Library Checking: Automatically checks which books you already own in your Booklore library
+
+Series Information: Can be used as primary or fallback source for series data (see Series Information Handling)
+
+Ratings & Reviews: See community ratings and detailed descriptions
+
+Ephemera Integration: Request missing books directly from Hardcover book details
 
 All Hardcover data is intelligently cached for 5 minutes to minimize API calls while maintaining responsiveness.
 
-## Troubleshooting
-- If KOReader can't reach the services:
-  - Verify the device and the host are on the same network and can reach each other's IPs.
-  - Confirm ports are open and not blocked by a firewall.
-  - Test the service endpoints from another device (browser or curl).
+Optional: Project Title Patch
 
-- Logs:
-```bash
+This repository includes an optional user patch located in patches/2-toolbar-replace-button.lua. This patch is designed for "Project: Title" + OPDS Browser users.
+
+It replaces the default Favourites (heart) button on the top toolbar with a shortcut to this plugin:
+
+Tap: Open OPDS Browser Main Menu
+
+Hold: Sync OPDS Library (build placeholders)
+
+To install:
+
+Copy patches/2-toolbar-replace-button.lua to your device.
+
+Place it in your KOReader user patches directory (typically /koreader/patches/).
+
+Restart KOReader.
+
+Troubleshooting
+
+If KOReader can't reach the services:
+
+Verify the device and the host are on the same network and can reach each other's IPs.
+
+Confirm ports are open and not blocked by a firewall.
+
+Test the service endpoints from another device (browser or curl).
+
+Logs:
+
   docker compose logs -f
-```
-  Check logs for both booklore and ephemera containers for errors.
 
-- If the plugin doesn't appear in KOReader:
-  - Ensure the plugin folder is in the correct plugins directory for your device and KOReader version.
-  - Check KOReader console/logs for plugin-related errors.
 
-- If Hardcover features aren't working:
-  - Verify your Bearer Token is correct and includes the "Bearer " prefix
-  - Check network connectivity to api.hardcover.app
-  - Review KOReader logs for Hardcover API errors
-  - Edit the settings file directly: `/koreader/settings/opdsbrowser.lua`
+Check logs for both booklore and ephemera containers for errors.
 
-- If series information isn't displaying correctly:
-  - Check your "Use Publisher as Series" setting in plugin settings
-  - Verify your OPDS feed includes the expected fields (publisher or summary)
-  - If using Hardcover mode, ensure your API token is configured
-  - Check KOReader logs for series extraction messages
+If the plugin doesn't appear in KOReader:
 
-- If library ownership flags aren't showing:
-  - Ensure your Booklore OPDS URL is configured correctly
-  - Verify the OPDS search endpoint is working
-  - Check that author names match between Hardcover and your library
+Ensure the plugin folder is in the correct plugins directory for your device and KOReader version.
 
-- If book downloads fail:
-  - Check that the download directory exists and is writable
-  - Verify authentication credentials if your Booklore instance requires them
-  - Check KOReader logs for specific error messages
+Check KOReader console/logs for plugin-related errors.
 
-- If KOReader restart after download doesn't work:
-  - Check logs for "RestartNavigation: No restart method available!"
-  - Restart feature may not be available on your device/KOReader version
-  - Book will still open directly as fallback
-  - See [Restart Navigation Guide](RESTART_NAVIGATION.md) for details
+If Hardcover features aren't working:
 
-- If cloud badges don't appear on placeholder books:
-  - Ensure CoverBrowser plugin is enabled in KOReader settings
-  - File Manager must be in Mosaic/Grid view mode
-  - Requires custom KOReader build with userpatch support
-  - Check logs for "PlaceholderBadge: userpatch module not available"
-  - See [Cloud Badge Troubleshooting](CLOUD_BADGE_TROUBLESHOOTING.md) for full guide
-  - Note: Placeholder detection and download work without badges
+Verify your Bearer Token is correct and includes the "Bearer " prefix
 
-## Security and networking notes
-- If exposing services to the internet, secure them appropriately:
-  - Use HTTPS (reverse proxy with TLS), strong passwords and/or API tokens.
-  - Consider using a VPN or tunneled connection if you need remote access but want to avoid public exposure.
-- Keep your host OS, Docker, and the upstream projects up to date.
-- Store your Hardcover API token securely and never share it publicly.
-- Consider enabling authentication on your Booklore instance if it will be network-accessible.
+Check network connectivity to api.hardcover.app
 
-## Contributing
-- Contributions, fixes, and improvements are welcome.
-- If you add integration improvements, tests, or documentation updates, please open a PR.
-- If you find issues with the KOReader plugin or with the docker-compose, open an issue describing the environment, steps to reproduce, and logs.
+Review KOReader logs for Hardcover API errors
 
-## Credits and upstream projects
+Edit the settings file directly: /koreader/settings/opdsbrowser.lua
+
+If series information isn't displaying correctly:
+
+Check your "Use Publisher as Series" setting in plugin settings
+
+Verify your OPDS feed includes the expected fields (publisher or summary)
+
+If using Hardcover mode, ensure your API token is configured
+
+Check KOReader logs for series extraction messages
+
+If library ownership flags aren't showing:
+
+Ensure your Booklore OPDS URL is configured correctly
+
+Verify the OPDS search endpoint is working
+
+Check that author names match between Hardcover and your library
+
+If book downloads fail:
+
+Check that the download directory exists and is writable
+
+Verify authentication credentials if your Booklore instance requires them
+
+Check KOReader logs for specific error messages
+
+If KOReader restart after download doesn't work:
+
+Check logs for "RestartNavigation: No restart method available!"
+
+Restart feature may not be available on your device/KOReader version
+
+Book will still open directly as fallback
+
+See Restart Navigation Guide for details
+
+If cloud badges don't appear on placeholder books:
+
+Ensure CoverBrowser plugin is enabled in KOReader settings
+
+File Manager must be in Mosaic/Grid view mode
+
+Requires custom KOReader build with userpatch support
+
+Check logs for "PlaceholderBadge: userpatch module not available"
+
+See Cloud Badge Troubleshooting for full guide
+
+Note: Placeholder detection and download work without badges
+
+Security and networking notes
+
+If exposing services to the internet, secure them appropriately:
+
+Use HTTPS (reverse proxy with TLS), strong passwords and/or API tokens.
+
+Consider using a VPN or tunneled connection if you need remote access but want to avoid public exposure.
+
+Keep your host OS, Docker, and the upstream projects up to date.
+
+Store your Hardcover API token securely and never share it publicly.
+
+Consider enabling authentication on your Booklore instance if it will be network-accessible.
+
+Contributing
+
+Contributions, fixes, and improvements are welcome.
+
+If you add integration improvements, tests, or documentation updates, please open a PR.
+
+If you find issues with the KOReader plugin or with the docker-compose, open an issue describing the environment, steps to reproduce, and logs.
+
+Credits and upstream projects
+
 This repo integrates and builds on:
-- Booklore — https://github.com/avilapa/booklore
-- Ephemera — https://github.com/OrwellianEpilogue/ephemera
-- KOReader — https://github.com/koreader/koreader
-- Hardcover — https://hardcover.app
+
+Booklore — https://github.com/avilapa/booklore
+
+Ephemera — https://github.com/OrwellianEpilogue/ephemera
+
+KOReader — https://github.com/koreader/koreader
+
+Hardcover — https://hardcover.app
 
 Thanks to the developers and maintainers of those projects for their work.
 
-## License
+License
+
 This repository uses the same license as the included upstream components unless otherwise noted. Please review individual component licenses and this repo's LICENSE file (if present) before production use.
