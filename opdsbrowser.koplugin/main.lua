@@ -557,19 +557,38 @@ function OPDSBrowser:onReaderReady(config)
             -- If not found by direct lookup and it's a file in special folders,
             -- fall back to checking the placeholder database for any matching book
             if current_file:match("/Recently Added/") or current_file:match("/Current Reads/") then
-                logger.info("OPDSBrowser: File is in special folder (Recently Added/Current Reads), attempting content-based check")
-                -- Check if it's a placeholder by examining the file content
-                if PlaceholderGenerator:isPlaceholder(current_file) then
-                    logger.info("OPDSBrowser: Detected as placeholder via content check")
-                    UIManager:scheduleIn(0.5, function()
-                        self:handlePlaceholderAutoDownload(current_file)
-                    end)
-                else
-                    logger.info("OPDSBrowser: Not a placeholder")
-                end
+    logger.dbg("OPDSBrowser: File is in special folder (Recently Added/Current Reads), resolving symlink before content check")
+
+    -- Resolve symlink to real filepath (if applicable)
+    local real_filepath = current_file
+    local attr = lfs.symlinkattributes(current_file)
+    if attr and attr.mode == "link" then
+        local target = lfs.readlink(current_file)
+        if target then
+            if not target:match("^/") then
+                -- relative symlink
+                local dir = current_file:match("(.*/)")
+                real_filepath = dir .. target
             else
-                logger.info("OPDSBrowser: Not a placeholder")
+                real_filepath = target
             end
+            logger.dbg("OPDSBrowser: Resolved symlink. target:", real_filepath)
+        else
+            logger.warn("OPDSBrowser: symlink detected but readlink failed for:", current_file)
+        end
+    end
+
+    -- Use the resolved path for placeholder detection
+    local PlaceholderGenerator = require("placeholder_generator")
+    if PlaceholderGenerator and PlaceholderGenerator:isPlaceholder(real_filepath) then
+        logger.info("OPDSBrowser: Detected as placeholder via content check on resolved path")
+        UIManager:scheduleIn(0.5, function()
+            self:handlePlaceholderAutoDownload(real_filepath)
+        end)
+    else
+        logger.info("OPDSBrowser: Not a placeholder (after resolving symlink)")
+    end
+end
         end
 
         -- Update Current Reads folder whenever any book is opened (async, non-blocking)
@@ -2025,6 +2044,21 @@ function OPDSBrowser:displayDownloadQueue(queue)
         return
     end
 
+   -- mark menu open
+    self.queue_menu_open = true
+
+    -- add a Close item (or ensure existing close flow clears the flag)
+    table.insert(items, { text = _("Close"), callback = function()
+        -- Close menu and mark as closed so refresh stops
+        self.queue_menu_open = false
+        self:stopQueueRefresh()
+        if self.queue_menu then
+            UIManager:close(self.queue_menu)
+            self.queue_menu = nil
+        end
+    end })
+
+    -- create and show menu as before
     self.queue_menu = UIHelpers.createMenu(_("Download Queue (Ephemera)"), items)
     UIManager:show(self.queue_menu)
 
@@ -2037,19 +2071,29 @@ end
 
 function OPDSBrowser:startQueueRefresh()
     self:stopQueueRefresh()
-    
+
     self.queue_refresh_action = function()
-        if self.queue_menu then
-            local ok, queue = self.ephemera_client:getQueue()
-            if ok then
-                UIManager:close(self.queue_menu)
-                self:displayDownloadQueue(queue)
-            end
-        else
+        -- only refresh if the dialog is open
+        if not self.queue_menu_open then
+            -- user closed the dialog — stop refreshing
             self:stopQueueRefresh()
+            return
+        end
+
+        local ok, queue = self.ephemera_client:getQueue()
+        if ok then
+            -- update the dialog contents (rebuild menu)
+            -- close the old menu then re-display, or ideally update in-place if UI supports it
+            if self.queue_menu then
+                UIManager:close(self.queue_menu)
+                self.queue_menu = nil
+            end
+            self:displayDownloadQueue(queue)
+        else
+            logger.err("OPDSBrowser: Failed to refresh queue:", queue)
         end
     end
-    
+
     UIManager:scheduleIn(Constants.QUEUE_REFRESH_INTERVAL, self.queue_refresh_action)
 end
 
@@ -2058,7 +2102,9 @@ function OPDSBrowser:stopQueueRefresh()
         UIManager:unschedule(self.queue_refresh_action)
         self.queue_refresh_action = nil
     end
+    self.queue_menu_open = false
 end
+
 
 
 -- Hardcover functions
