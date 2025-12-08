@@ -89,7 +89,7 @@ end
 
 function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
     local entries = {}
-    logger.info("OPDS: Parsing feed, XML length:", #xml_data)
+    logger.info("OPDS: Parsing feed with updated series logic")
 
     local entry_count = 0
     for entry in xml_data:gmatch("<entry>(.-)</entry>") do
@@ -98,7 +98,6 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
 
         book.title = entry:match("<title>(.-)</title>") or "Unknown Title"
         book.title = Utils.html_unescape(book.title)
-        -- Fix apostrophe issues in title (replace &apos; with ')
         book.title = book.title:gsub("&apos;", "'")
 
         local author_name = entry:match("<author><name>(.-)</name></author>")
@@ -107,7 +106,6 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
         local raw_summary = entry:match('<summary>(.-)</summary>') or ""
         raw_summary = Utils.html_unescape(raw_summary)
 
-        -- Extract publisher
         local publisher = entry:match('<dc:publisher>(.-)</dc:publisher>') or ""
         publisher = Utils.html_unescape(publisher)
         
@@ -115,66 +113,99 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
         book.series = ""
         book.series_index = ""
         
-        -- NEW: Method 0: Parse standard OPDS series metadata (highest priority)
-        -- Try schema.org/Series and belongs-to-collection metadata
-        local series_meta = entry:match('<meta property="belongs%-to%-collection"[^>]*>(.-)</meta>')
+        -- ==================================================================================
+        -- SERIES EXTRACTION LOGIC (ORDER 1 -> 4)
+        -- ==================================================================================
+
+        -- 1. Search OPDS feed for belongs-to-collection and group-position
+        --    Format: <meta property="belongs-to-collection" id="series">The Nero Trilogy</meta>
+        --            <meta property="group-position" refines="#series">1.0</meta>
+        local series_meta = entry:match('<meta property="belongs%-to%-collection"[^>]*id="series"[^>]*>(.-)</meta>')
+        
+        -- Fallback: Try match without id="series" check just in case, but prioritize the specific one
+        if not series_meta then
+            series_meta = entry:match('<meta property="belongs%-to%-collection"[^>]*>(.-)</meta>')
+        end
+
         if series_meta then
-            series_meta = Utils.html_unescape(series_meta)
             book.series = Utils.trim(series_meta)
-            logger.dbg("OPDS: Extracted series from belongs-to-collection:", book.series)
+            logger.dbg("OPDS (Step 1): Found series in metadata:", book.series)
             
-            -- Try to find series position/index
-            local series_pos = entry:match('<meta property="group%-position"[^>]*>(.-)</meta>')
+            -- Extract and normalize position
+            local series_pos = entry:match('<meta property="group%-position"[^>]*refines="#series"[^>]*>(.-)</meta>')
+            
+            -- Fallback: Try without refines if not found (loose match)
+            if not series_pos then
+                 series_pos = entry:match('<meta property="group%-position"[^>]*>(.-)</meta>')
+            end
+
             if series_pos then
-                book.series_index = Utils.trim(Utils.html_unescape(series_pos))
-                logger.dbg("OPDS: Extracted series index from group-position:", book.series_index)
-            end
-        end
-        
-        -- Try calibre:series metadata if not found
-        if book.series == "" then
-            local calibre_series = entry:match('<meta name="calibre:series"[^>]*content="([^"]+)"')
-            if calibre_series then
-                book.series = Utils.trim(Utils.html_unescape(calibre_series))
-                logger.dbg("OPDS: Extracted series from calibre:series:", book.series)
+                local pos_str = Utils.trim(Utils.html_unescape(series_pos))
+                local pos_num = tonumber(pos_str)
                 
-                -- Try calibre:series_index
-                local calibre_index = entry:match('<meta name="calibre:series_index"[^>]*content="([^"]+)"')
-                if calibre_index then
-                    book.series_index = Utils.trim(Utils.html_unescape(calibre_index))
-                    logger.dbg("OPDS: Extracted series index from calibre:series_index:", book.series_index)
+                -- Normalize: 1.0 -> 1, 1.5 -> 1.5
+                if pos_num then
+                    if pos_num == math.floor(pos_num) then
+                        book.series_index = string.format("%d", pos_num)
+                    else
+                        book.series_index = tostring(pos_num)
+                    end
+                else
+                    book.series_index = pos_str
                 end
+                logger.dbg("OPDS (Step 1): Extracted normalized index:", book.series_index)
             end
         end
-        
-        -- Method 1: Use publisher as series if enabled (only if no standard series found)
+
+        -- 2. If 'use publisher for series' is YES, use publisher data
+        --    (Only if series not already found in step 1)
         if book.series == "" and use_publisher_as_series and publisher ~= "" then
-            local series_name, series_num = publisher:match(Constants.SERIES_PATTERNS.PUBLISHER_WITH_NUMBER)
+            -- Pattern: "Series Name Number" or "Series Name #Number"
+            -- Try to capture the number at the end
+            local series_name, series_num = publisher:match("^(.-)%s+(%d+%.?%d*)$")
+            
             if series_name and series_num then
                 book.series = Utils.trim(series_name)
                 book.series_index = series_num
-                logger.dbg("OPDS: Extracted series from publisher:", book.series, "#", book.series_index)
+                logger.dbg("OPDS (Step 2): Found series in publisher:", book.series, "#", book.series_index)
             else
+                -- Fallback: use whole publisher as series name
                 book.series = Utils.trim(publisher)
-                logger.dbg("OPDS: Using publisher as series:", book.series)
+                logger.dbg("OPDS (Step 2): Using publisher as series name:", book.series)
             end
         end
-        
-        -- Method 2: Extract series from summary (lowest priority fallback)
+
+        -- 3. If description contains |Reacher 3|, use this
+        --    (Only if series not already found in steps 1 or 2)
         if book.series == "" then
-            local series_match = raw_summary:match(Constants.SERIES_PATTERNS.SUMMARY_SERIES)
-            if series_match then
-                local series_name, series_num = series_match:match(Constants.SERIES_PATTERNS.SERIES_WITH_NUMBER)
+            -- Look for content explicitly inside pipes |...|
+            local desc_tag = raw_summary:match("|([^|]+)|")
+            
+            if desc_tag then
+                -- Try to parse "Name Number" from inside the tag
+                local series_name, series_num = desc_tag:match("^(.-)%s+(%d+%.?%d*)$")
+                
+                if not series_name then
+                    -- Try "Name #Number"
+                    series_name, series_num = desc_tag:match("^(.-)%s+#(%d+%.?%d*)$")
+                end
+
                 if series_name and series_num then
                     book.series = Utils.trim(series_name)
                     book.series_index = series_num
-                    logger.dbg("OPDS: Extracted series from summary:", book.series, "#", book.series_index)
+                    logger.dbg("OPDS (Step 3): Found series in description tag:", book.series, "#", book.series_index)
                 else
-                    book.series = Utils.trim(series_match)
-                    logger.dbg("OPDS: Extracted series from summary (no number):", book.series)
+                    -- Use the whole tag content as series name
+                    book.series = Utils.trim(desc_tag)
+                    logger.dbg("OPDS (Step 3): Using description tag as series:", book.series)
                 end
             end
         end
+
+        -- 4. Scrape Hardcover
+        --    If book.series is still empty at this point, the plugin's Hardcover integration
+        --    (logic in main.lua/hardcover_client) will handle the lookup lazily or on demand.
+        --    We leave the fields empty here to signal that fallback is needed.
 
         -- Clean series name: replace underscores with spaces
         if book.series ~= "" then
@@ -185,75 +216,46 @@ function OPDSClient:parseBookloreOPDSFeed(xml_data, use_publisher_as_series)
         book.summary = Utils.strip_html(raw_summary)
 
         book.id = entry:match('<id>(.-)</id>') or ""
-
-        -- Extract updated timestamp
         book.updated = entry:match('<updated>(.-)</updated>') or ""
 
         -- Extract download link
         local download_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/acquisition"')
         if download_link then
-            -- Resolve relative URLs against base_url
             book.download_url = Utils.resolve_url(self.base_url, download_link)
             book.media_type = "application/epub+zip"
         end
         
-        -- Extract cover image URL - try multiple patterns for better coverage
+        -- Extract cover image URL
         local cover_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/image"')
         if not cover_link then
-            -- Try with rel and type in different order
             cover_link = entry:match('<link rel="http://opds%-spec%.org/image"[^>]*href="([^"]+)"')
         end
         if not cover_link then
-            -- Try thumbnail pattern
             cover_link = entry:match('<link href="([^"]+)" rel="http://opds%-spec%.org/image/thumbnail"')
         end
         if not cover_link then
             cover_link = entry:match('<link rel="http://opds%-spec%.org/image/thumbnail"[^>]*href="([^"]+)"')
         end
         if not cover_link then
-            -- Try alternative cover link patterns with image type
             cover_link = entry:match('<link href="([^"]+)" type="image/[^"]*"[^>]*rel="[^"]*cover[^"]*"')
         end
         if not cover_link then
-            -- Try without rel restriction, just image type
             cover_link = entry:match('<link href="([^"]+)" type="image/jpeg"')
             if not cover_link then
                 cover_link = entry:match('<link href="([^"]+)" type="image/png"')
             end
         end
-        if not cover_link then
-            -- Try generic image link without specific type - more flexible pattern
-            cover_link = entry:match('<link[^>]+type="image/[^"]*"[^>]+href="([^"]+)"')
-            if not cover_link then
-                -- Try reverse attribute order
-                cover_link = entry:match('<link[^>]+href="([^"]+)"[^>]+type="image/[^"]*"')
-            end
-        end
         
         if cover_link then
-            -- Resolve relative URLs against base_url
             book.cover_url = Utils.resolve_url(self.base_url, cover_link)
-            logger.info("OPDS: Extracted cover URL for", book.title, ":", book.cover_url)
-        else
-            logger.warn("OPDS: No cover URL found for:", book.title)
-            -- Log all link elements for debugging
-            local link_count = 0
-            for link in entry:gmatch('<link[^>]*>') do
-                link_count = link_count + 1
-                if link_count <= 3 then -- Only log first 3 to avoid spam
-                    logger.dbg("OPDS: Available link:", link)
-                end
-            end
         end
 
         if book.download_url then
             table.insert(entries, book)
-        else
-            logger.warn("OPDS: Skipping entry without download URL:", book.title)
         end
     end
 
-    logger.info("OPDS: Parsed", #entries, "books from", entry_count, "entries")
+    logger.info("OPDS: Parsed", #entries, "books")
     return entries
 end
 
@@ -269,7 +271,6 @@ function OPDSClient:parseAuthorsFromBooklore(xml_data)
         end
     end
 
-    -- Convert set to sorted array
     local authors = {}
     for name, _ in pairs(author_set) do
         table.insert(authors, { name = name })
@@ -277,11 +278,9 @@ function OPDSClient:parseAuthorsFromBooklore(xml_data)
     
     table.sort(authors, function(a, b) return a.name < b.name end)
     
-    logger.info("OPDS: Found", #authors, "unique authors")
     return authors
 end
 
--- Sort books by series and title
 function OPDSClient:sortBooks(books)
     table.sort(books, function(a, b)
         local a_has_series = a.series and type(a.series) == "string" and a.series ~= ""
@@ -292,7 +291,6 @@ function OPDSClient:sortBooks(books)
                 return a.series < b.series
             end
             
-            -- Safe series index comparison
             local a_idx = Utils.safe_number(a.series_index, 0)
             local b_idx = Utils.safe_number(b.series_index, 0)
             
