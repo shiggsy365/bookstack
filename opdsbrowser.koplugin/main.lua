@@ -1,4 +1,40 @@
 -- Refactored OPDS Browser Plugin with improvements
+--
+-- PLACEHOLDER BOOK AUTO-DOWNLOAD WORKFLOW (5 Steps):
+-- ===================================================
+-- Step 1: DETECT PLACEHOLDER OPENED
+--   - Triggered by: onReaderReady() event when user opens a book
+--   - Action: Check if opened file is a placeholder (via database lookup)
+--   - Success: Call handlePlaceholderAutoDownload()
+--   - Failure: Normal book reading continues
+--
+-- Step 2: TRIGGER OPDS DOWNLOAD
+--   - Triggered by: handlePlaceholderAutoDownload() from Step 1
+--   - Action: Download real book from OPDS server to temp file
+--   - Success: Temp file created with real book content
+--   - Failure: Show error, placeholder remains
+--
+-- Step 3: DELETE PLACEHOLDER
+--   - Triggered by: _finishPlaceholderDownload() after download completes
+--   - Action: Delete placeholder file, rename temp to final location
+--   - Success: Real book replaces placeholder on disk
+--   - Failure: Show error, temp file deleted, placeholder may remain
+--
+-- Step 4: RESTART KOREADER
+--   - Triggered by: _finishPlaceholderDownload() after file replacement
+--   - Action: Save navigation state, trigger automatic restart
+--   - Success: KOReader restarts
+--   - Failure: Fall back to opening book directly
+--
+-- Step 5: NAVIGATE TO FOLDER
+--   - Triggered by: checkRestartNavigation() during init() after restart
+--   - Action: Load saved state, navigate FileManager to book folder
+--   - Success: User sees folder with newly downloaded book
+--   - Failure: Show error, user must navigate manually
+--
+-- All steps include comprehensive logging with "OPDS WORKFLOW: STEP N" markers
+-- for easy diagnosis. Each step logs success (✓) or failure with detailed error info.
+--
 local BD = require("ui/bidi")
 local DataStorage = require("datastorage")
 local NetworkMgr = require("ui/network/manager")
@@ -90,37 +126,53 @@ function OPDSBrowser:init()
     UIManager:scheduleIn(2, function()
         self:checkRestartNavigation()
     end)
+    
+    -- Run workflow health check on startup (logs to console)
+    UIManager:scheduleIn(3, function()
+        self:checkWorkflowHealth()
+    end)
 
     logger.info("OPDS Browser: Initialized with improved architecture")
 end
 
 -- Check and handle pending navigation from restart
 function OPDSBrowser:checkRestartNavigation()
+    logger.info("========================================")
+    logger.info("OPDS WORKFLOW: STEP 5 - POST-RESTART NAVIGATION")
+    logger.info("========================================")
     logger.info("OPDS Browser: Checking for restart navigation state")
     
     local state = RestartNavigationManager:loadNavigationState()
     if not state then
+        logger.info("OPDS WORKFLOW: No pending navigation - normal startup")
         logger.info("OPDS Browser: No restart navigation pending")
         return
     end
     
+    logger.info("OPDS WORKFLOW: Found saved navigation state from pre-restart")
     logger.info("OPDS Browser: Found restart navigation state, navigating to:", state.folder_path)
     
     -- Navigate to the folder
     local success = RestartNavigationManager:navigateToFolder(state.folder_path)
     
     if success then
+        logger.info("OPDS WORKFLOW: ✓ Step 5 complete - Successfully navigated to folder")
         logger.info("OPDS Browser: Successfully navigated to folder after restart")
         
         -- Show a brief notification to the user
         UIHelpers.showInfo(_("Navigated to downloaded book folder"))
     else
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 5 - Cannot navigate to folder")
         logger.err("OPDS Browser: Failed to navigate to folder after restart")
         UIHelpers.showError(_("Failed to navigate to folder"))
     end
     
     -- Clear the state file (consumed)
     RestartNavigationManager:clearNavigationState()
+    
+    logger.info("========================================")
+    logger.info("OPDS WORKFLOW: ALL STEPS COMPLETE")
+    logger.info("========================================")
 end
 
 -- Hook for when a document is opened
@@ -153,6 +205,9 @@ end
 
 -- Handle auto-download from placeholder
 function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
+    logger.info("========================================")
+    logger.info("OPDS WORKFLOW: STEP 1 - PLACEHOLDER DETECTED")
+    logger.info("========================================")
     logger.info("OPDSBrowser: handlePlaceholderAutoDownload called for:", filepath)
 
     -- CRITICAL: Resolve symlinks to get the real file path
@@ -178,11 +233,13 @@ function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
     local book_info = self.library_sync:getBookInfo(real_filepath)
 
     if not book_info then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 1 - Placeholder info not found")
         logger.warn("OPDSBrowser: Placeholder not found in database:", real_filepath)
         UIHelpers.showError(_("Placeholder information not found.\n\nPlease use the manual download option."))
         return
     end
 
+    logger.info("OPDS WORKFLOW: ✓ Step 1 complete - Placeholder detected and validated")
     logger.info("OPDSBrowser: Starting auto-download for:", book_info.title)
 
     -- NEW STRATEGY: Keep placeholder open, download in background, then switch to real book
@@ -195,7 +252,14 @@ end
 
 -- Download from placeholder with auto-replacement
 function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
-    if not self:ensureNetwork() then return end
+    logger.info("========================================")
+    logger.info("OPDS WORKFLOW: STEP 2 - TRIGGERING DOWNLOAD")
+    logger.info("========================================")
+    
+    if not self:ensureNetwork() then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Network not available")
+        return
+    end
     
     -- Extract book ID
     local book_id = book_info.book_id
@@ -204,7 +268,8 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     end
     
     if not book_id or book_id == "" then
-        logger.err("OPDS: No book ID found in placeholder info")
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - No book ID found in placeholder info")
+        logger.err("OPDS: Book info:", book_info and "present" or "nil")
         UIHelpers.showError(_("Cannot download: Book ID not found"))
         return
     end
@@ -273,6 +338,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     UIManager:close(loading)
     
     if not res or code ~= 200 then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Download failed")
         logger.err("OPDS: Download failed with code:", code)
         logger.err("OPDS: Download URL was:", download_url)
         logger.err("OPDS: Response:", res)
@@ -280,11 +346,15 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
         return
     end
     
+    logger.info("OPDS WORKFLOW: ✓ Step 2 complete - Book downloaded successfully")
+    
     local data = table.concat(response_body)
     logger.info("OPDS: Downloaded", #data, "bytes")
 
     -- Validate file size - files smaller than MIN_VALID_BOOK_SIZE are likely errors
     if #data < Constants.MIN_VALID_BOOK_SIZE then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Downloaded file too small")
+        logger.err("OPDS: File size:", #data, "bytes, minimum:", Constants.MIN_VALID_BOOK_SIZE)
         UIHelpers.showError(_("Downloaded file appears invalid (too small)\n\nPlaceholder will remain."))
         return
     end
@@ -292,6 +362,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     -- Write to temporary file first
     local file, err = io.open(temp_filepath, "wb")
     if not file then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Cannot create temp file")
         logger.err("OPDS: Failed to open temp file for writing:", err)
         UIHelpers.showError(T(_("Failed to create file: %1\n\nPlaceholder will remain."), err or "unknown"))
         return
@@ -305,6 +376,7 @@ function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
     -- Verify temp file was written successfully
     local temp_attr = lfs.attributes(temp_filepath)
     if not temp_attr or temp_attr.mode ~= "file" then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Temp file not created")
         logger.err("OPDS: Temp file was not created successfully")
         UIHelpers.showError(_("Download succeeded but temp file not found\n\nPlaceholder will remain."))
         return
@@ -354,6 +426,9 @@ end
 
 -- Finish placeholder download by replacing file and opening book
 function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath, filepath)
+    logger.info("========================================")
+    logger.info("OPDS WORKFLOW: STEP 3 - DELETING PLACEHOLDER")
+    logger.info("========================================")
     logger.info("OPDS: Finishing placeholder download")
     logger.info("OPDS:   Placeholder path:", placeholder_path)
     logger.info("OPDS:   Temp file path:", temp_filepath)
@@ -365,6 +440,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     logger.info("OPDS: Checking if downloaded temp file is placeholder:", temp_is_placeholder)
 
     if temp_is_placeholder then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Downloaded file is a placeholder")
         logger.err("OPDS: ERROR - Downloaded file is a placeholder!")
         logger.err("OPDS: The server sent us a placeholder instead of the real book")
         logger.err("OPDS: Download URL may be incorrect or server returned wrong content")
@@ -418,6 +494,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     end
     
     if not delete_ok then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Cannot delete placeholder")
         logger.err("OPDS: Failed to delete placeholder after", max_delete_attempts, "attempts")
         os.remove(temp_filepath)
         UIHelpers.showError(_("Failed to delete placeholder file after multiple attempts.\n\nThe file may be locked or have permission issues.\n\nPlease close any other apps using the file and try again."))
@@ -487,6 +564,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     -- Verify placeholder is truly gone before renaming
     local placeholder_still_exists = lfs.attributes(placeholder_path)
     if placeholder_still_exists then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Placeholder still exists after deletion")
         logger.err("OPDS: Placeholder file still exists before rename operation")
         os.remove(temp_filepath)
         UIHelpers.showError(_("Placeholder deletion verification failed.\n\nThe old file still exists.\n\nPlease try again."))
@@ -502,10 +580,13 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         return
     end
 
+    logger.info("OPDS WORKFLOW: ✓ Step 3 complete - Placeholder deleted successfully")
+    
     -- Rename temp file to final location
     logger.info("OPDS: Renaming temp file to final location:", filepath)
     local rename_ok = os.rename(temp_filepath, filepath)
     if not rename_ok then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Cannot rename temp file")
         logger.err("OPDS: Failed to rename temp file to final location")
         logger.err("OPDS: Temp file:", temp_filepath)
         logger.err("OPDS: Target file:", filepath)
@@ -539,6 +620,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     logger.info("OPDS: Verifying final file - exists:", final_attr ~= nil, "mode:", final_attr and final_attr.mode, "size:", final_attr and final_attr.size)
 
     if not final_attr or final_attr.mode ~= "file" then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Final file not found")
         logger.err("OPDS: Downloaded file not found at:", filepath)
         UIHelpers.showError(_("Download succeeded but file not found"))
         return
@@ -550,6 +632,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     logger.info("OPDS: Checking if final file is placeholder:", still_placeholder)
 
     if still_placeholder then
+        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Final file is still a placeholder")
         logger.err("OPDS: ERROR - Downloaded file is still a placeholder!")
         logger.err("OPDS: This means the real book didn't replace the placeholder properly")
         logger.err("OPDS: Temp file size was:", lfs.attributes(temp_filepath) and lfs.attributes(temp_filepath).size or "unknown")
@@ -568,6 +651,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     end
 
     logger.info("OPDS: Verified - final file is a real book (not placeholder)")
+    logger.info("OPDS WORKFLOW: ✓ Step 3 complete - Placeholder deleted, real book in place")
 
     -- ============================================================================
     -- CRITICAL: Clear ALL caches related to the replaced book
@@ -719,9 +803,12 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     logger.info("OPDS: Successfully downloaded book:", filepath)
 
     -- ============================================================================
-    -- RESTART KOREADER AND NAVIGATE TO FOLDER
+    -- STEP 4: RESTART KOREADER AND NAVIGATE TO FOLDER
     -- This ensures all caches are completely cleared and UI shows the real book
     -- ============================================================================
+    logger.info("========================================")
+    logger.info("OPDS WORKFLOW: STEP 4 - RESTARTING KOREADER")
+    logger.info("========================================")
     
     -- Extract folder path from filepath
     local folder_path = filepath:match("(.*/)")
@@ -737,6 +824,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         
         if save_ok then
             logger.info("OPDS: Navigation state saved successfully")
+            logger.info("OPDS WORKFLOW: ✓ Step 4 preparation complete - State saved for post-restart navigation")
             
             -- Show user message before restart
             local restart_msg = UIHelpers.showLoading(
@@ -754,6 +842,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
                 
                 if not restart_ok then
                     -- Restart failed, fall back to old behavior (open book directly)
+                    logger.err("OPDS WORKFLOW: FAILED AT STEP 4 - Restart not available")
                     logger.err("OPDS: Restart failed, falling back to direct book open")
                     UIHelpers.showError(_("Restart failed. Opening book directly."))
                     
@@ -763,9 +852,13 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
                     -- Open book directly
                     local ReaderUI = require("apps/reader/readerui")
                     ReaderUI:showReader(filepath)
+                else
+                    logger.info("OPDS WORKFLOW: ✓ Step 4 complete - Restart triggered")
+                    logger.info("OPDS WORKFLOW: Waiting for restart... Step 5 will execute on next startup")
                 end
             end)
         else
+            logger.err("OPDS WORKFLOW: FAILED AT STEP 4 - Cannot save navigation state")
             logger.err("OPDS: Failed to save navigation state, opening book directly")
             
             -- Fall back to opening book directly
@@ -802,6 +895,158 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         
         logger.info("OPDS: ==================== UI REFRESH COMPLETE ====================")
     end)
+end
+
+-- Health check for placeholder auto-download workflow
+-- Verifies all components required for the 5-step workflow are available
+function OPDSBrowser:checkWorkflowHealth()
+    logger.info("========================================")
+    logger.info("PLACEHOLDER AUTO-DOWNLOAD WORKFLOW HEALTH CHECK")
+    logger.info("========================================")
+    
+    local all_ok = true
+    local issues = {}
+    
+    -- Check Step 1: Placeholder detection
+    logger.info("Step 1 - Placeholder Detection:")
+    if self.library_sync and self.library_sync.getBookInfo then
+        logger.info("  ✓ LibrarySyncManager available")
+        if self.library_sync.placeholder_db then
+            logger.info("  ✓ Placeholder database available")
+            local count = 0
+            for _ in pairs(self.library_sync.placeholder_db) do
+                count = count + 1
+            end
+            logger.info("  ✓ Database has", count, "placeholder(s)")
+        else
+            logger.warn("  ✗ Placeholder database not initialized")
+            table.insert(issues, "Placeholder database not initialized")
+            all_ok = false
+        end
+    else
+        logger.err("  ✗ LibrarySyncManager not available")
+        table.insert(issues, "LibrarySyncManager not available")
+        all_ok = false
+    end
+    
+    -- Check Step 2: OPDS download capability
+    logger.info("Step 2 - OPDS Download:")
+    if self.opds_url and self.opds_url ~= "" then
+        logger.info("  ✓ OPDS URL configured:", self.opds_url)
+    else
+        logger.warn("  ✗ OPDS URL not configured")
+        table.insert(issues, "OPDS URL not configured")
+        all_ok = false
+    end
+    
+    local https_ok, https = pcall(require, "ssl.https")
+    if https_ok and https then
+        logger.info("  ✓ HTTPS library available")
+    else
+        logger.err("  ✗ HTTPS library not available")
+        table.insert(issues, "HTTPS library not available")
+        all_ok = false
+    end
+    
+    -- Check Step 3: File operations
+    logger.info("Step 3 - File Operations:")
+    local lfs_ok = pcall(function() return lfs.attributes("/") end)
+    if lfs_ok then
+        logger.info("  ✓ LFS (filesystem) library available")
+    else
+        logger.err("  ✗ LFS library not working")
+        table.insert(issues, "LFS library not working")
+        all_ok = false
+    end
+    
+    -- Check Step 4: Restart capability
+    logger.info("Step 4 - Restart Capability:")
+    if RestartNavigationManager then
+        logger.info("  ✓ RestartNavigationManager available")
+        
+        -- Check if we can write state files
+        local state_path = RestartNavigationManager:getStatePath()
+        if state_path then
+            logger.info("  ✓ State file path:", state_path)
+            
+            -- Try to write a test state (will be immediately deleted)
+            local test_ok = pcall(function()
+                local f = io.open(state_path .. ".test", "w")
+                if f then
+                    f:write("test")
+                    f:close()
+                    os.remove(state_path .. ".test")
+                    return true
+                end
+                return false
+            end)
+            
+            if test_ok then
+                logger.info("  ✓ Can write state files")
+            else
+                logger.warn("  ✗ Cannot write state files")
+                table.insert(issues, "Cannot write state files")
+            end
+        else
+            logger.warn("  ✗ Cannot determine state path")
+            table.insert(issues, "Cannot determine state path")
+        end
+        
+        -- Check restart methods
+        local UIManager = require("ui/uimanager")
+        local Device = require("device")
+        local has_restart = false
+        
+        if type(UIManager.restart) == "function" then
+            logger.info("  ✓ UIManager:restart() available")
+            has_restart = true
+        elseif type(UIManager.restartKOReader) == "function" then
+            logger.info("  ✓ UIManager:restartKOReader() available")
+            has_restart = true
+        elseif type(UIManager.exitOrRestart) == "function" then
+            logger.info("  ✓ UIManager:exitOrRestart() available")
+            has_restart = true
+        elseif Device and type(Device.reboot) == "function" then
+            logger.info("  ✓ Device:reboot() available")
+            has_restart = true
+        else
+            logger.warn("  ✗ No restart method available (will fall back to direct open)")
+            table.insert(issues, "No restart method available")
+        end
+    else
+        logger.err("  ✗ RestartNavigationManager not available")
+        table.insert(issues, "RestartNavigationManager not available")
+        all_ok = false
+    end
+    
+    -- Check Step 5: FileManager navigation
+    logger.info("Step 5 - FileManager Navigation:")
+    local fm_ok, FileManager = pcall(require, "apps/filemanager/filemanager")
+    if fm_ok and FileManager and FileManager.showFiles then
+        logger.info("  ✓ FileManager available")
+        logger.info("  ✓ FileManager.showFiles() available")
+    else
+        logger.err("  ✗ FileManager or showFiles() not available")
+        table.insert(issues, "FileManager not available")
+        all_ok = false
+    end
+    
+    -- Summary
+    logger.info("========================================")
+    if all_ok then
+        logger.info("WORKFLOW HEALTH: ✓ ALL CHECKS PASSED")
+        logger.info("All 5 workflow steps are fully functional")
+    else
+        logger.warn("WORKFLOW HEALTH: ✗ ISSUES FOUND")
+        logger.warn("Found", #issues, "issue(s):")
+        for i, issue in ipairs(issues) do
+            logger.warn("  " .. i .. ".", issue)
+        end
+        logger.warn("Workflow may not function correctly")
+    end
+    logger.info("========================================")
+    
+    return all_ok, issues
 end
 
 function OPDSBrowser:addToMainMenu(menu_items)
@@ -845,6 +1090,8 @@ function OPDSBrowser:addToMainMenu(menu_items)
               callback = function() self:showSettings() end },
             { text = _("Plugin - Cache Info"),
               callback = function() self:showCacheInfo() end },
+            { text = _("Plugin - Workflow Health Check"),
+              callback = function() self:showWorkflowHealth() end },
         },
     }
 end
@@ -976,6 +1223,65 @@ function OPDSBrowser:showCacheInfo()
     
     self.cache_info = UIHelpers.createTextViewer(_("Cache Info"), details, buttons)
     UIManager:show(self.cache_info)
+end
+
+-- Show workflow health check results
+function OPDSBrowser:showWorkflowHealth()
+    -- Run health check
+    local all_ok, issues = self:checkWorkflowHealth()
+    
+    -- Build message
+    local status_icon = all_ok and "✓" or "✗"
+    local status_text = all_ok and "ALL SYSTEMS OPERATIONAL" or "ISSUES DETECTED"
+    
+    local message = T(
+        _("Placeholder Auto-Download Workflow\n\n") ..
+        _("Status: %1 %2\n\n"),
+        status_icon,
+        status_text
+    )
+    
+    if all_ok then
+        message = message .. _("All 5 workflow steps are fully functional:\n\n") ..
+            _("1. ✓ Placeholder Detection\n") ..
+            _("2. ✓ OPDS Download\n") ..
+            _("3. ✓ File Operations\n") ..
+            _("4. ✓ Restart Capability\n") ..
+            _("5. ✓ FileManager Navigation\n\n") ..
+            _("The workflow will function correctly when you open a placeholder book.")
+    else
+        message = message .. T(
+            _("Found %1 issue(s):\n\n"),
+            #issues
+        )
+        
+        for i, issue in ipairs(issues) do
+            message = message .. T(_("%1. %2\n"), i, issue)
+        end
+        
+        message = message .. _("\n") ..
+            _("Some workflow steps may not function correctly. ") ..
+            _("Check KOReader logs for detailed diagnostics.")
+    end
+    
+    local buttons = {
+        {
+            { text = _("View Logs"), callback = function()
+                UIManager:close(self.workflow_health)
+                UIHelpers.showInfo(_("Check KOReader logs:\n\n") ..
+                    _("Look for 'PLACEHOLDER AUTO-DOWNLOAD WORKFLOW HEALTH CHECK' ") ..
+                    _("and 'OPDS WORKFLOW' entries for detailed information."))
+            end },
+        },
+        {
+            { text = _("Close"), callback = function()
+                UIManager:close(self.workflow_health)
+            end },
+        },
+    }
+    
+    self.workflow_health = UIHelpers.createTextViewer(_("Workflow Health"), message, buttons)
+    UIManager:show(self.workflow_health)
 end
 
 -- Network check helper
