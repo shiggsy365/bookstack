@@ -33,8 +33,7 @@ function PlaceholderBadge:init(placeholder_generator)
 
     -- Detect SVG icon availability
     local lfs = require("libs/libkoreader-lfs")
-    local plugin_dir = (...):match("(.-)[^%.]+$")  -- Get directory path
-    
+
     -- Try to find SVG files in plugin directory
     -- Note: In KOReader, plugin files are typically in koreader/plugins/pluginname.koplugin/
     self.cloud_svg_path = nil
