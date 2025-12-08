@@ -1178,16 +1178,37 @@ end
 function OPDSBrowser:showMainMenu()
     local items = self:getMenuItems()
     -- Uses your existing UIHelpers to create the menu style consistently
-    local menu = UIHelpers.createMenu(_("Cloud Book Library"), items)
+    -- Ensure scrollable is explicitly set to true
+    local menu = UIHelpers.createMenu(_("Cloud Book Library"), items, { scrollable = true })
     UIManager:show(menu)
 end
 
--- Settings
+-- Settings Sub-Menus
 function OPDSBrowser:showSettings()
-    local hardcover_status = self.hardcover_client:isConfigured() and "✓ Configured" or "✗ Not configured"
-    local publisher_setting = self.use_publisher_as_series and "YES" or "NO"
-    local library_check_setting = self.enable_library_check and "YES" or "NO"
+    local settings_menu_items = {
+        {
+            text = _("OPDS Settings"),
+            callback = function() self:showOPDSSettings() end
+        },
+        {
+            text = _("Ephemera Settings"),
+            callback = function() self:showEphemeraSettings() end
+        },
+        {
+            text = _("Hardcover Settings"),
+            callback = function() self:showHardcoverSettings() end
+        },
+        {
+            text = _("Plugin Settings"),
+            callback = function() self:showPluginSettings() end
+        }
+    }
+    
+    local menu = UIHelpers.createMenu(_("Plugin Settings"), settings_menu_items, { scrollable = true })
+    UIManager:show(menu)
+end
 
+function OPDSBrowser:showOPDSSettings()
     local fields = {
         {
             text = self.opds_url,
@@ -1207,29 +1228,50 @@ function OPDSBrowser:showSettings()
             input_type = "string",
             description = _("OPDS Password")
         },
+    }
+    
+    UIHelpers.createMultiInputDialog(
+        _("OPDS Settings"),
+        fields,
+        function(field_values)
+            self:saveSettings({
+                opds_url = field_values[1],
+                opds_username = field_values[2],
+                opds_password = field_values[3],
+            })
+        end
+    )
+end
+
+function OPDSBrowser:showEphemeraSettings()
+    local fields = {
         {
             text = self.ephemera_url,
             hint = _("Ephemera URL (e.g., http://example.com:8286)"),
             input_type = "string",
             description = _("Ephemera URL")
         },
-        {
-            text = self.download_dir,
-            hint = _("Download Directory"),
-            input_type = "string",
-            description = _("Download Directory")
-        },
+    }
+    
+    UIHelpers.createMultiInputDialog(
+        _("Ephemera Settings"),
+        fields,
+        function(field_values)
+            self:saveSettings({
+                ephemera_url = field_values[1],
+            })
+        end
+    )
+end
+
+function OPDSBrowser:showHardcoverSettings()
+    local library_check_setting = self.enable_library_check and "YES" or "NO"
+    local fields = {
         {
             text = self.hardcover_token,
             hint = _("Bearer Token (e.g., Bearer abc123xyz...)"),
             input_type = "string",
             description = _("Hardcover API Key")
-        },
-        {
-            text = publisher_setting,
-            hint = _("Use Publisher as Series? (YES/NO)"),
-            input_type = "string",
-            description = _("Publisher as Series")
         },
         {
             text = library_check_setting,
@@ -1243,6 +1285,36 @@ function OPDSBrowser:showSettings()
             input_type = "number",
             description = _("Library Check Page Limit")
         },
+    }
+    
+    UIHelpers.createMultiInputDialog(
+        _("Hardcover Settings"),
+        fields,
+        function(field_values)
+            self:saveSettings({
+                hardcover_token = field_values[1],
+                enable_library_check = field_values[2],
+                library_check_page_limit = field_values[3],
+            })
+        end
+    )
+end
+
+function OPDSBrowser:showPluginSettings()
+    local publisher_setting = self.use_publisher_as_series and "YES" or "NO"
+    local fields = {
+        {
+            text = self.download_dir,
+            hint = _("Download Directory"),
+            input_type = "string",
+            description = _("Download Directory")
+        },
+        {
+            text = publisher_setting,
+            hint = _("Use Publisher as Series? (YES/NO)"),
+            input_type = "string",
+            description = _("Publisher As Series")
+        },
         {
             text = self.library_sync.base_library_path,
             hint = _("Library Sync Path"),
@@ -1251,81 +1323,101 @@ function OPDSBrowser:showSettings()
         },
     }
     
-    local extra_text = T(_("Hardcover API Status: %1"), hardcover_status)
-    
     UIHelpers.createMultiInputDialog(
-        _("Book Download Settings"),
+        _("Plugin Settings"),
         fields,
         function(field_values)
-            self:saveSettings(field_values)
-        end,
-        extra_text
+            self:saveSettings({
+                download_dir = field_values[1],
+                use_publisher_as_series = field_values[2],
+                library_sync_path = field_values[3],
+            })
+        end
     )
 end
 
-function OPDSBrowser:saveSettings(fields)
-    -- Clean and validate URLs
-    local new_opds_url = Utils.trim(fields[1] or ""):gsub("/$", "")
-    local new_ephemera_url = Utils.trim(fields[4] or ""):gsub("/$", "")
+function OPDSBrowser:saveSettings(new_values)
+    -- Merge new values into current settings
+    local updates = {}
     
-    -- Validate OPDS URL
-    if new_opds_url ~= "" then
-        local valid, err = Utils.validate_url(new_opds_url)
-        if not valid then
-            UIHelpers.showError(err)
-            return
+    if new_values.opds_url ~= nil then 
+        local url_val = Utils.trim(new_values.opds_url or ""):gsub("/$", "")
+        if url_val ~= "" then
+            local valid, err = Utils.validate_url(url_val)
+            if not valid then UIHelpers.showError(err) return end
         end
+        updates.opds_url = url_val
+        self.opds_url = url_val
     end
     
-    -- Validate Ephemera URL
-    if new_ephemera_url ~= "" then
-        local valid, err = Utils.validate_url(new_ephemera_url)
-        if not valid then
-            UIHelpers.showError(err)
-            return
+    if new_values.opds_username ~= nil then 
+        updates.opds_username = Utils.trim(new_values.opds_username or "")
+        self.opds_username = updates.opds_username
+    end
+    
+    if new_values.opds_password ~= nil then 
+        updates.opds_password = Utils.trim(new_values.opds_password or "")
+        self.opds_password = updates.opds_password
+    end
+    
+    if new_values.ephemera_url ~= nil then 
+        local url_val = Utils.trim(new_values.ephemera_url or ""):gsub("/$", "")
+        if url_val ~= "" then
+            local valid, err = Utils.validate_url(url_val)
+            if not valid then UIHelpers.showError(err) return end
         end
+        updates.ephemera_url = url_val
+        self.ephemera_url = url_val
     end
     
-    -- Save settings
-    self.opds_url = new_opds_url
-    self.opds_username = Utils.trim(fields[2] or "")
-    self.opds_password = Utils.trim(fields[3] or "")
-    self.ephemera_url = new_ephemera_url
-    self.download_dir = Utils.trim(fields[5] or self.download_dir)
-    self.hardcover_token = Utils.trim(fields[6] or "")
-    self.use_publisher_as_series = Utils.safe_boolean(fields[7], false)
-    self.enable_library_check = Utils.safe_boolean(fields[8], true)
-    self.library_check_page_limit = Utils.safe_number(fields[9], Constants.DEFAULT_PAGE_LIMIT)
-    
-    -- Update library sync path (use download_dir/Library unless user specified custom path)
-    local new_library_path = Utils.trim(fields[10] or "")
-    if new_library_path == "" or new_library_path == self.library_sync.base_library_path then
-        -- Use default: download_dir/Library
-        new_library_path = self.download_dir .. "/Library"
+    if new_values.download_dir ~= nil then 
+        updates.download_dir = Utils.trim(new_values.download_dir or "")
+        self.download_dir = updates.download_dir
     end
-    LibrarySyncManager:init(new_library_path)
     
-    -- Update settings
-    SettingsManager:setAll({
-        opds_url = self.opds_url,
-        opds_username = self.opds_username,
-        opds_password = self.opds_password,
-        ephemera_url = self.ephemera_url,
-        download_dir = self.download_dir,
-        hardcover_token = self.hardcover_token,
-        use_publisher_as_series = self.use_publisher_as_series,
-        enable_library_check = self.enable_library_check,
-        library_check_page_limit = self.library_check_page_limit,
-        library_sync_path = new_library_path,
-    })
+    if new_values.hardcover_token ~= nil then 
+        updates.hardcover_token = Utils.trim(new_values.hardcover_token or "")
+        self.hardcover_token = updates.hardcover_token
+    end
     
-    -- Update clients
+    if new_values.use_publisher_as_series ~= nil then 
+        updates.use_publisher_as_series = Utils.safe_boolean(new_values.use_publisher_as_series, false)
+        self.use_publisher_as_series = updates.use_publisher_as_series
+    end
+    
+    if new_values.enable_library_check ~= nil then 
+        updates.enable_library_check = Utils.safe_boolean(new_values.enable_library_check, true)
+        self.enable_library_check = updates.enable_library_check
+    end
+    
+    if new_values.library_check_page_limit ~= nil then 
+        updates.library_check_page_limit = Utils.safe_number(new_values.library_check_page_limit, Constants.DEFAULT_PAGE_LIMIT)
+        self.library_check_page_limit = updates.library_check_page_limit
+    end
+    
+    -- Handle sync path update specially as it requires re-init of LibrarySyncManager
+    if new_values.library_sync_path ~= nil then
+        local new_path = Utils.trim(new_values.library_sync_path or "")
+        if new_path == "" or new_path == self.library_sync.base_library_path then
+             -- If empty, default to download_dir/Library
+             new_path = self.download_dir .. "/Library"
+        end
+        updates.library_sync_path = new_path
+        LibrarySyncManager:init(new_path)
+    end
+    
+    -- Update settings manager
+    SettingsManager:setAll(updates)
+    
+    -- Update clients with new credentials/URLs
     self.opds_client:setCredentials(self.opds_url, self.opds_username, self.opds_password)
     self.hardcover_client:setToken(self.hardcover_token)
     self.ephemera_client:setBaseURL(self.ephemera_url)
     
-    -- Clear cache
-    CacheManager:clear()
+    -- Clear cache if URLs changed
+    if new_values.opds_url or new_values.ephemera_url or new_values.hardcover_token then
+        CacheManager:clear()
+    end
     
     UIHelpers.showSuccess(_("Settings saved successfully!"))
 end
