@@ -37,6 +37,7 @@
 --
 local BD = require("ui/bidi")
 local DataStorage = require("datastorage")
+local Dispatcher = require("dispatcher") -- Added Dispatcher import
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -69,54 +70,12 @@ local OPDSBrowser = WidgetContainer:extend{
 }
 
 function OPDSBrowser:init()
-    self.ui.menu:registerToMainMenu(self)
-
-    -- Register the action
-    Dispatcher:registerAction("opds_sync_library", {
-        category = "none",
-        event = "opds_sync_library",
-        title = _("Sync OPDS Library"),
-        separator = true,
-    })
-
-    -- Register the handler
-    Dispatcher:registerActionHandler("opds_sync_library", function() 
-        self:buildPlaceholderLibrary() 
-    end)
-
-    Dispatcher:registerAction("opds_menu", {
-        category = "none",
-        event = "opds_sync_library",
-        title = _("Sync OPDS Library"),
-        separator = true,
-    })
-
-    -- Register the handler
-    Dispatcher:registerActionHandler("opds_sync_library", function() 
-        self:buildPlaceholderLibrary() 
-    end)
-
--- 2. Register the Dispatcher action
-    -- This makes "Open Cloud Book Library" appear in KOReader's Gesture/Profile settings
-    Dispatcher:registerAction("opds_open_menu", {
-        category = "none",
-        event = "opds_open_menu",
-        title = _("Open Cloud Book Library"),
-        separator = true,
-    })
-    
-    -- 3. Register the handler
-    Dispatcher:registerActionHandler("opds_open_menu", function() 
-        self:showMainMenu()
-    end)
-
-    
-    -- Initialize managers
+    -- 1. Initialize managers
     SettingsManager:init()
     CacheManager:init()
     HistoryManager:init()
     
-    -- Load settings
+    -- 2. Load settings
     local settings = SettingsManager:getAll()
     self.opds_url = settings.opds_url
     self.opds_username = settings.opds_username
@@ -128,7 +87,7 @@ function OPDSBrowser:init()
     self.enable_library_check = settings.enable_library_check
     self.library_check_page_limit = settings.library_check_page_limit
     
-    -- Initialize clients
+    -- 3. Initialize clients (MUST happen before registering menu)
     self.opds_client = OPDSClient:new()
     self.opds_client:setCredentials(self.opds_url, self.opds_username, self.opds_password)
     
@@ -138,7 +97,7 @@ function OPDSBrowser:init()
     self.ephemera_client = EphemeraClient:new()
     self.ephemera_client:setBaseURL(self.ephemera_url)
     
-    -- Initialize library sync
+    -- 4. Initialize library sync
     -- Use download_dir as base, create Library subfolder
     local base_download_dir = settings.download_dir or "/mnt/us/books"
     -- Remove trailing slash if present
@@ -147,8 +106,32 @@ function OPDSBrowser:init()
     LibrarySyncManager:init(library_path, self.opds_username, self.opds_password)
     self.library_sync = LibrarySyncManager
 
-    -- Cloud Badge feature removed at user request
-    -- self.placeholder_badge initialization removed
+    -- 5. Register to Main Menu (Now safe because clients exist)
+    self.ui.menu:registerToMainMenu(self)
+
+    -- 6. Register Dispatcher actions (For user patches/gestures)
+    Dispatcher:registerAction("opds_open_menu", {
+        category = "none",
+        event = "opds_open_menu",
+        title = _("Open Cloud Book Library"),
+        separator = true,
+    })
+    
+    Dispatcher:registerAction("opds_sync_library", {
+        category = "none",
+        event = "opds_sync_library",
+        title = _("Sync Cloud Library"),
+        separator = true,
+    })
+    
+    -- Register handlers
+    Dispatcher:registerActionHandler("opds_open_menu", function() 
+        self:showMainMenu()
+    end)
+
+    Dispatcher:registerActionHandler("opds_sync_library", function() 
+        self:buildPlaceholderLibrary()
+    end)
 
     -- Queue refresh
     self.queue_refresh_action = nil
@@ -207,50 +190,6 @@ function OPDSBrowser:checkRestartNavigation()
     logger.info("========================================")
     logger.info("OPDS WORKFLOW: ALL STEPS COMPLETE")
     logger.info("========================================")
-end
-
-function OPDSBrowser:getMenuItems()
-    return {
-        -- Library Sync section
-        { text = _("Library Sync - OPDS"),
-          callback = function() self:buildPlaceholderLibrary() end,
-          enabled_func = function() return self.opds_url ~= "" end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
-        -- Ephemera section
-        { text = _("Ephemera - Request New Book"),
-          callback = function() self:requestBook() end,
-          enabled_func = function() return self.ephemera_client:isConfigured() end },
-        { text = _("Ephemera - View Download Queue"),
-          callback = function() self:showDownloadQueue() end,
-          enabled_func = function() return self.ephemera_client:isConfigured() end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
-        -- Hardcover section
-        { text = _("Hardcover - Search Author"),
-          callback = function() self:hardcoverSearchAuthor() end,
-          enabled_func = function() return self.hardcover_client:isConfigured() end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
-        -- History section
-        { text = _("History - Recent Searches"),
-          callback = function() self:showSearchHistory() end },
-        { text = _("History - Recently Viewed"),
-          callback = function() self:showRecentBooks() end },
-
-        { text = "────────────────────", enabled_func = function() return false end },
-
-        -- Settings section
-        { text = _("Plugin - Settings"),
-          callback = function() self:showSettings() end },
-        { text = _("Plugin - Cache Info"),
-          callback = function() self:showCacheInfo() end },
-        { text = _("Plugin - Workflow Health Check"),
-          callback = function() self:showWorkflowHealth() end },
-    }
 end
 
 -- Register FileManager hooks to intercept placeholder file selections
@@ -558,8 +497,6 @@ function OPDSBrowser:onReaderReady(config)
         logger.info("OPDSBrowser: Checking file:", current_file)
 
         -- CRITICAL: Resolve symlinks before database lookup
-        -- This logic is kept generic for safety, although the "Recently Added" folder
-        -- logic that relied on it has been removed.
         local lookup_path = current_file
         local attr = lfs.symlinkattributes(current_file)
         if attr and attr.mode == "link" then
@@ -599,8 +536,6 @@ function OPDSBrowser:onReaderReady(config)
                 end)
             end
         end
-        
-        -- "Current Reads" folder update removed
     end)
 end
 
@@ -930,9 +865,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
     logger.info("OPDS: Clearing ALL caches for placeholder:", placeholder_path)
     logger.info("OPDS: Clearing ALL caches for real book:", filepath)
     
-    -- 1. Badge cache clearing removed (feature removed)
-    
-    -- 2. Clear document settings for both old and new paths
+    -- 1. Clear document settings for both old and new paths
     pcall(function()
         local DocSettings = require("docsettings")
         -- Clear placeholder settings
@@ -942,7 +875,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         logger.info("OPDS: ✓ Cleared DocSettings cache for both paths")
     end)
 
-    -- 3. Clear DocumentRegistry cache (KOReader's internal metadata cache)
+    -- 2. Clear DocumentRegistry cache (KOReader's internal metadata cache)
     pcall(function()
         local DocumentRegistry = require("documentregistry")
         if DocumentRegistry then
@@ -981,7 +914,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         end
     end)
 
-    -- 4. Clear CoverBrowser cache if it's loaded
+    -- 3. Clear CoverBrowser cache if it's loaded
     pcall(function()
         -- Try to clear CoverBrowser caches if the plugin is loaded
         local package_loaded = package.loaded
@@ -1014,7 +947,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         end
     end)
 
-    -- 5. Clear FileManager collection cache if loaded
+    -- 4. Clear FileManager collection cache if loaded
     pcall(function()
         local FileManagerCollection = require("apps/filemanager/filemanagercollection")
         if FileManagerCollection and FileManagerCollection.coll then
@@ -1026,7 +959,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         end
     end)
 
-    -- 6. Update placeholder database - remove the old entry
+    -- 5. Update placeholder database - remove the old entry
     if self.library_sync and self.library_sync.placeholder_db then
         if self.library_sync.placeholder_db[placeholder_path] then
             self.library_sync.placeholder_db[placeholder_path] = nil
@@ -1041,7 +974,7 @@ function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath,
         end
     end
 
-    -- 7. Clear plugin's own OPDS cache for this book
+    -- 6. Clear plugin's own OPDS cache for this book
     if CacheManager then
         -- Invalidate any OPDS metadata cache entries for this book
         local filename = placeholder_path:match("([^/]+)$") or ""
