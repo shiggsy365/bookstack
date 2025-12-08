@@ -201,16 +201,12 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         local INSET_Y  = Screen:scaleBySize(5)   -- push down from the top
         local TEXT_PAD = Screen:scaleBySize(8)   -- breathing room inside the badge
 
-        -- Multiple Unicode cloud options for better compatibility across devices
-        -- We'll try each one and use the first that's available
-        local cloud_options = {
-            "☁",   -- U+2601 - standard cloud (most compatible)
-            "🌥",  -- U+1F325 - cloud with sun (may not render on all devices)
-            "↓",   -- U+2193 - simple down arrow (universal fallback)
-        }
-        
-        -- Use the first cloud character (most compatible)
-        local cloud_text = cloud_options[1]
+        -- Use Unicode cloud character (☁ U+2601)
+        -- This is the most compatible cloud character across devices
+        -- Fallback options if needed in future:
+        --   🌥 (U+1F325) - cloud with sun (may not render on all devices)
+        --   ↓ (U+2193) - simple down arrow (universal fallback)
+        local cloud_text = "☁"
         
         logger.info("PlaceholderBadge: Using cloud character:", cloud_text)
 
@@ -241,13 +237,13 @@ local function patchCoverBrowserForPlaceholders(plugin, placeholder_gen)
         
         -- Try to use a blue color if available (more visible and distinctive)
         -- Fallback to dark gray if blue is not available
-        if Blitbuffer.COLOR_BLUE then
+        if Blitbuffer.COLOR_BLUE ~= nil then
             badge_color = Blitbuffer.COLOR_BLUE
-        elseif Blitbuffer.COLOR_DARK_BLUE then
+        elseif Blitbuffer.COLOR_DARK_BLUE ~= nil then
             badge_color = Blitbuffer.COLOR_DARK_BLUE
         end
         
-        logger.info("PlaceholderBadge: Using badge color")
+        logger.info("PlaceholderBadge: Using badge background color")
         
         local badge_bg = FrameContainer:new{
             background = badge_color,

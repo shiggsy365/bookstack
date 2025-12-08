@@ -183,12 +183,14 @@ end
 function OPDSBrowser:registerFileManagerHooks()
     logger.info("OPDS Browser: Registering FileManager hooks for placeholder interception")
     
-    -- Note: In KOReader, we can't directly override the file tap behavior
-    -- but we can add a menu action that users can trigger via long-press (hold)
-    -- This is the standard way plugins add custom file actions
+    -- Note: KOReader doesn't have a standard onFileSelect hook at the plugin level
+    -- Instead, we rely on onMenuHold (long-press) which is the standard way
+    -- for plugins to add custom file actions in FileManager
+    --
+    -- The onFileSelect method below is available for potential future enhancement
+    -- if KOReader adds such a hook, but currently the main interaction method
+    -- is through long-press menu (onMenuHold)
     
-    -- The actual hook will be registered via onMenuHold which is called
-    -- when a user long-presses a file in FileManager
     logger.info("OPDS Browser: FileManager hooks ready (onMenuHold)")
 end
 
@@ -229,7 +231,7 @@ function OPDSBrowser:onMenuHold(item)
             text = _("Download from OPDS"),
             callback = function()
                 logger.info("OPDS Browser: User selected 'Download from OPDS'")
-                UIManager:close(self.file_menu_dialog)
+                -- Dialog will be automatically closed by KOReader
                 self:handlePlaceholderDownloadFromFileManager(filepath, book_info)
             end,
         },
@@ -237,29 +239,38 @@ function OPDSBrowser:onMenuHold(item)
 end
 
 -- Hook for when a file is selected (tapped) in FileManager
--- This is our main interception point for placeholder files
+-- NOTE: This is a placeholder for potential future enhancement
+-- KOReader does not currently support onFileSelect at the plugin level
+-- For now, users must use long-press menu (onMenuHold) to download placeholders
+-- 
+-- This function is kept for documentation and potential future use if KOReader
+-- adds support for file selection interception at the plugin level
+--
+-- If you want to enable this, you would need to modify KOReader core to call
+-- this hook when files are selected in FileManager
 function OPDSBrowser:onFileSelect(filepath)
-    logger.info("=========================================")
-    logger.info("OPDS Browser: onFileSelect called")
-    logger.info("OPDS Browser: File:", filepath)
-    logger.info("=========================================")
+    logger.dbg("OPDS Browser: onFileSelect called (not currently supported by KOReader)")
+    logger.dbg("OPDS Browser: File:", filepath)
+    
+    -- This code is disabled because onFileSelect is not a standard KOReader hook
+    -- Keeping it here for future reference if the hook becomes available
+    return false
+    
+    --[[ DISABLED CODE - Would work if onFileSelect hook existed:
     
     -- Only process if we're in FileManager
     if self.ui.name ~= "FileManager" then
-        logger.dbg("OPDS Browser: Not in FileManager, ignoring")
         return false
     end
     
     -- Only process EPUB files
     if not filepath:match("%.epub$") then
-        logger.dbg("OPDS Browser: Not an EPUB file, ignoring")
         return false
     end
     
     -- Check if this is a placeholder file
     local book_info = self.library_sync:getBookInfo(filepath)
     if not book_info then
-        logger.dbg("OPDS Browser: Not a placeholder, allowing normal open")
         return false
     end
     
@@ -274,6 +285,7 @@ function OPDSBrowser:onFileSelect(filepath)
     
     -- Return true to prevent default behavior (opening the file)
     return true
+    ]]--
 end
 
 -- Handle placeholder download triggered from FileManager
