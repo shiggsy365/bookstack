@@ -110,6 +110,7 @@ function OPDSBrowser:init()
     self.ui.menu:registerToMainMenu(self)
 
     -- 6. Register Dispatcher actions (For user patches/gestures)
+    -- We keep registerAction for UI visibility, but remove the failing handlers
     Dispatcher:registerAction("opds_open_menu", {
         category = "none",
         event = "opds_open_menu",
@@ -124,14 +125,9 @@ function OPDSBrowser:init()
         separator = true,
     })
     
-    -- Register handlers
-    Dispatcher:registerActionHandler("opds_open_menu", function() 
-        self:showMainMenu()
-    end)
-
-    Dispatcher:registerActionHandler("opds_sync_library", function() 
-        self:buildPlaceholderLibrary()
-    end)
+    -- EXPOSE GLOBAL INSTANCE
+    -- This allows user patches to call methods directly: _G.opds_plugin_instance:methodName()
+    _G.opds_plugin_instance = self
 
     -- Queue refresh
     self.queue_refresh_action = nil
