@@ -522,15 +522,54 @@ function OPDSBrowser:onReaderReady(config)
         local current_file = ReaderUI.instance.document.file
         logger.info("OPDSBrowser: Checking file:", current_file)
 
+        -- CRITICAL: Resolve symlinks before database lookup
+        -- "Recently Added" folder contains symlinks/copies to books in author folders
+        local lookup_path = current_file
+        local attr = lfs.symlinkattributes(current_file)
+        if attr and attr.mode == "link" then
+            -- It's a symlink, resolve it to get the real path for database lookup
+            local target = lfs.readlink(current_file)
+            if target then
+                -- Handle relative symlinks
+                if not target:match("^/") then
+                    local dir = current_file:match("(.*/)")
+                    lookup_path = dir .. target
+                else
+                    lookup_path = target
+                end
+                logger.info("OPDSBrowser: Resolved symlink from:", current_file)
+                logger.info("OPDSBrowser: Resolved symlink to:", lookup_path)
+            else
+                logger.warn("OPDSBrowser: Failed to read symlink target for:", current_file)
+            end
+        end
+
         -- Check placeholder database directly (faster than parsing EPUB)
-        local book_info = self.library_sync:getBookInfo(current_file)
+        -- Use the resolved path for lookup
+        local book_info = self.library_sync:getBookInfo(lookup_path)
         if book_info then
             logger.info("OPDSBrowser: Found placeholder in database, triggering auto-download")
             UIManager:scheduleIn(0.5, function()
                 self:handlePlaceholderAutoDownload(current_file)
             end)
         else
-            logger.info("OPDSBrowser: Not a placeholder")
+            logger.info("OPDSBrowser: Not a placeholder, checking if it's a copy in Recently Added")
+            -- If not found by direct lookup and it's a file in Recently Added,
+            -- fall back to checking the placeholder database for any matching book
+            if current_file:match("/Recently Added/") then
+                logger.info("OPDSBrowser: File is in Recently Added folder, attempting content-based check")
+                -- Check if it's a placeholder by examining the file content
+                if self.placeholder_gen:isPlaceholder(current_file) then
+                    logger.info("OPDSBrowser: Detected as placeholder via content check")
+                    UIManager:scheduleIn(0.5, function()
+                        self:handlePlaceholderAutoDownload(current_file)
+                    end)
+                else
+                    logger.info("OPDSBrowser: Not a placeholder")
+                end
+            else
+                logger.info("OPDSBrowser: Not a placeholder")
+            end
         end
     end)
 end
