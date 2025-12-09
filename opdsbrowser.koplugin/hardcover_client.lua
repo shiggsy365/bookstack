@@ -316,4 +316,82 @@ function HardcoverClient:getSeriesBooks(series_id)
     return true, data.data.series_by_pk
 end
 
+-- New: Top Rated Books
+function HardcoverClient:getTopRatedBooks(limit)
+    limit = limit or 100
+    local query = {
+        query = string.format([[
+            query TopRatedBooks {
+              books(
+                where: { ratings_count: { _gt: 500} }
+                limit: %d
+                order_by: {rating: desc}
+              ) {
+                id
+                title
+                description
+                release_date
+                rating
+                ratings_count
+                contributions {
+                    author {
+                        name
+                    }
+                }
+              }
+            }
+        ]], limit)
+    }
+    
+    logger.info("Hardcover: Fetching top rated books")
+    
+    local ok, data = self:graphqlRequest(query)
+    if not ok then return false, data end
+    
+    if not data.data or not data.data.books then
+        return false, "Invalid response structure"
+    end
+    
+    return true, data.data.books
+end
+
+-- New: Recently Released Top Rated
+function HardcoverClient:getTopRatedRecent(limit)
+    limit = limit or 100
+    local query = {
+        query = string.format([[
+            query TopRatedRecent {
+              books(
+                where: { ratings_count: { _gt: 2}, rating: {_gt: 3}, release_date: {_is_null: false}}
+                limit: %d
+                order_by: {release_date: desc}
+              ) {
+                id
+                title
+                description
+                release_date
+                rating
+                ratings_count
+                contributions {
+                    author {
+                        name
+                    }
+                }
+              }
+            }
+        ]], limit)
+    }
+    
+    logger.info("Hardcover: Fetching top rated recent books")
+    
+    local ok, data = self:graphqlRequest(query)
+    if not ok then return false, data end
+    
+    if not data.data or not data.data.books then
+        return false, "Invalid response structure"
+    end
+    
+    return true, data.data.books
+end
+
 return HardcoverClient
