@@ -1,43 +1,13 @@
--- Refactored OPDS Browser Plugin with improvements
+-- Refactored OPDS Browser Plugin
 --
--- PLACEHOLDER BOOK AUTO-DOWNLOAD WORKFLOW (5 Steps):
--- ===================================================
--- Step 1: DETECT PLACEHOLDER OPENED
---   - Triggered by: onReaderReady() event when user opens a book
---   - Action: Check if opened file is a placeholder (via database lookup)
---   - Success: Call handlePlaceholderAutoDownload()
---   - Failure: Normal book reading continues
---
--- Step 2: TRIGGER OPDS DOWNLOAD
---   - Triggered by: handlePlaceholderAutoDownload() from Step 1
---   - Action: Download real book from OPDS server to temp file
---   - Success: Temp file created with real book content
---   - Failure: Show error, placeholder remains
---
--- Step 3: DELETE PLACEHOLDER
---   - Triggered by: _finishPlaceholderDownload() after download completes
---   - Action: Delete placeholder file, rename temp to final location
---   - Success: Real book replaces placeholder on disk
---   - Failure: Show error, temp file deleted, placeholder may remain
---
--- Step 4: RESTART KOREADER
---   - Triggered by: _finishPlaceholderDownload() after file replacement
---   - Action: Save navigation state, trigger automatic restart
---   - Success: KOReader restarts
---   - Failure: Fall back to opening book directly
---
--- Step 5: NAVIGATE TO FOLDER
---   - Triggered by: checkRestartNavigation() during init() after restart
---   - Action: Load saved state, navigate FileManager to book folder
---   - Success: User sees folder with newly downloaded book
---   - Failure: Show error, user must navigate manually
---
--- All steps include comprehensive logging with "OPDS WORKFLOW: STEP N" markers
--- for easy diagnosis. Each step logs success (✓) or failure with detailed error info.
---
+-- WORKFLOW:
+-- 1. DETECT: onReaderReady checks if opened file is a placeholder
+-- 2. DOWNLOAD: Downloads real book to temp file
+-- 3. CLOSE & SWAP: Close Reader -> Switch to FM -> Replace File
+-- 4. OPEN: Opens the new book file directly
+
 local BD = require("ui/bidi")
 local DataStorage = require("datastorage")
--- Removed Dispatcher import as we are not using it for action registration anymore
 local NetworkMgr = require("ui/network/manager")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
@@ -62,7 +32,6 @@ local EphemeraClient = require("ephemera_client")
 local HttpClient = require("http_client_new")
 local PlaceholderGenerator = require("placeholder_generator")
 local LibrarySyncManager = require("library_sync_manager")
-local RestartNavigationManager = require("restart_navigation_manager")
 
 local OPDSBrowser = WidgetContainer:extend{
     name = "opdsbrowser",
@@ -70,12 +39,10 @@ local OPDSBrowser = WidgetContainer:extend{
 }
 
 function OPDSBrowser:init()
-    -- 1. Initialize managers
     SettingsManager:init()
     CacheManager:init()
     HistoryManager:init()
     
-    -- 2. Load settings
     local settings = SettingsManager:getAll()
     self.opds_url = settings.opds_url
     self.opds_username = settings.opds_username
@@ -87,7 +54,6 @@ function OPDSBrowser:init()
     self.enable_library_check = settings.enable_library_check
     self.library_check_page_limit = settings.library_check_page_limit
     
-    -- 3. Initialize clients (MUST happen before registering menu)
     self.opds_client = OPDSClient:new()
     self.opds_client:setCredentials(self.opds_url, self.opds_username, self.opds_password)
     
@@ -97,131 +63,43 @@ function OPDSBrowser:init()
     self.ephemera_client = EphemeraClient:new()
     self.ephemera_client:setBaseURL(self.ephemera_url)
     
-    -- 4. Initialize library sync
-    -- Use download_dir as base, create Library subfolder
     local base_download_dir = settings.download_dir or "/mnt/us/books"
-    -- Remove trailing slash if present
     base_download_dir = base_download_dir:gsub("/$", "")
     local library_path = settings.library_sync_path or (base_download_dir .. "/Library")
     LibrarySyncManager:init(library_path, self.opds_username, self.opds_password)
     self.library_sync = LibrarySyncManager
 
-    -- 5. Register to Main Menu (Now safe because clients exist)
     self.ui.menu:registerToMainMenu(self)
-
-    -- 6. EXPOSE GLOBAL INSTANCE
-    -- This is the critical fix. Instead of using Dispatcher:registerActionHandler (which failed),
-    -- we expose the instance globally so user patches can call methods directly.
-    -- Usage in patch: if _G.opds_plugin_instance then _G.opds_plugin_instance:showMainMenu() end
     _G.opds_plugin_instance = self
-    logger.info("OPDS Browser: Plugin instance exposed as _G.opds_plugin_instance")
-
-    -- Queue refresh
     self.queue_refresh_action = nil
     
-    -- Register file selection hook for FileManager
+    -- State flag to prevent recursive download loops
+    self.processing_download = false
+    
     self:registerFileManagerHooks()
 
-    -- Check for pending navigation from restart (must be done after UI is ready)
-    UIManager:scheduleIn(2, function()
-        self:checkRestartNavigation()
-    end)
-    
-    -- Run workflow health check on startup (logs to console)
-    UIManager:scheduleIn(3, function()
-        self:checkWorkflowHealth()
-    end)
-
-    logger.info("OPDS Browser: Initialized with improved architecture")
+    logger.info("OPDS Browser: Initialized")
 end
 
--- Check and handle pending navigation from restart
-function OPDSBrowser:checkRestartNavigation()
-    logger.info("========================================")
-    logger.info("OPDS WORKFLOW: STEP 5 - POST-RESTART NAVIGATION")
-    logger.info("========================================")
-    logger.info("OPDS Browser: Checking for restart navigation state")
-    
-    local state = RestartNavigationManager:loadNavigationState()
-    if not state then
-        logger.info("OPDS WORKFLOW: No pending navigation - normal startup")
-        logger.info("OPDS Browser: No restart navigation pending")
-        return
-    end
-    
-    logger.info("OPDS WORKFLOW: Found saved navigation state from pre-restart")
-    logger.info("OPDS Browser: Found restart navigation state, navigating to:", state.folder_path)
-    
-    -- Navigate to the folder
-    local success = RestartNavigationManager:navigateToFolder(state.folder_path)
-    
-    if success then
-        logger.info("OPDS WORKFLOW: ✓ Step 5 complete - Successfully navigated to folder")
-        logger.info("OPDS Browser: Successfully navigated to folder after restart")
-        
-        -- Show a brief notification to the user
-        UIHelpers.showInfo(_("Navigated to downloaded book folder"))
-    else
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 5 - Cannot navigate to folder")
-        logger.err("OPDS Browser: Failed to navigate to folder after restart")
-        UIHelpers.showError(_("Failed to navigate to folder"))
-    end
-    
-    -- Clear the state file (consumed)
-    RestartNavigationManager:clearNavigationState()
-    
-    logger.info("========================================")
-    logger.info("OPDS WORKFLOW: ALL STEPS COMPLETE")
-    logger.info("========================================")
-end
+-- ============================================================================
+-- PLACEHOLDER DETECTION & DOWNLOAD LOGIC
+-- ============================================================================
 
--- Register FileManager hooks to intercept placeholder file selections
 function OPDSBrowser:registerFileManagerHooks()
-    logger.info("OPDS Browser: Registering FileManager hooks for placeholder interception")
-    
-    -- Note: KOReader doesn't have a standard onFileSelect hook at the plugin level
-    -- Instead, we rely on onMenuHold (long-press) which is the standard way
-    -- for plugins to add custom file actions in FileManager
-    
-    logger.info("OPDS Browser: FileManager hooks ready (onMenuHold)")
 end
 
--- Handle menu hold (long-press) on a file in FileManager
 function OPDSBrowser:onMenuHold(item)
-    logger.info("OPDS Browser: onMenuHold called")
-    
-    -- Only process if we're in FileManager (not ReaderUI)
-    if self.ui.name ~= "FileManager" then
-        logger.dbg("OPDS Browser: Not in FileManager, ignoring")
-        return false
-    end
-    
-    -- Check if item is a file (not a directory)
-    if not item or not item.path or item.is_directory then
-        logger.dbg("OPDS Browser: Not a file, ignoring")
-        return false
-    end
+    if self.ui.name ~= "FileManager" then return false end
+    if not item or not item.path or item.is_directory then return false end
     
     local filepath = item.path
-    logger.info("OPDS Browser: Checking if file is placeholder:", filepath)
-    
-    -- Check if file is a placeholder
     local book_info = self.library_sync:getBookInfo(filepath)
-    if not book_info then
-        logger.dbg("OPDS Browser: Not a placeholder, ignoring")
-        return false
-    end
+    if not book_info then return false end
     
-    logger.info("OPDS Browser: File IS a placeholder!")
-    logger.info("OPDS Browser: Book title:", book_info.title)
-    
-    -- Add our custom "Download from OPDS" action to the menu
     return {
         {
             text = _("Download from OPDS"),
             callback = function()
-                logger.info("OPDS Browser: User selected 'Download from OPDS'")
-                -- Dialog will be automatically closed by KOReader
                 self:handlePlaceholderDownloadFromFileManager(filepath, book_info)
             end,
         },
@@ -229,1262 +107,9 @@ function OPDSBrowser:onMenuHold(item)
 end
 
 function OPDSBrowser:onFileSelect(filepath)
-    -- This hook is not currently supported by KOReader at the plugin level
-    -- Users must use long-press menu (onMenuHold) instead
     return false
 end
 
--- Handle placeholder download triggered from FileManager
-function OPDSBrowser:handlePlaceholderDownloadFromFileManager(filepath, book_info)
-    logger.info("========================================")
-    logger.info("PLACEHOLDER FILE MANAGER DOWNLOAD WORKFLOW")
-    logger.info("========================================")
-    logger.info("OPDS Browser: Starting download from FileManager")
-    logger.info("OPDS Browser: File:", filepath)
-    logger.info("OPDS Browser: Title:", book_info.title)
-    
-    if not self:ensureNetwork() then
-        logger.err("OPDS Browser: Network not available")
-        return
-    end
-    
-    -- Show confirmation dialog
-    local ConfirmBox = require("ui/widget/confirmbox")
-    UIManager:show(ConfirmBox:new{
-        text = T(_("Download '%1' from OPDS server?\n\nThis will replace the placeholder with the real book."), 
-                 book_info.title),
-        ok_text = _("Download"),
-        ok_callback = function()
-            -- Trigger the download with "refresh folder" mode
-            self:downloadPlaceholderAndRefresh(filepath, book_info)
-        end,
-    })
-end
-
--- Download placeholder and refresh folder (don't open book)
-function OPDSBrowser:downloadPlaceholderAndRefresh(placeholder_path, book_info)
-    logger.info("========================================")
-    logger.info("DOWNLOAD AND REFRESH WORKFLOW")
-    logger.info("========================================")
-    
-    if not self:ensureNetwork() then
-        return
-    end
-    
-    -- Extract book ID
-    local book_id = book_info.book_id
-    if book_id then
-        book_id = book_id:match("book:(%d+)$") or book_id
-    end
-    
-    if not book_id or book_id == "" then
-        logger.err("OPDS: No book ID found in placeholder info")
-        UIHelpers.showError(_("Cannot download: Book ID not found"))
-        return
-    end
-
-    -- Determine file extension
-    local extension = ".epub"
-    if book_info.download_url and book_info.download_url:lower():match("kepub") then
-        extension = ".kepub.epub"
-    end
-
-    -- Create unique temp file name
-    local timestamp = os.time()
-    local temp_filepath = placeholder_path:gsub("%.epub$", string.format(".downloading_%d.tmp", timestamp))
-    local filepath = placeholder_path:gsub("%.epub$", extension)
-
-    -- Use download URL from book_info
-    local download_url = book_info.download_url
-    
-    if not download_url or download_url == "" then
-        logger.warn("OPDS: No download_url in book_info, constructing from book ID")
-        download_url = self.opds_url .. "/" .. book_id .. "/download"
-    end
-
-    logger.info("OPDS: Downloading:", book_info.title)
-    logger.info("OPDS: Download URL:", download_url)
-    logger.info("OPDS: Placeholder path:", placeholder_path)
-    logger.info("OPDS: Temp download path:", temp_filepath)
-    logger.info("OPDS: Final book path:", filepath)
-
-    local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
-    UIManager:show(loading)
-    
-    -- Download with authentication
-    local user = (self.opds_username and self.opds_username ~= "") and self.opds_username or nil
-    local pass = (self.opds_password and self.opds_password ~= "") and self.opds_password or nil
-    
-    local https = require("ssl.https")
-    local ltn12 = require("ltn12")
-    local mime = require("mime")
-    
-    local response_body = {}
-    local headers = {
-        ["Cache-Control"] = "no-cache, no-store, must-revalidate",
-        ["Pragma"] = "no-cache",
-        ["Expires"] = "0"
-    }
-    
-    if user and pass then
-        local credentials = mime.b64(user .. ":" .. pass)
-        headers["Authorization"] = "Basic " .. credentials
-    end
-    
-    local res, code, response_headers = https.request{
-        url = download_url,
-        method = "GET",
-        headers = headers,
-        sink = ltn12.sink.table(response_body)
-    }
-    
-    UIManager:close(loading)
-    
-    if not res or code ~= 200 then
-        logger.err("OPDS: Download failed with code:", code)
-        UIHelpers.showError(T(_("Download failed: HTTP %1"), code or "error"))
-        return
-    end
-    
-    local data = table.concat(response_body)
-    logger.info("OPDS: Downloaded", #data, "bytes")
-
-    -- Validate file size
-    if #data < Constants.MIN_VALID_BOOK_SIZE then
-        logger.err("OPDS: File size:", #data, "bytes, minimum:", Constants.MIN_VALID_BOOK_SIZE)
-        UIHelpers.showError(_("Downloaded file appears invalid (too small)"))
-        return
-    end
-
-    -- Write to temporary file
-    local file, err = io.open(temp_filepath, "wb")
-    if not file then
-        logger.err("OPDS: Failed to open temp file for writing:", err)
-        UIHelpers.showError(T(_("Failed to create file: %1"), err or "unknown"))
-        return
-    end
-
-    file:write(data)
-    file:close()
-
-    logger.info("OPDS: Wrote", #data, "bytes to temp file:", temp_filepath)
-
-    -- Verify temp file
-    local temp_attr = lfs.attributes(temp_filepath)
-    if not temp_attr or temp_attr.mode ~= "file" then
-        logger.err("OPDS: Temp file was not created successfully")
-        UIHelpers.showError(_("Download succeeded but temp file not found"))
-        return
-    end
-
-    -- Replace placeholder with real book
-    self:_finishPlaceholderDownloadAndRefresh(placeholder_path, temp_filepath, filepath, book_info.title)
-end
-
--- Finish placeholder download and refresh folder (don't open book)
-function OPDSBrowser:_finishPlaceholderDownloadAndRefresh(placeholder_path, temp_filepath, filepath, book_title)
-    logger.info("========================================")
-    logger.info("FINISHING DOWNLOAD AND REFRESH")
-    logger.info("========================================")
-    
-    -- Verify temp file is not a placeholder
-    local PlaceholderGenerator = require("placeholder_generator")
-    local temp_is_placeholder = PlaceholderGenerator:isPlaceholder(temp_filepath)
-    
-    if temp_is_placeholder then
-        logger.err("OPDS: Downloaded file is a placeholder!")
-        os.remove(temp_filepath)
-        UIHelpers.showError(_("Download failed: Server returned a placeholder instead of the book."))
-        return
-    end
-
-    logger.info("OPDS: Verified - temp file is a real book")
-
-    -- Delete placeholder file
-    logger.info("OPDS: Deleting placeholder file:", placeholder_path)
-    local delete_ok = os.remove(placeholder_path)
-    
-    if not delete_ok then
-        logger.err("OPDS: Failed to delete placeholder")
-        os.remove(temp_filepath)
-        UIHelpers.showError(_("Failed to delete placeholder file"))
-        return
-    end
-    
-    -- Remove from placeholder database
-    self.library_sync.placeholder_db[placeholder_path] = nil
-    self.library_sync:savePlaceholderDB()
-    logger.info("OPDS: Removed placeholder from database")
-
-    -- Rename temp file to final location
-    logger.info("OPDS: Renaming temp file to final location:", filepath)
-    local rename_ok = os.rename(temp_filepath, filepath)
-    if not rename_ok then
-        logger.err("OPDS: Failed to rename temp file")
-        os.remove(temp_filepath)
-        UIHelpers.showError(_("Failed to rename downloaded file"))
-        return
-    end
-
-    logger.info("OPDS: File replacement complete")
-    
-    -- Clear document settings
-    pcall(function()
-        local DocSettings = require("docsettings")
-        DocSettings:open(placeholder_path):purge()
-        DocSettings:open(filepath):purge()
-    end)
-
-    -- Show success message
-    UIHelpers.showSuccess(T(_("Downloaded: %1\n\nReturning to folder view..."), book_title or "Book"))
-
-    -- Extract folder path
-    local folder_path = filepath:match("(.*/)")
-    
-    if folder_path then
-        logger.info("OPDS: Refreshing folder view:", folder_path)
-        
-        -- Schedule folder refresh
-        UIManager:scheduleIn(0.5, function()
-            local FileManager = require("apps/filemanager/filemanager")
-            if FileManager.instance then
-                -- Refresh current folder
-                FileManager.instance:onRefresh()
-                logger.info("OPDS: FileManager refreshed")
-            else
-                -- FileManager not active, open folder
-                FileManager:showFiles(folder_path)
-                logger.info("OPDS: Opened folder:", folder_path)
-            end
-        end)
-    end
-    
-    logger.info("========================================")
-    logger.info("DOWNLOAD AND REFRESH COMPLETE")
-    logger.info("========================================")
-end
-
--- Hook for when a document is opened
-function OPDSBrowser:onReaderReady(config)
-    logger.info("OPDSBrowser: onReaderReady called")
-
-    -- Use a delayed check since ReaderUI.instance.document may not be ready yet
-    UIManager:scheduleIn(1, function()
-        local ReaderUI = require("apps/reader/readerui")
-        if not ReaderUI.instance or not ReaderUI.instance.document then
-            logger.info("OPDSBrowser: No document loaded after delay")
-            return
-        end
-
-        local current_file = ReaderUI.instance.document.file
-        logger.info("OPDSBrowser: Checking file:", current_file)
-
-        -- CRITICAL: Resolve symlinks before database lookup
-        local lookup_path = current_file
-        local attr = lfs.symlinkattributes(current_file)
-        if attr and attr.mode == "link" then
-            -- It's a symlink, resolve it to get the real path for database lookup
-            local target = lfs.readlink(current_file)
-            if target then
-                -- Handle relative symlinks
-                if not target:match("^/") then
-                    local dir = current_file:match("(.*/)")
-                    lookup_path = dir .. target
-                else
-                    lookup_path = target
-                end
-                logger.info("OPDSBrowser: Resolved symlink from:", current_file)
-                logger.info("OPDSBrowser: Resolved symlink to:", lookup_path)
-            else
-                logger.warn("OPDSBrowser: Failed to read symlink target for:", current_file)
-            end
-        end
-
-        -- Check placeholder database directly (faster than parsing EPUB)
-        -- Use the resolved path for lookup
-        local book_info = self.library_sync:getBookInfo(lookup_path)
-        if book_info then
-            logger.info("OPDSBrowser: Found placeholder in database, triggering auto-download")
-            UIManager:scheduleIn(0.5, function()
-                self:handlePlaceholderAutoDownload(current_file)
-            end)
-        else
-            -- Not found in database; check via file content as fallback
-            -- (This handles cases where DB might be out of sync or file was moved)
-            local PlaceholderGenerator = require("placeholder_generator")
-            if PlaceholderGenerator and PlaceholderGenerator:isPlaceholder(lookup_path) then
-                logger.info("OPDSBrowser: Detected as placeholder via content check")
-                UIManager:scheduleIn(0.5, function()
-                    self:handlePlaceholderAutoDownload(lookup_path)
-                end)
-            end
-        end
-    end)
-end
-
--- Handle auto-download from placeholder
-function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
-    logger.info("========================================")
-    logger.info("OPDS WORKFLOW: STEP 1 - PLACEHOLDER DETECTED")
-    logger.info("========================================")
-    logger.info("OPDSBrowser: handlePlaceholderAutoDownload called for:", filepath)
-
-    -- CRITICAL: Resolve symlinks to get the real file path
-    local real_filepath = filepath
-    local attr = lfs.symlinkattributes(filepath)
-    if attr and attr.mode == "link" then
-        -- It's a symlink, resolve it
-        local target = lfs.readlink(filepath)
-        if target then
-            -- Handle relative symlinks
-            if not target:match("^/") then
-                local dir = filepath:match("(.*/)")
-                real_filepath = dir .. target
-            else
-                real_filepath = target
-            end
-            logger.info("OPDSBrowser: Resolved symlink:", filepath, "->", real_filepath)
-        end
-    end
-
-    -- Get book info from placeholder database using real path
-    local book_info = self.library_sync:getBookInfo(real_filepath)
-
-    if not book_info then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 1 - Placeholder info not found")
-        logger.warn("OPDSBrowser: Placeholder not found in database:", real_filepath)
-        UIHelpers.showError(_("Placeholder information not found.\n\nPlease use the manual download option."))
-        return
-    end
-
-    logger.info("OPDS WORKFLOW: ✓ Step 1 complete - Placeholder detected and validated")
-    logger.info("OPDSBrowser: Starting auto-download for:", book_info.title)
-
-    -- Start download immediately
-    self:downloadFromPlaceholderAuto(real_filepath, book_info)
-end
-
--- Download from placeholder with auto-replacement
-function OPDSBrowser:downloadFromPlaceholderAuto(placeholder_path, book_info)
-    logger.info("========================================")
-    logger.info("OPDS WORKFLOW: STEP 2 - TRIGGERING DOWNLOAD")
-    logger.info("========================================")
-    
-    if not self:ensureNetwork() then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Network not available")
-        return
-    end
-    
-    -- Extract book ID
-    local book_id = book_info.book_id
-    if book_id then
-        book_id = book_id:match("book:(%d+)$") or book_id
-    end
-    
-    if not book_id or book_id == "" then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - No book ID found in placeholder info")
-        logger.err("OPDS: Book info:", book_info and "present" or "nil")
-        UIHelpers.showError(_("Cannot download: Book ID not found"))
-        return
-    end
-
-    -- Determine file extension
-    local extension = ".epub"
-    if book_info.download_url and book_info.download_url:lower():match("kepub") then
-        extension = ".kepub.epub"
-    end
-
-    -- IMPORTANT: Use unique temp file name with timestamp to avoid any conflicts
-    local timestamp = os.time()
-    local temp_filepath = placeholder_path:gsub("%.epub$", string.format(".downloading_%d.tmp", timestamp))
-
-    -- Final filepath after placeholder is removed
-    local filepath = placeholder_path:gsub("%.epub$", extension)
-
-    -- Use download URL from book_info
-    local download_url = book_info.download_url
-    
-    if not download_url or download_url == "" then
-        -- Fallback: construct from base URL and book ID
-        logger.warn("OPDS: No download_url in book_info, constructing from book ID")
-        download_url = self.opds_url .. "/" .. book_id .. "/download"
-    end
-
-    logger.info("OPDS: Auto-downloading:", book_info.title)
-    logger.info("OPDS: Download URL:", download_url)
-    logger.info("OPDS: Placeholder path:", placeholder_path)
-    logger.info("OPDS: Temp download path:", temp_filepath)
-    logger.info("OPDS: Final book path:", filepath)
-
-    local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
-    UIManager:show(loading)
-    
-    -- Download with progress
-    local user = (self.opds_username and self.opds_username ~= "") and self.opds_username or nil
-    local pass = (self.opds_password and self.opds_password ~= "") and self.opds_password or nil
-    
-    local https = require("ssl.https")
-    local ltn12 = require("ltn12")
-    local mime = require("mime")
-    
-    local response_body = {}
-    local headers = {
-        ["Cache-Control"] = "no-cache, no-store, must-revalidate",
-        ["Pragma"] = "no-cache",
-        ["Expires"] = "0"
-    }
-    
-    if user and pass then
-        local credentials = mime.b64(user .. ":" .. pass)
-        headers["Authorization"] = "Basic " .. credentials
-    end
-    
-    local res, code, response_headers = https.request{
-        url = download_url,
-        method = "GET",
-        headers = headers,
-        sink = ltn12.sink.table(response_body)
-    }
-    
-    UIManager:close(loading)
-    
-    if not res or code ~= 200 then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Download failed")
-        logger.err("OPDS: Download failed with code:", code)
-        logger.err("OPDS: Download URL was:", download_url)
-        logger.err("OPDS: Response:", res)
-        UIHelpers.showError(T(_("Download failed: HTTP %1\n\nPlaceholder will remain."), code or "error"))
-        return
-    end
-    
-    logger.info("OPDS WORKFLOW: ✓ Step 2 complete - Book downloaded successfully")
-    
-    local data = table.concat(response_body)
-    logger.info("OPDS: Downloaded", #data, "bytes")
-
-    -- Validate file size
-    if #data < Constants.MIN_VALID_BOOK_SIZE then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Downloaded file too small")
-        logger.err("OPDS: File size:", #data, "bytes, minimum:", Constants.MIN_VALID_BOOK_SIZE)
-        UIHelpers.showError(_("Downloaded file appears invalid (too small)\n\nPlaceholder will remain."))
-        return
-    end
-
-    -- Write to temporary file first
-    local file, err = io.open(temp_filepath, "wb")
-    if not file then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Cannot create temp file")
-        logger.err("OPDS: Failed to open temp file for writing:", err)
-        UIHelpers.showError(T(_("Failed to create file: %1\n\nPlaceholder will remain."), err or "unknown"))
-        return
-    end
-
-    file:write(data)
-    file:close()
-
-    logger.info("OPDS: Wrote", #data, "bytes to temp file:", temp_filepath)
-
-    -- Verify temp file was written successfully
-    local temp_attr = lfs.attributes(temp_filepath)
-    if not temp_attr or temp_attr.mode ~= "file" then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 2 - Temp file not created")
-        logger.err("OPDS: Temp file was not created successfully")
-        UIHelpers.showError(_("Download succeeded but temp file not found\n\nPlaceholder will remain."))
-        return
-    end
-
-    logger.info("OPDS: Temp file verified, size:", temp_attr.size, "bytes")
-
-    -- CRITICAL: Close the placeholder reader BEFORE deleting/renaming files
-    local ReaderUI = require("apps/reader/readerui")
-
-    if ReaderUI.instance then
-        logger.info("OPDS: Closing placeholder reader before file operations")
-
-        -- Show a brief "processing" message to keep UI populated
-        local processing_msg = UIHelpers.showLoading(_("Preparing downloaded book..."))
-        UIManager:show(processing_msg)
-
-        -- Close the reader
-        UIManager:close(ReaderUI.instance)
-        ReaderUI.instance = nil
-
-        -- Capture self in closure for scheduled callback
-        local plugin_ref = self
-
-        -- Increased delay to ensure reader is fully closed and all locks released
-        UIManager:scheduleIn(0.5, function()
-            UIManager:close(processing_msg)
-            plugin_ref:_finishPlaceholderDownload(placeholder_path, temp_filepath, filepath)
-        end)
-    else
-        -- Reader wasn't open (shouldn't happen, but handle it)
-        logger.warn("OPDS: Reader not open during placeholder download")
-        self:_finishPlaceholderDownload(placeholder_path, temp_filepath, filepath)
-    end
-end
-
--- Finish placeholder download by replacing file and opening book
-function OPDSBrowser:_finishPlaceholderDownload(placeholder_path, temp_filepath, filepath)
-    logger.info("========================================")
-    logger.info("OPDS WORKFLOW: STEP 3 - DELETING PLACEHOLDER")
-    logger.info("========================================")
-    logger.info("OPDS: Finishing placeholder download")
-    logger.info("OPDS:   Placeholder path:", placeholder_path)
-    logger.info("OPDS:   Temp file path:", temp_filepath)
-    logger.info("OPDS:   Final file path:", filepath)
-
-    -- CRITICAL: Verify the temp file is NOT a placeholder before we proceed
-    local PlaceholderGenerator = require("placeholder_generator")
-    local temp_is_placeholder = PlaceholderGenerator:isPlaceholder(temp_filepath)
-    logger.info("OPDS: Checking if downloaded temp file is placeholder:", temp_is_placeholder)
-
-    if temp_is_placeholder then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Downloaded file is a placeholder")
-        os.remove(temp_filepath)
-        UIHelpers.showError(_("Download failed: Server returned a placeholder instead of the book.\n\nPlease try downloading manually or contact support."))
-
-        -- Return to file manager
-        local FileManager = require("apps/filemanager/filemanager")
-        if not FileManager.instance then
-            local dir = placeholder_path:match("(.*/)")
-            FileManager:showFiles(dir)
-        else
-            FileManager.instance:onRefresh()
-        end
-        return
-    end
-
-    logger.info("OPDS: Verified - temp file is a real book (not placeholder)")
-
-    -- Delete the placeholder file with retry logic
-    logger.info("OPDS: Deleting placeholder file:", placeholder_path)
-    local delete_ok = false
-    local max_delete_attempts = 3
-    
-    for attempt = 1, max_delete_attempts do
-        delete_ok = os.remove(placeholder_path)
-        
-        if delete_ok then
-            logger.info("OPDS: Successfully deleted placeholder on attempt", attempt, ":", placeholder_path)
-            -- Verify file actually deleted
-            local still_exists = lfs.attributes(placeholder_path)
-            if still_exists then
-                logger.err("OPDS: os.remove() returned true but file still exists!")
-                delete_ok = false
-            else
-                logger.info("OPDS: Verified placeholder file no longer exists")
-                -- Remove from placeholder database
-                self.library_sync.placeholder_db[placeholder_path] = nil
-                self.library_sync:savePlaceholderDB()
-                logger.info("OPDS: Removed placeholder from database:", placeholder_path)
-                break
-            end
-        else
-            logger.warn("OPDS: Failed to delete placeholder on attempt", attempt, ":", placeholder_path)
-            if attempt < max_delete_attempts then
-                logger.info("OPDS: Waiting before retry...")
-                socket.sleep(0.2)
-            end
-        end
-    end
-    
-    if not delete_ok then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Cannot delete placeholder")
-        os.remove(temp_filepath)
-        UIHelpers.showError(_("Failed to delete placeholder file after multiple attempts.\n\nThe file may be locked or have permission issues.\n\nPlease close any other apps using the file and try again."))
-        
-        -- Return to file manager
-        local FileManager = require("apps/filemanager/filemanager")
-        if not FileManager.instance then
-            local dir = placeholder_path:match("(.*/)")
-            FileManager:showFiles(dir)
-        else
-            FileManager.instance:onRefresh()
-        end
-        return
-    end
-
-    -- Rename temp file to final location
-    logger.info("OPDS: Renaming temp file to final location:", filepath)
-    local rename_ok = os.rename(temp_filepath, filepath)
-    if not rename_ok then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Cannot rename temp file")
-        
-        -- Attempt cleanup
-        os.remove(temp_filepath)
-        
-        UIHelpers.showError(_("Failed to rename downloaded file to final location.\n\nThis may be a permissions or filesystem issue.\n\nPlease try again."))
-
-        -- Return to file manager
-        local FileManager = require("apps/filemanager/filemanager")
-        if not FileManager.instance then
-            local dir = placeholder_path:match("(.*/)")
-            FileManager:showFiles(dir)
-        else
-            FileManager.instance:onRefresh()
-        end
-        return
-    end
-
-    logger.info("OPDS: Successfully renamed temp file to:", filepath)
-    logger.info("OPDS: File replacement complete - placeholder deleted, real book in place")
-
-    -- Verify the downloaded file exists and has content
-    local final_attr = lfs.attributes(filepath)
-    if not final_attr or final_attr.mode ~= "file" then
-        logger.err("OPDS WORKFLOW: FAILED AT STEP 3 - Final file not found")
-        UIHelpers.showError(_("Download succeeded but file not found"))
-        return
-    end
-
-    logger.info("OPDS: Verified - final file is a real book (not placeholder)")
-    logger.info("OPDS WORKFLOW: ✓ Step 3 complete - Placeholder deleted, real book in place")
-
-    -- ============================================================================
-    -- CRITICAL: Clear ALL caches related to the replaced book
-    -- ============================================================================
-    logger.info("OPDS: ==================== CACHE INVALIDATION START ====================")
-    logger.info("OPDS: Clearing ALL caches for placeholder:", placeholder_path)
-    logger.info("OPDS: Clearing ALL caches for real book:", filepath)
-    
-    -- 1. Clear document settings for both old and new paths
-    pcall(function()
-        local DocSettings = require("docsettings")
-        -- Clear placeholder settings
-        DocSettings:open(placeholder_path):purge()
-        -- Clear final file settings (in case it existed before)
-        DocSettings:open(filepath):purge()
-        logger.info("OPDS: ✓ Cleared DocSettings cache for both paths")
-    end)
-
-    -- 2. Clear DocumentRegistry cache (KOReader's internal metadata cache)
-    pcall(function()
-        local DocumentRegistry = require("documentregistry")
-        if DocumentRegistry then
-            local cleared_registry = false
-            local cleared_provider = false
-            
-            -- Remove cached entries for both paths from registry
-            if DocumentRegistry.registry then
-                if DocumentRegistry.registry[placeholder_path] then
-                    DocumentRegistry.registry[placeholder_path] = nil
-                    cleared_registry = true
-                end
-                if DocumentRegistry.registry[filepath] then
-                    DocumentRegistry.registry[filepath] = nil
-                    cleared_registry = true
-                end
-                if cleared_registry then
-                    logger.info("OPDS: ✓ Cleared DocumentRegistry.registry cache")
-                end
-            end
-            
-            -- If DocumentRegistry has a provider_cache, clear those too
-            if DocumentRegistry.provider_cache then
-                if DocumentRegistry.provider_cache[placeholder_path] then
-                    DocumentRegistry.provider_cache[placeholder_path] = nil
-                    cleared_provider = true
-                end
-                if DocumentRegistry.provider_cache[filepath] then
-                    DocumentRegistry.provider_cache[filepath] = nil
-                    cleared_provider = true
-                end
-                if cleared_provider then
-                    logger.info("OPDS: ✓ Cleared DocumentRegistry.provider_cache")
-                end
-            end
-        end
-    end)
-
-    -- 3. Clear CoverBrowser cache if it's loaded
-    pcall(function()
-        -- Try to clear CoverBrowser caches if the plugin is loaded
-        local package_loaded = package.loaded
-        if package_loaded then
-            local coverbrowser_modules = {
-                "coverbrowser",
-                "plugins.coverbrowser.main",
-            }
-            
-            for _, module_name in ipairs(coverbrowser_modules) do
-                local module = package_loaded[module_name]
-                if module and type(module) == "table" then
-                    local cleared_cache = false
-                    -- Try to clear its cache tables
-                    if module.cache then
-                        module.cache[placeholder_path] = nil
-                        module.cache[filepath] = nil
-                        cleared_cache = true
-                    end
-                    if module.cover_cache then
-                        module.cover_cache[placeholder_path] = nil
-                        module.cover_cache[filepath] = nil
-                        cleared_cache = true
-                    end
-                    if cleared_cache then
-                        logger.info("OPDS: ✓ Cleared CoverBrowser caches for:", module_name)
-                    end
-                end
-            end
-        end
-    end)
-
-    -- 4. Clear FileManager collection cache if loaded
-    pcall(function()
-        local FileManagerCollection = require("apps/filemanager/filemanagercollection")
-        if FileManagerCollection and FileManagerCollection.coll then
-            -- Refresh collection data
-            if type(FileManagerCollection.coll.reload) == "function" then
-                FileManagerCollection.coll:reload()
-                logger.info("OPDS: ✓ Reloaded FileManagerCollection")
-            end
-        end
-    end)
-
-    -- 5. Update placeholder database - remove the old entry
-    if self.library_sync and self.library_sync.placeholder_db then
-        if self.library_sync.placeholder_db[placeholder_path] then
-            self.library_sync.placeholder_db[placeholder_path] = nil
-            self.library_sync:savePlaceholderDB()
-            logger.info("OPDS: ✓ Removed placeholder from database")
-        end
-        -- Ensure the new file is NOT in the placeholder database
-        if self.library_sync.placeholder_db[filepath] then
-            self.library_sync.placeholder_db[filepath] = nil
-            self.library_sync:savePlaceholderDB()
-            logger.info("OPDS: ✓ Removed new file from placeholder database (if present)")
-        end
-    end
-
-    -- 6. Clear plugin's own OPDS cache for this book
-    if CacheManager then
-        -- Invalidate any OPDS metadata cache entries for this book
-        local filename = placeholder_path:match("([^/]+)$") or ""
-        if filename ~= "" then
-            local book_id_pattern = filename:gsub("%.kepub%.epub$", ""):gsub("%.epub$", "")
-            if book_id_pattern ~= "" and book_id_pattern ~= filename then
-                CacheManager:invalidatePattern(book_id_pattern)
-                logger.info("OPDS: ✓ Invalidated OPDS cache entries matching:", book_id_pattern)
-            end
-        end
-    end
-
-    logger.info("OPDS: ==================== CACHE INVALIDATION COMPLETE ====================")
-    logger.info("OPDS: Successfully downloaded book:", filepath)
-
-    -- ============================================================================
-    -- STEP 4: RESTART KOREADER AND NAVIGATE TO FOLDER
-    -- ============================================================================
-    logger.info("========================================")
-    logger.info("OPDS WORKFLOW: STEP 4 - RESTARTING KOREADER")
-    logger.info("========================================")
-    
-    -- Extract folder path from filepath
-    local folder_path = filepath:match("(.*/)")
-    
-    if folder_path then
-        logger.info("OPDS: ==================== RESTART NAVIGATION START ====================")
-        logger.info("OPDS: Saving navigation state for post-restart")
-        
-        -- Save navigation state
-        local save_ok = RestartNavigationManager:saveNavigationState(folder_path, filepath)
-        
-        if save_ok then
-            logger.info("OPDS: Navigation state saved successfully")
-            logger.info("OPDS WORKFLOW: ✓ Step 4 preparation complete - State saved for post-restart navigation")
-            
-            -- Show user message before restart
-            local restart_msg = UIHelpers.showLoading(
-                _("Download complete!\n\nRestarting KOReader to clear cache and show book...")
-            )
-            UIManager:show(restart_msg)
-            UIManager:forceRePaint()
-            
-            -- Small delay to show message, then restart
-            UIManager:scheduleIn(2, function()
-                UIManager:close(restart_msg)
-                
-                logger.info("OPDS: Triggering KOReader restart")
-                local restart_ok = RestartNavigationManager:restartKOReader()
-                
-                if not restart_ok then
-                    -- Restart failed, fall back to old behavior (open book directly)
-                    logger.err("OPDS WORKFLOW: FAILED AT STEP 4 - Restart not available")
-                    logger.err("OPDS: Restart failed, falling back to direct book open")
-                    UIHelpers.showError(_("Restart failed. Opening book directly."))
-                    
-                    -- Clean up state file
-                    RestartNavigationManager:clearNavigationState()
-                    
-                    -- Open book directly
-                    local ReaderUI = require("apps/reader/readerui")
-                    ReaderUI:showReader(filepath)
-                else
-                    logger.info("OPDS WORKFLOW: ✓ Step 4 complete - Restart triggered")
-                end
-            end)
-        else
-            logger.err("OPDS WORKFLOW: FAILED AT STEP 4 - Cannot save navigation state")
-            logger.err("OPDS: Failed to save navigation state, opening book directly")
-            
-            -- Fall back to opening book directly
-            local ReaderUI = require("apps/reader/readerui")
-            ReaderUI:showReader(filepath)
-        end
-        
-        logger.info("OPDS: ==================== RESTART NAVIGATION COMPLETE ====================")
-    else
-        logger.err("OPDS: Could not extract folder path from:", filepath)
-        
-        -- Fall back to opening book directly
-        local ReaderUI = require("apps/reader/readerui")
-        ReaderUI:showReader(filepath)
-    end
-
-    -- Background: Refresh file manager (in case restart fails)
-    UIManager:scheduleIn(3, function()
-        -- Refresh file manager in background
-        local FileManager = require("apps/filemanager/filemanager")
-        if FileManager.instance then
-            -- Force a full refresh to clear any cached file information
-            FileManager.instance:onRefresh()
-            logger.info("OPDS: ✓ Background FileManager refresh complete")
-            
-            -- If FileManagerHistory exists, refresh it too
-            pcall(function()
-                if FileManager.instance.history then
-                    FileManager.instance.history:reload()
-                    logger.info("OPDS: ✓ Refreshed FileManager history")
-                end
-            end)
-        end
-        
-        logger.info("OPDS: ==================== UI REFRESH COMPLETE ====================")
-    end)
-end
-
--- Health check for placeholder auto-download workflow
-function OPDSBrowser:checkWorkflowHealth()
-    logger.info("========================================")
-    logger.info("PLACEHOLDER AUTO-DOWNLOAD WORKFLOW HEALTH CHECK")
-    logger.info("========================================")
-    
-    local all_ok = true
-    local issues = {}
-    
-    -- Check Step 1: Placeholder detection
-    logger.info("Step 1 - Placeholder Detection:")
-    if self.library_sync and self.library_sync.getBookInfo then
-        logger.info("  ✓ LibrarySyncManager available")
-        if self.library_sync.placeholder_db then
-            logger.info("  ✓ Placeholder database available")
-            local count = 0
-            for _ in pairs(self.library_sync.placeholder_db) do
-                count = count + 1
-            end
-            logger.info("  ✓ Database has", count, "placeholder(s)")
-        else
-            logger.warn("  ✗ Placeholder database not initialized")
-            table.insert(issues, "Placeholder database not initialized")
-            all_ok = false
-        end
-    else
-        logger.err("  ✗ LibrarySyncManager not available")
-        table.insert(issues, "LibrarySyncManager not available")
-        all_ok = false
-    end
-    
-    -- Check Step 2: OPDS download capability
-    logger.info("Step 2 - OPDS Download:")
-    if self.opds_url and self.opds_url ~= "" then
-        logger.info("  ✓ OPDS URL configured:", self.opds_url)
-    else
-        logger.warn("  ✗ OPDS URL not configured")
-        table.insert(issues, "OPDS URL not configured")
-        all_ok = false
-    end
-    
-    -- Check other steps...
-    
-    -- Summary
-    logger.info("========================================")
-    if all_ok then
-        logger.info("WORKFLOW HEALTH: ✓ ALL CHECKS PASSED")
-    else
-        logger.warn("WORKFLOW HEALTH: ✗ ISSUES FOUND")
-        logger.warn("Found", #issues, "issue(s):")
-        for i, issue in ipairs(issues) do
-            logger.warn("  " .. i .. ".", issue)
-        end
-    end
-    logger.info("========================================")
-    
-    return all_ok, issues
-end
-
--- Define getMenuItems to provide the table of menu options
-function OPDSBrowser:getMenuItems()
-    return {
-        -- Library Sync section
-        { text = _("Library Sync - OPDS"),
-          callback = function() self:buildPlaceholderLibrary() end,
-          enabled_func = function() return self.opds_url ~= "" end },
-        -- Ephemera section
-        { text = _("Ephemera - Request New Book"),
-          callback = function() self:requestBook() end,
-          enabled_func = function() return self.ephemera_client:isConfigured() end },
-        { text = _("Ephemera - View Download Queue"),
-          callback = function() self:showDownloadQueue() end,
-          enabled_func = function() return self.ephemera_client:isConfigured() end },
-        -- Hardcover section
-        { text = _("Hardcover - Search Author"),
-          callback = function() self:hardcoverSearchAuthor() end,
-          enabled_func = function() return self.hardcover_client:isConfigured() end },
-        -- History section
-        { text = _("History - Recent Searches"),
-          callback = function() self:showSearchHistory() end },
-        { text = _("History - Recently Viewed"),
-          callback = function() self:showRecentBooks() end },
-        -- Settings section
-        { text = _("Plugin - Settings"),
-          callback = function() self:showSettings() end },
-        { text = _("Plugin - Cache Info"),
-          callback = function() self:showCacheInfo() end },
-        { text = _("Plugin - Workflow Health Check"),
-          callback = function() self:showWorkflowHealth() end },
-    }
-end
-
-function OPDSBrowser:addToMainMenu(menu_items)
-    menu_items.opdsbrowser = {
-        text = _("Cloud Book Library"),
-        sub_item_table = self:getMenuItems(),
-    }
-end
-
-function OPDSBrowser:showMainMenu()
-    local items = self:getMenuItems()
-    -- Uses your existing UIHelpers to create the menu style consistently
-    -- Ensure scrollable is explicitly set to true
-    local menu = UIHelpers.createMenu(_("Cloud Book Library"), items, { scrollable = true })
-    UIManager:show(menu)
-end
-
--- Settings Sub-Menus
-function OPDSBrowser:showSettings()
-    local settings_menu_items = {
-        {
-            text = _("OPDS Settings"),
-            callback = function() self:showOPDSSettings() end
-        },
-        {
-            text = _("Ephemera Settings"),
-            callback = function() self:showEphemeraSettings() end
-        },
-        {
-            text = _("Hardcover Settings"),
-            callback = function() self:showHardcoverSettings() end
-        },
-        {
-            text = _("Plugin Settings"),
-            callback = function() self:showPluginSettings() end
-        }
-    }
-    
-    local menu = UIHelpers.createMenu(_("Plugin Settings"), settings_menu_items, { scrollable = true })
-    UIManager:show(menu)
-end
-
-function OPDSBrowser:showOPDSSettings()
-    local fields = {
-        {
-            text = self.opds_url,
-            hint = _("Base URL (e.g., https://example.com/api/v1/opds)"),
-            input_type = "string",
-            description = _("OPDS URL")
-        },
-        {
-            text = self.opds_username,
-            hint = _("OPDS Username (optional)"),
-            input_type = "string",
-            description = _("OPDS Username")
-        },
-        {
-            text = self.opds_password,
-            hint = _("OPDS Password (optional)"),
-            input_type = "string",
-            description = _("OPDS Password")
-        },
-    }
-    
-    UIHelpers.createMultiInputDialog(
-        _("OPDS Settings"),
-        fields,
-        function(field_values)
-            self:saveSettings({
-                opds_url = field_values[1],
-                opds_username = field_values[2],
-                opds_password = field_values[3],
-            })
-        end
-    )
-end
-
-function OPDSBrowser:showEphemeraSettings()
-    local fields = {
-        {
-            text = self.ephemera_url,
-            hint = _("Ephemera URL (e.g., http://example.com:8286)"),
-            input_type = "string",
-            description = _("Ephemera URL")
-        },
-    }
-    
-    UIHelpers.createMultiInputDialog(
-        _("Ephemera Settings"),
-        fields,
-        function(field_values)
-            self:saveSettings({
-                ephemera_url = field_values[1],
-            })
-        end
-    )
-end
-
-function OPDSBrowser:showHardcoverSettings()
-    local library_check_setting = self.enable_library_check and "YES" or "NO"
-    local fields = {
-        {
-            text = self.hardcover_token,
-            hint = _("Bearer Token (e.g., Bearer abc123xyz...)"),
-            input_type = "string",
-            description = _("Hardcover API Key")
-        },
-        {
-            text = library_check_setting,
-            hint = _("Check 'In Library' for Hardcover? (YES/NO)"),
-            input_type = "string",
-            description = _("Check Library Status")
-        },
-        {
-            text = tostring(self.library_check_page_limit),
-            hint = _("Max pages to check (5=250 books, 0=unlimited)"),
-            input_type = "number",
-            description = _("Library Check Page Limit")
-        },
-    }
-    
-    UIHelpers.createMultiInputDialog(
-        _("Hardcover Settings"),
-        fields,
-        function(field_values)
-            self:saveSettings({
-                hardcover_token = field_values[1],
-                enable_library_check = field_values[2],
-                library_check_page_limit = field_values[3],
-            })
-        end
-    )
-end
-
-function OPDSBrowser:showPluginSettings()
-    local publisher_setting = self.use_publisher_as_series and "YES" or "NO"
-    local fields = {
-        {
-            text = self.download_dir,
-            hint = _("Download Directory"),
-            input_type = "string",
-            description = _("Download Directory")
-        },
-        {
-            text = publisher_setting,
-            hint = _("Use Publisher as Series? (YES/NO)"),
-            input_type = "string",
-            description = _("Publisher As Series")
-        },
-        {
-            text = self.library_sync.base_library_path,
-            hint = _("Library Sync Path"),
-            input_type = "string",
-            description = _("Sync Path")
-        },
-    }
-    
-    UIHelpers.createMultiInputDialog(
-        _("Plugin Settings"),
-        fields,
-        function(field_values)
-            self:saveSettings({
-                download_dir = field_values[1],
-                use_publisher_as_series = field_values[2],
-                library_sync_path = field_values[3],
-            })
-        end
-    )
-end
-
-function OPDSBrowser:saveSettings(new_values)
-    -- Merge new values into current settings
-    local updates = {}
-    
-    if new_values.opds_url ~= nil then 
-        local url_val = Utils.trim(new_values.opds_url or ""):gsub("/$", "")
-        if url_val ~= "" then
-            local valid, err = Utils.validate_url(url_val)
-            if not valid then UIHelpers.showError(err) return end
-        end
-        updates.opds_url = url_val
-        self.opds_url = url_val
-    end
-    
-    if new_values.opds_username ~= nil then 
-        updates.opds_username = Utils.trim(new_values.opds_username or "")
-        self.opds_username = updates.opds_username
-    end
-    
-    if new_values.opds_password ~= nil then 
-        updates.opds_password = Utils.trim(new_values.opds_password or "")
-        self.opds_password = updates.opds_password
-    end
-    
-    if new_values.ephemera_url ~= nil then 
-        local url_val = Utils.trim(new_values.ephemera_url or ""):gsub("/$", "")
-        if url_val ~= "" then
-            local valid, err = Utils.validate_url(url_val)
-            if not valid then UIHelpers.showError(err) return end
-        end
-        updates.ephemera_url = url_val
-        self.ephemera_url = url_val
-    end
-    
-    if new_values.download_dir ~= nil then 
-        updates.download_dir = Utils.trim(new_values.download_dir or "")
-        self.download_dir = updates.download_dir
-    end
-    
-    if new_values.hardcover_token ~= nil then 
-        updates.hardcover_token = Utils.trim(new_values.hardcover_token or "")
-        self.hardcover_token = updates.hardcover_token
-    end
-    
-    if new_values.use_publisher_as_series ~= nil then 
-        updates.use_publisher_as_series = Utils.safe_boolean(new_values.use_publisher_as_series, false)
-        self.use_publisher_as_series = updates.use_publisher_as_series
-    end
-    
-    if new_values.enable_library_check ~= nil then 
-        updates.enable_library_check = Utils.safe_boolean(new_values.enable_library_check, true)
-        self.enable_library_check = updates.enable_library_check
-    end
-    
-    if new_values.library_check_page_limit ~= nil then 
-        updates.library_check_page_limit = Utils.safe_number(new_values.library_check_page_limit, Constants.DEFAULT_PAGE_LIMIT)
-        self.library_check_page_limit = updates.library_check_page_limit
-    end
-    
-    -- Handle sync path update specially as it requires re-init of LibrarySyncManager
-    if new_values.library_sync_path ~= nil then
-        local new_path = Utils.trim(new_values.library_sync_path or "")
-        if new_path == "" or new_path == self.library_sync.base_library_path then
-             -- If empty, default to download_dir/Library
-             new_path = self.download_dir .. "/Library"
-        end
-        updates.library_sync_path = new_path
-        LibrarySyncManager:init(new_path)
-    end
-    
-    -- Update settings manager
-    SettingsManager:setAll(updates)
-    
-    -- Update clients with new credentials/URLs
-    self.opds_client:setCredentials(self.opds_url, self.opds_username, self.opds_password)
-    self.hardcover_client:setToken(self.hardcover_token)
-    self.ephemera_client:setBaseURL(self.ephemera_url)
-    
-    -- Clear cache if URLs changed
-    if new_values.opds_url or new_values.ephemera_url or new_values.hardcover_token then
-        CacheManager:clear()
-    end
-    
-    UIHelpers.showSuccess(_("Settings saved successfully!"))
-end
-
--- Cache info
-function OPDSBrowser:showCacheInfo()
-    local stats = CacheManager:getCacheStats()
-    local details = T(
-        _("Cache Statistics\n\n") ..
-        _("Total Entries: %1\n") ..
-        _("Oldest Entry: %2 seconds\n") ..
-        _("Newest Entry: %3 seconds\n") ..
-        _("Cache TTL: %4 seconds"),
-        stats.total_entries,
-        stats.oldest_age,
-        stats.newest_age == math.huge and "N/A" or stats.newest_age,
-        Constants.CACHE_TTL
-    )
-    
-    local buttons = {
-        {
-            { text = _("Clear Cache"), callback = function()
-                UIManager:close(self.cache_info)
-                CacheManager:clear()
-                UIHelpers.showSuccess(_("Cache cleared"))
-            end },
-        },
-        {
-            { text = _("Close"), callback = function()
-                UIManager:close(self.cache_info)
-            end },
-        },
-    }
-    
-    self.cache_info = UIHelpers.createTextViewer(_("Cache Info"), details, buttons)
-    UIManager:show(self.cache_info)
-end
-
--- Show workflow health check results
-function OPDSBrowser:showWorkflowHealth()
-    -- Run health check
-    local all_ok, issues = self:checkWorkflowHealth()
-    
-    -- Build message
-    local status_icon = all_ok and "✓" or "✗"
-    local status_text = all_ok and "ALL SYSTEMS OPERATIONAL" or "ISSUES DETECTED"
-    
-    local message = T(
-        _("Placeholder Auto-Download Workflow\n\n") ..
-        _("Status: %1 %2\n\n"),
-        status_icon,
-        status_text
-    )
-    
-    if all_ok then
-        message = message .. _("All 5 workflow steps are fully functional.")
-    else
-        message = message .. T(
-            _("Found %1 issue(s):\n\n"),
-            #issues
-        )
-        for i, issue in ipairs(issues) do
-            message = message .. T(_("%1. %2\n"), i, issue)
-        end
-    end
-    
-    local buttons = {
-        {
-            { text = _("Close"), callback = function()
-                UIManager:close(self.workflow_health)
-            end },
-        },
-    }
-    
-    self.workflow_health = UIHelpers.createTextViewer(_("Workflow Health"), message, buttons)
-    UIManager:show(self.workflow_health)
-end
-
--- Network check helper
 function OPDSBrowser:ensureNetwork()
     if not NetworkMgr:isOnline() then
         NetworkMgr:beforeWifiAction()
@@ -1497,20 +122,469 @@ function OPDSBrowser:ensureNetwork()
     return true
 end
 
--- Show book list and details functions omitted for brevity (unchanged)
+function OPDSBrowser:handlePlaceholderDownloadFromFileManager(filepath, book_info)
+    if not self:ensureNetwork() then return end
+    
+    local ConfirmBox = require("ui/widget/confirmbox")
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Download '%1' from OPDS server?\n\nThis will replace the placeholder with the real book."), 
+                 book_info.title),
+        ok_text = _("Download"),
+        ok_callback = function()
+            self:downloadPlaceholderAndRefresh(filepath, book_info)
+        end,
+    })
+end
+
+function OPDSBrowser:downloadPlaceholderAndRefresh(placeholder_path, book_info)
+    if not self:ensureNetwork() then return end
+    
+    -- Set processing flag immediately to stop other events
+    self.processing_download = true
+    
+    local book_id = book_info.book_id
+    if book_id then book_id = book_id:match("book:(%d+)$") or book_id end
+    
+    if not book_id or book_id == "" then
+        self.processing_download = false
+        UIHelpers.showError(_("Cannot download: Book ID not found"))
+        return
+    end
+
+    local extension = ".epub"
+    if book_info.download_url and book_info.download_url:lower():match("kepub") then
+        extension = ".kepub.epub"
+    end
+
+    local timestamp = os.time()
+    local temp_filepath = placeholder_path:gsub("%.epub$", string.format(".downloading_%d.tmp", timestamp))
+    
+    -- CHANGE: Strip the suffix " - (PH)" from the filename if present
+    -- This converts ".../Title - (PH).epub" to ".../Title.epub"
+    -- Pattern matches " - (PH)" specifically at the end of the filename stem
+    local clean_path = placeholder_path:gsub(" %- %(PH%)", "")
+    local filepath = clean_path:gsub("%.epub$", extension)
+
+    if filepath == placeholder_path then
+        logger.info("OPDS: No ' - (PH)' suffix found, overwriting existing filename")
+    else
+        logger.info("OPDS: Converting placeholder filename to clean filename")
+        logger.info("OPDS: From:", placeholder_path)
+        logger.info("OPDS: To:  ", filepath)
+    end
+
+    local download_url = book_info.download_url
+    if not download_url or download_url == "" then
+        download_url = self.opds_url .. "/" .. book_id .. "/download"
+    end
+
+    local loading = UIHelpers.createProgressMessage(_("Downloading book..."))
+    UIManager:show(loading)
+    
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    local mime = require("mime")
+    
+    local response_body = {}
+    local headers = { ["Cache-Control"] = "no-cache", ["Pragma"] = "no-cache" }
+    
+    if self.opds_username and self.opds_password then
+        local credentials = mime.b64(self.opds_username .. ":" .. self.opds_password)
+        headers["Authorization"] = "Basic " .. credentials
+    end
+    
+    local res, code = https.request{
+        url = download_url,
+        method = "GET",
+        headers = headers,
+        sink = ltn12.sink.table(response_body)
+    }
+    
+    UIManager:close(loading)
+    
+    if not res or code ~= 200 then
+        self.processing_download = false
+        UIHelpers.showError(T(_("Download failed: HTTP %1"), code or "error"))
+        return
+    end
+    
+    local data = table.concat(response_body)
+    if #data < Constants.MIN_VALID_BOOK_SIZE then
+        self.processing_download = false
+        UIHelpers.showError(_("Downloaded file appears invalid (too small)"))
+        return
+    end
+
+    local file, err = io.open(temp_filepath, "wb")
+    if not file then
+        self.processing_download = false
+        UIHelpers.showError(T(_("Failed to create file: %1"), err or "unknown"))
+        return
+    end
+
+    file:write(data)
+    file:close()
+
+    local temp_attr = lfs.attributes(temp_filepath)
+    if not temp_attr or temp_attr.mode ~= "file" then
+        self.processing_download = false
+        UIHelpers.showError(_("Download succeeded but temp file not found"))
+        return
+    end
+
+    self:performSafeTransition(placeholder_path, temp_filepath, filepath)
+end
+
+function OPDSBrowser:performSafeTransition(placeholder_path, temp_filepath, filepath)
+    local ReaderUI = require("apps/reader/readerui")
+    local FileManager = require("apps/filemanager/filemanager")
+    
+    local blocking_ui = UIHelpers.showLoading(_("Finalizing download...\n\nReplacing placeholder..."))
+    UIManager:show(blocking_ui)
+    UIManager:forceRePaint()
+
+    -- Step 1: Close Reader if open
+    if ReaderUI.instance then
+        logger.info("OPDS: Closing ReaderUI instance")
+        UIManager:close(ReaderUI.instance)
+        ReaderUI.instance = nil
+    end
+
+    collectgarbage()
+    collectgarbage()
+
+    -- Step 2: Switch to File Manager
+    UIManager:scheduleIn(0.5, function()
+        logger.info("OPDS: Transitioning to FileManager")
+        local folder_path = filepath:match("(.*/)")
+        
+        if FileManager.instance then
+            FileManager.instance:reinit(folder_path)
+        else
+            FileManager:showFiles(folder_path)
+        end
+        
+        -- Step 3: Perform file operations
+        UIManager:scheduleIn(0.5, function()
+            self:_swapFilesAndOpen(placeholder_path, temp_filepath, filepath, blocking_ui)
+        end)
+    end)
+end
+
+function OPDSBrowser:_swapFilesAndOpen(placeholder_path, temp_filepath, filepath, blocking_ui)
+    local function cleanup(err_msg)
+        self.processing_download = false
+        if blocking_ui then UIManager:close(blocking_ui) end
+        if err_msg then 
+            UIManager:scheduleIn(0.1, function() UIHelpers.showError(err_msg) end)
+        end
+    end
+
+    logger.info("OPDS: Swapping files...")
+
+    if PlaceholderGenerator:isPlaceholder(temp_filepath) then
+        os.remove(temp_filepath)
+        cleanup(_("Download failed: Server returned a placeholder."))
+        return
+    end
+
+    -- Attempt to clear locks before deleting
+    pcall(function()
+        require("docsettings"):open(placeholder_path):purge()
+    end)
+
+    local delete_success = false
+    for i = 1, 5 do
+        if os.remove(placeholder_path) then
+            delete_success = true
+            break
+        end
+        if not lfs.attributes(placeholder_path) then
+            delete_success = true
+            break
+        end
+        logger.warn("OPDS: Failed to delete placeholder, retrying...", i)
+        socket.sleep(0.2)
+        collectgarbage()
+    end
+
+    if not delete_success then
+        os.remove(temp_filepath)
+        cleanup(_("Failed to delete placeholder file. File may be locked."))
+        return
+    end
+
+    self.library_sync.placeholder_db[placeholder_path] = nil
+    self.library_sync:savePlaceholderDB()
+
+    local rename_ok = os.rename(temp_filepath, filepath)
+    if not rename_ok then
+        os.remove(temp_filepath)
+        cleanup(_("Failed to rename downloaded file"))
+        return
+    end
+
+    -- Cache Clearing
+    pcall(function()
+        local DocSettings = require("docsettings")
+        local ds_old = DocSettings:open(placeholder_path)
+        ds_old:purge()
+        ds_old:save() 
+        local ds_new = DocSettings:open(filepath)
+        ds_new:purge()
+        ds_new:save()
+    end)
+    
+    pcall(function()
+        local ReadHistory = require("readhistory")
+        if ReadHistory then
+            ReadHistory:removeItemByPath(placeholder_path)
+            ReadHistory:removeItemByPath(filepath)
+            if ReadHistory.purge then
+                ReadHistory:purge(placeholder_path)
+                ReadHistory:purge(filepath)
+            end
+            ReadHistory:flush()
+        end
+    end)
+
+    pcall(function()
+        local DocumentRegistry = require("documentregistry")
+        if DocumentRegistry then
+            if DocumentRegistry.registry then
+                DocumentRegistry.registry[placeholder_path] = nil
+                DocumentRegistry.registry[filepath] = nil
+            end
+            if DocumentRegistry.provider_cache then
+                DocumentRegistry.provider_cache[placeholder_path] = nil
+                DocumentRegistry.provider_cache[filepath] = nil
+            end
+            if DocumentRegistry.purge then
+                DocumentRegistry:purge(placeholder_path)
+                DocumentRegistry:purge(filepath)
+            end
+        end
+    end)
+
+    pcall(function()
+        local GlobalCache = require("cache")
+        if GlobalCache then
+            if GlobalCache.removeEntry then
+                GlobalCache:removeEntry(placeholder_path)
+                GlobalCache:removeEntry(filepath)
+            end
+            if GlobalCache.flush then GlobalCache:flush() end
+            if GlobalCache.cache then
+                GlobalCache.cache[placeholder_path] = nil
+                GlobalCache.cache[filepath] = nil
+            end
+        end
+    end)
+    
+    pcall(function()
+        local DocumentCache = require("ui/document/documentcache")
+        if DocumentCache and DocumentCache.discard then
+             DocumentCache:discard(placeholder_path)
+             DocumentCache:discard(filepath)
+        end
+    end)
+
+    pcall(function()
+        local BookDB = require("apps/filemanager/db")
+        if BookDB then
+            if BookDB.removeBook then
+                BookDB:removeBook(placeholder_path)
+                BookDB:removeBook(filepath)
+            end
+            if BookDB.refreshBook then
+                BookDB:refreshBook(filepath)
+            end
+        end
+    end)
+
+    local filename = placeholder_path:match("([^/]+)$") or ""
+    if filename ~= "" then
+        local book_id_pattern = filename:gsub("%.kepub%.epub$", ""):gsub("%.epub$", "")
+        if book_id_pattern ~= "" then
+            CacheManager:invalidatePattern(book_id_pattern)
+        end
+    end
+    
+    collectgarbage()
+    collectgarbage()
+
+    local FileManager = require("apps/filemanager/filemanager")
+    if FileManager.instance then
+        FileManager.instance:onRefresh()
+    end
+
+    logger.info("OPDS: Opening new book:", filepath)
+    local ReaderUI = require("apps/reader/readerui")
+    
+    if blocking_ui then UIManager:close(blocking_ui) end
+    
+    -- Wait a moment, then allow processing again
+    UIManager:scheduleIn(2.0, function()
+        self.processing_download = false
+    end)
+    
+    UIManager:scheduleIn(0.5, function()
+        ReaderUI:showReader(filepath)
+    end)
+end
+
+function OPDSBrowser:onReaderReady(config)
+    logger.info("OPDS: onReaderReady triggered")
+
+    -- STOP: If we are currently downloading/swapping, do NOT trigger again
+    if self.processing_download then
+        logger.info("OPDS: Already processing a download, ignoring onReaderReady")
+        return
+    end
+
+    UIManager:scheduleIn(3.0, function()
+        -- Re-check processing flag in case it started during delay
+        if self.processing_download then return end
+
+        local ReaderUI = require("apps/reader/readerui")
+        if not ReaderUI.instance or not ReaderUI.instance.document then
+            return 
+        end
+
+        local current_file = ReaderUI.instance.document.file
+        logger.info("OPDS: Checking file:", current_file)
+        
+        local lookup_path = current_file
+        local attr = lfs.symlinkattributes(current_file)
+        if attr and attr.mode == "link" then
+            local target = lfs.readlink(current_file)
+            if target then
+                if not target:match("^/") then
+                    local dir = current_file:match("(.*/)")
+                    lookup_path = dir .. target
+                else
+                    lookup_path = target
+                end
+                logger.info("OPDS: Resolved symlink to:", lookup_path)
+            end
+        end
+
+        local book_info = self.library_sync:getBookInfo(lookup_path)
+        if book_info then
+            logger.info("OPDS: Found in DB, triggering download")
+            UIManager:scheduleIn(0.5, function()
+                self:downloadPlaceholderAndRefresh(current_file, book_info)
+            end)
+        else
+            local f_attr = lfs.attributes(lookup_path)
+            if f_attr and f_attr.size and f_attr.size > 200000 then
+                 return
+            end
+
+            if PlaceholderGenerator:isPlaceholder(lookup_path) then
+                logger.info("OPDS: Detected via file content, triggering download")
+                UIManager:scheduleIn(0.5, function()
+                    self:handlePlaceholderAutoDownload(lookup_path)
+                end)
+            end
+        end
+    end)
+end
+
+function OPDSBrowser:handlePlaceholderAutoDownload(filepath)
+    if self.processing_download then return end
+
+    local real_filepath = filepath
+    local attr = lfs.symlinkattributes(filepath)
+    if attr and attr.mode == "link" then
+        local target = lfs.readlink(filepath)
+        if target then
+            if not target:match("^/") then
+                local dir = filepath:match("(.*/)")
+                real_filepath = dir .. target
+            else
+                real_filepath = target
+            end
+        end
+    end
+
+    local book_info = self.library_sync:getBookInfo(real_filepath)
+    if not book_info then
+        UIHelpers.showError(_("Placeholder information not found."))
+        return
+    end
+
+    self:downloadPlaceholderAndRefresh(real_filepath, book_info)
+end
+
+function OPDSBrowser:checkWorkflowHealth()
+    local all_ok = true
+    local issues = {}
+    if not self.library_sync or not self.library_sync.getBookInfo then 
+        all_ok = false 
+        table.insert(issues, "Library Sync not ready")
+    end
+    if not self.opds_url or self.opds_url == "" then 
+        all_ok = false 
+        table.insert(issues, "OPDS URL missing")
+    end
+    return all_ok, issues
+end
+
+-- ============================================================================
+-- UI MENUS & BROWSING LOGIC
+-- ============================================================================
+
+function OPDSBrowser:getMenuItems()
+    return {
+        { text = _("Library Sync - OPDS"),
+          callback = function() self:buildPlaceholderLibrary() end,
+          enabled_func = function() return self.opds_url ~= "" end },
+        { text = _("Ephemera - Request New Book"),
+          callback = function() self:requestBook() end,
+          enabled_func = function() return self.ephemera_client:isConfigured() end },
+        { text = _("Ephemera - View Download Queue"),
+          callback = function() self:showDownloadQueue() end,
+          enabled_func = function() return self.ephemera_client:isConfigured() end },
+        { text = _("Hardcover - Search Author"),
+          callback = function() self:hardcoverSearchAuthor() end,
+          enabled_func = function() return self.hardcover_client:isConfigured() end },
+        { text = _("History - Recent Searches"),
+          callback = function() self:showSearchHistory() end },
+        { text = _("History - Recently Viewed"),
+          callback = function() self:showRecentBooks() end },
+        { text = _("Plugin - Settings"),
+          callback = function() self:showSettings() end },
+        { text = _("Plugin - Cache Info"),
+          callback = function() self:showCacheInfo() end },
+        { text = _("Plugin - Workflow Health Check"),
+          callback = function() self:showWorkflowHealthDialog() end },
+    }
+end
+
+function OPDSBrowser:addToMainMenu(menu_items)
+    menu_items.opdsbrowser = {
+        text = _("Cloud Book Library"),
+        sub_item_table = self:getMenuItems(),
+    }
+end
+
+function OPDSBrowser:showMainMenu()
+    local items = self:getMenuItems()
+    local menu = UIHelpers.createMenu(_("Cloud Book Library"), items, { scrollable = true })
+    UIManager:show(menu)
+end
+
 function OPDSBrowser:showBookList(books, title)
-    -- ... (unchanged)
     local items = {}
     for _, book in ipairs(books) do
         local display_text = book.title
-        -- Add series info
         if book.series and book.series ~= "" then
             display_text = display_text .. " - " .. book.series
             if book.series_index and book.series_index ~= "" then
                 display_text = display_text .. " #" .. tostring(book.series_index)
             end
         end
-        -- Add author
         display_text = display_text .. " - " .. book.author
 
         table.insert(items, {
@@ -1531,7 +605,6 @@ function OPDSBrowser:showBookList(books, title)
 end
 
 function OPDSBrowser:showBookDetails(book)
-    -- ... (unchanged)
     local series_text = ""
     if book.series and book.series ~= "" then
         series_text = "\n\n" .. T(_("Series: %1"), book.series)
@@ -1575,8 +648,6 @@ function OPDSBrowser:showBookDetails(book)
 end
 
 function OPDSBrowser:downloadBook(book)
-    -- ... (unchanged)
-    -- Ensure download directory exists
     local dir_exists = lfs.attributes(self.download_dir, "mode") == "directory"
     if not dir_exists then
         local ok = lfs.mkdir(self.download_dir)
@@ -1586,15 +657,12 @@ function OPDSBrowser:downloadBook(book)
         end
     end
 
-    -- Extract book ID
     local book_id = book.id:match("book:(%d+)$")
     if not book_id or book_id == "" then
-        logger.err("OPDS: No book ID found in:", book.id)
         UIHelpers.showError(_("Cannot download: Book ID not found"))
         return
     end
 
-    -- Determine file extension
     local extension = ".epub"
     if book.media_type and book.media_type:match("kepub") then
         extension = ".kepub.epub"
@@ -1602,28 +670,50 @@ function OPDSBrowser:downloadBook(book)
         extension = ".kepub.epub"
     end
 
-    -- Generate safe filename
     local filename = book.title:gsub("[^%w%s%-]", ""):gsub("%s+", "_") .. extension
     local filepath = self.download_dir .. "/" .. filename
-    
-    -- Construct download URL
     local download_url = self.opds_url .. "/" .. book_id .. "/download"
     
-    logger.info("OPDS: Downloading:", book.title, "to", filepath)
-
     local loading = UIHelpers.createProgressMessage(_("Downloading..."))
     UIManager:show(loading)
     
-    -- Download with progress logic (omitted for brevity, same as original)
-    -- ...
+    local https = require("ssl.https")
+    local ltn12 = require("ltn12")
+    local mime = require("mime")
+    local response_body = {}
+    local headers = { ["Cache-Control"] = "no-cache" }
     
-    -- Assume download successful for this snippet context
-    -- ...
+    if self.opds_username and self.opds_password then
+        local credentials = mime.b64(self.opds_username .. ":" .. self.opds_password)
+        headers["Authorization"] = "Basic " .. credentials
+    end
+    
+    local res, code = https.request{
+        url = download_url,
+        method = "GET",
+        headers = headers,
+        sink = ltn12.sink.table(response_body)
+    }
+    
+    UIManager:close(loading)
+    
+    if not res or code ~= 200 then
+        UIHelpers.showError(T(_("Download failed: HTTP %1"), code or "error"))
+        return
+    end
+    
+    local file, err = io.open(filepath, "wb")
+    if not file then
+        UIHelpers.showError(T(_("Failed to create file: %1"), err or "unknown"))
+        return
+    end
+    file:write(table.concat(response_body))
+    file:close()
+    
+    UIHelpers.showSuccess(T(_("Downloaded: %1"), book.title))
 end
 
--- Ephemera, Hardcover, and History functions omitted for brevity (unchanged)
 function OPDSBrowser:requestBook()
-    -- ... (unchanged)
     UIHelpers.createMultiInputDialog(
         _("Request Book via Ephemera"),
         {
@@ -1641,19 +731,15 @@ function OPDSBrowser:requestBook()
 end
 
 function OPDSBrowser:searchEphemera(title, author)
-    -- ... (unchanged)
     if not self:ensureNetwork() then return end
     
     local loading = UIHelpers.showLoading(_("Searching Ephemera..."))
     UIManager:show(loading)
     
     local search_string = title
-    if author ~= "" then
-        search_string = search_string .. " " .. author
-    end
+    if author ~= "" then search_string = search_string .. " " .. author end
     
     local ok, results = self.ephemera_client:search(search_string)
-    
     UIManager:close(loading)
     
     if not ok then
@@ -1661,9 +747,7 @@ function OPDSBrowser:searchEphemera(title, author)
         return
     end
     
-    -- Filter for EPUB
     results = self.ephemera_client:filterResults(results, { epub_only = true })
-    
     if #results == 0 then
         UIHelpers.showInfo(_("No EPUB books found in Ephemera"))
         return
@@ -1673,79 +757,48 @@ function OPDSBrowser:searchEphemera(title, author)
 end
 
 function OPDSBrowser:showEphemeraResults(results)
-    -- ... (unchanged)
     local items = {}
     for _, book in ipairs(results) do
         local title = Utils.safe_string(book.title, "Unknown Title")
         local author = self.ephemera_client:formatAuthor(book.authors)
         local display_text = title .. " - " .. author
-        
         table.insert(items, {
             text = display_text,
             callback = function() self:requestEphemeraBook(book) end
         })
     end
-
-    self.ephemera_menu = UIHelpers.createMenu(
-        T(_("Ephemera Search Results (%1 EPUB)"), #results),
-        items
-    )
+    self.ephemera_menu = UIHelpers.createMenu(T(_("Ephemera Results (%1)"), #results), items)
     UIManager:show(self.ephemera_menu)
 end
 
 function OPDSBrowser:requestEphemeraBook(book)
-    -- ... (unchanged)
     local loading = UIHelpers.showLoading(_("Requesting download..."))
     UIManager:show(loading)
-    
     local ok, result = self.ephemera_client:requestDownload(book)
-    
     UIManager:close(loading)
     
     if not ok then
-        UIHelpers.showError(T(_("Download request failed: %1"), result))
+        UIHelpers.showError(T(_("Request failed: %1"), result))
         return
     end
-
-    local message = ""
-    if result.status == "queued" then
-        message = T(_("Book queued for download!\n\nPosition: %1"), result.position or "unknown")
-    elseif result.status == "already_downloaded" then
-        message = _("Book already downloaded!")
-    elseif result.status == "already_in_queue" then
-        message = T(_("Book already in queue!\n\nPosition: %1"), result.position or "unknown")
-    else
-        message = T(_("Status: %1"), result.status or "unknown")
-    end
-    
-    UIHelpers.showInfo(message)
-    
-    if self.ephemera_menu then
-        UIManager:close(self.ephemera_menu)
-    end
+    UIHelpers.showInfo(T(_("Status: %1"), result.status or "unknown"))
+    if self.ephemera_menu then UIManager:close(self.ephemera_menu) end
 end
 
 function OPDSBrowser:showDownloadQueue()
-    -- ... (unchanged)
     if not self:ensureNetwork() then return end
-    
     local loading = UIHelpers.showLoading(_("Loading queue..."))
     UIManager:show(loading)
-    
     local ok, queue = self.ephemera_client:getQueue()
-    
     UIManager:close(loading)
-    
     if not ok then
         UIHelpers.showError(T(_("Failed to load queue: %1"), queue))
         return
     end
-    
     self:displayDownloadQueue(queue)
 end
 
 function OPDSBrowser:displayDownloadQueue(queue)
-    -- ... (unchanged)
     local items = {}
     local has_incomplete = self.ephemera_client:hasIncompleteItems(queue)
 
@@ -1757,9 +810,7 @@ function OPDSBrowser:displayDownloadQueue(queue)
                 if item.status == "downloading" and item.progress then
                     status_text = status_text .. string.format(" (%d%%)", math.floor(item.progress))
                 end
-                if item.error then
-                    status_text = status_text .. " - " .. item.error
-                end
+                if item.error then status_text = status_text .. " - " .. item.error end
                 table.insert(items, {
                     text = icon .. " " .. title,
                     subtitle = status_text,
@@ -1796,49 +847,21 @@ function OPDSBrowser:displayDownloadQueue(queue)
     self.queue_menu = UIHelpers.createMenu(_("Download Queue (Ephemera)"), items)
     UIManager:show(self.queue_menu)
 
-    if has_incomplete then
-        self:startQueueRefresh()
-    else
-        self:stopQueueRefresh()
-    end
+    if has_incomplete then self:startQueueRefresh() else self:stopQueueRefresh() end
 end
 
 function OPDSBrowser:startQueueRefresh()
     self:stopQueueRefresh()
     self.queue_refresh_action = function()
-        -- FIX: Prevent re-opening menu if it was closed
         if not self.queue_menu_open or not self.queue_menu then
             self:stopQueueRefresh()
             return
         end
-        
-        -- Check if menu is still active in UIManager
-        -- This handles the case where user closed it via swipe/tap outside
-        -- but our flag didn't catch it
-        local is_visible = false
-        if self.queue_menu.onShow then -- Simple check if widget is valid
-             -- Real visibility check would be better but complex in KOReader
-             is_visible = true 
-        end
-        
-        -- If we can't reliably check visibility, we rely on the flag
-        -- But if the queue request fails, we stop anyway
-        
         local ok, queue = self.ephemera_client:getQueue()
-        if ok then
-            if self.queue_menu and self.queue_menu_open then
-                -- Close old menu and reopen with new data
-                -- This is a bit brute force but standard for KOReader menus
-                UIManager:close(self.queue_menu)
-                self.queue_menu = nil
-                self:displayDownloadQueue(queue)
-            else
-                self:stopQueueRefresh()
-            end
-        else
-            logger.err("OPDSBrowser: Failed to refresh queue:", queue)
-            -- Don't stop refreshing on transient network errors, maybe?
-            -- For now, keep trying
+        if ok and self.queue_menu and self.queue_menu_open then
+            UIManager:close(self.queue_menu)
+            self.queue_menu = nil
+            self:displayDownloadQueue(queue)
         end
     end
     UIManager:scheduleIn(Constants.QUEUE_REFRESH_INTERVAL, self.queue_refresh_action)
@@ -1853,44 +876,31 @@ function OPDSBrowser:stopQueueRefresh()
 end
 
 function OPDSBrowser:hardcoverSearchAuthor()
-    -- ... (unchanged)
-    UIHelpers.createInputDialog(
-        _("Search Author on Hardcover"),
-        _("Enter author name"),
-        function(author_name)
-            if author_name and author_name ~= "" then
-                self:performHardcoverAuthorSearch(author_name)
-            end
+    UIHelpers.createInputDialog(_("Search Author"), _("Enter author name"), function(author_name)
+        if author_name and author_name ~= "" then
+            self:performHardcoverAuthorSearch(author_name)
         end
-    )
+    end)
 end
 
 function OPDSBrowser:performHardcoverAuthorSearch(author_name)
-    -- ... (unchanged)
     if not self:ensureNetwork() then return end
-    
     local loading = UIHelpers.showLoading(_("Searching Hardcover..."))
     UIManager:show(loading)
-    
     local ok, results = self.hardcover_client:searchAuthor(author_name)
-    
     UIManager:close(loading)
-    
     if not ok then
         UIHelpers.showError(T(_("Hardcover search failed: %1"), results))
         return
     end
-    
     self:showHardcoverAuthorResults(results)
 end
 
 function OPDSBrowser:showHardcoverAuthorResults(results)
-    -- ... (unchanged)
     if not results.hits or #results.hits == 0 then
-        UIHelpers.showInfo(_("No authors found on Hardcover"))
+        UIHelpers.showInfo(_("No authors found"))
         return
     end
-
     local items = {}
     for _, hit in ipairs(results.hits) do
         local author = hit.document
@@ -1898,7 +908,6 @@ function OPDSBrowser:showHardcoverAuthorResults(results)
         if author.books and #author.books > 0 then
             display_text = display_text .. " - Known for " .. author.books[1]
         end
-
         table.insert(items, {
             text = display_text,
             callback = function()
@@ -1907,13 +916,11 @@ function OPDSBrowser:showHardcoverAuthorResults(results)
             end,
         })
     end
-
     self.hardcover_menu = UIHelpers.createMenu(_("Hardcover Authors"), items)
     UIManager:show(self.hardcover_menu)
 end
 
 function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
-    -- ... (unchanged)
     if not self:ensureNetwork() then return end
     local loading = UIHelpers.showLoading(_("Loading books..."))
     UIManager:show(loading)
@@ -1927,91 +934,27 @@ function OPDSBrowser:hardcoverGetAuthorBooks(author_id, author_name)
 end
 
 function OPDSBrowser:showHardcoverAuthorFilterOptions(books, author_name, author_id)
-    -- ... (unchanged)
     self.hardcover_all_books = books
-    self.hardcover_current_author = author_name
-    self.hardcover_current_author_id = author_id
-
     local items = {
-        {
-            text = _("Standalone Books"),
-            callback = function()
-                UIManager:close(self.filter_menu)
-                self:showHardcoverStandaloneBooks(books, author_name)
-            end,
-        },
-        {
-            text = _("Book Series"),
-            callback = function()
-                UIManager:close(self.filter_menu)
-                self:showHardcoverBookSeries(author_id, author_name)
-            end,
-        },
-        {
-            text = _("All Books"),
-            callback = function()
-                UIManager:close(self.filter_menu)
-                self:showHardcoverAllBooks(books, author_name)
-            end,
-        },
+        { text = _("Standalone Books"), callback = function() UIManager:close(self.filter_menu); self:showHardcoverStandaloneBooks(books, author_name) end },
+        { text = _("Book Series"), callback = function() UIManager:close(self.filter_menu); self:showHardcoverBookSeries(author_id, author_name) end },
+        { text = _("All Books"), callback = function() UIManager:close(self.filter_menu); self:showHardcoverAllBooks(books, author_name) end },
     }
-
     self.filter_menu = UIHelpers.createMenu(T(_("Books by %1"), author_name), items)
     UIManager:show(self.filter_menu)
 end
 
 function OPDSBrowser:showHardcoverStandaloneBooks(books, author_name)
-    -- ... (unchanged)
     local standalone_books = {}
     for _, book in ipairs(books) do
-        local has_series = book.book_series and type(book.book_series) == "table" and #book.book_series > 0
-        if not has_series then
+        if not (book.book_series and #book.book_series > 0) then
             table.insert(standalone_books, book)
         end
     end
-    -- ... (rest of function unchanged)
-    if #standalone_books == 0 then
-        UIHelpers.showInfo(_("No standalone books found for this author"))
-        return
-    end
-    table.sort(standalone_books, function(a, b)
-        local date_a = Utils.safe_string(a.release_date, "")
-        local date_b = Utils.safe_string(b.release_date, "")
-        if date_a == "" and date_b == "" then return false end
-        if date_a == "" then return false end
-        if date_b == "" then return true end
-        return date_a > date_b
-    end)
-    local author_books_lookup = {}
-    if self.enable_library_check then
-        author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
-    end
-    local items = {}
-    for _, book in ipairs(standalone_books) do
-        local display_text = Utils.safe_string(book.title, "Unknown Title")
-        local release_date = Utils.safe_string(book.release_date, "")
-        if release_date ~= "" then
-            display_text = display_text .. " (" .. release_date .. ")"
-        end
-        if self.enable_library_check then
-            local normalized_title = Utils.normalize_title(book.title)
-            if author_books_lookup[normalized_title] then
-                display_text = Constants.ICONS.IN_LIBRARY .. " " .. display_text
-            end
-        end
-        table.insert(items, {
-            text = display_text,
-            callback = function()
-                self:showHardcoverBookDetails(book, author_name)
-            end,
-        })
-    end
-    self.standalone_menu = UIHelpers.createMenu(T(_("Standalone Books - %1"), author_name), items)
-    UIManager:show(self.standalone_menu)
+    self:showHardcoverBookList(standalone_books, author_name, T(_("Standalone Books - %1"), author_name))
 end
 
 function OPDSBrowser:showHardcoverBookSeries(author_id, author_name)
-    -- ... (unchanged)
     if not self:ensureNetwork() then return end
     local loading = UIHelpers.showLoading(_("Loading series..."))
     UIManager:show(loading)
@@ -2021,19 +964,12 @@ function OPDSBrowser:showHardcoverBookSeries(author_id, author_name)
         UIHelpers.showError(T(_("Failed to load series: %1"), series_list))
         return
     end
-    if #series_list == 0 then
-        UIHelpers.showInfo(_("No series found for this author"))
-        return
-    end
     local items = {}
     for _, series in ipairs(series_list) do
         local book_count = Utils.safe_number(series.books_count, 0)
-        local display_text = series.name .. " (" .. book_count .. " book" .. (book_count > 1 and "s" or "") .. ")"
         table.insert(items, {
-            text = display_text,
-            callback = function()
-                self:showHardcoverSeriesBooks(series.id, series.name, author_name)
-            end,
+            text = series.name .. " (" .. book_count .. ")",
+            callback = function() self:showHardcoverSeriesBooks(series.id, series.name, author_name) end,
         })
     end
     self.series_menu = UIHelpers.createMenu(T(_("Book Series - %1"), author_name), items)
@@ -2041,7 +977,6 @@ function OPDSBrowser:showHardcoverBookSeries(author_id, author_name)
 end
 
 function OPDSBrowser:showHardcoverSeriesBooks(series_id, series_name, author_name)
-    -- ... (unchanged)
     if not self:ensureNetwork() then return end
     local loading = UIHelpers.showLoading(_("Loading books..."))
     UIManager:show(loading)
@@ -2051,40 +986,13 @@ function OPDSBrowser:showHardcoverSeriesBooks(series_id, series_name, author_nam
         UIHelpers.showError(T(_("Failed to load books: %1"), series_data))
         return
     end
-    local book_series_list = series_data.book_series or {}
-    if #book_series_list == 0 then
-        UIHelpers.showInfo(_("No books found in this series"))
-        return
-    end
-    local author_books_lookup = {}
-    if self.enable_library_check then
-        author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
-    end
     local items = {}
-    for _, book_series in ipairs(book_series_list) do
+    for _, book_series in ipairs(series_data.book_series or {}) do
         local book = book_series.book
         local position = Utils.safe_number(book_series.position, 0)
-        local display_text = Utils.safe_string(book.title, "Unknown Title")
-        if position > 0 then
-            display_text = display_text .. " - " .. series_name .. " #" .. position
-        else
-            display_text = display_text .. " - " .. series_name
-        end
-        if self.enable_library_check then
-            local normalized_title = Utils.normalize_title(book.title)
-            if author_books_lookup[normalized_title] then
-                display_text = Constants.ICONS.IN_LIBRARY .. " " .. display_text
-            end
-        end
         table.insert(items, {
-            text = display_text,
-            callback = function()
-                book.book_series = {{
-                    series = { name = series_name, id = series_id },
-                    details = "#" .. position
-                }}
-                self:showHardcoverBookDetails(book, author_name)
-            end,
+            text = book.title .. " #" .. position,
+            callback = function() self:showHardcoverBookDetails(book, author_name) end,
         })
     end
     self.series_books_menu = UIHelpers.createMenu(series_name, items)
@@ -2092,163 +1000,88 @@ function OPDSBrowser:showHardcoverSeriesBooks(series_id, series_name, author_nam
 end
 
 function OPDSBrowser:showHardcoverAllBooks(books, author_name)
-    -- ... (unchanged)
-    if #books == 0 then
-        UIHelpers.showInfo(_("No books found for this author"))
-        return
-    end
-    table.sort(books, function(a, b)
-        local date_a = Utils.safe_string(a.release_date, "")
-        local date_b = Utils.safe_string(b.release_date, "")
-        if date_a == "" and date_b == "" then return false end
-        if date_a == "" then return false end
-        if date_b == "" then return true end
-        return date_a > date_b
-    end)
-    local author_books_lookup = {}
-    if self.enable_library_check then
-        author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
-    end
+    self:showHardcoverBookList(books, author_name, T(_("All Books - %1"), author_name))
+end
+
+function OPDSBrowser:showHardcoverBookList(books, author_name, title)
     local items = {}
+    local author_books_lookup = self:getAuthorBooksFromLibrary(author_name)
+    
     for _, book in ipairs(books) do
-        local display_text = Utils.safe_string(book.title, "Unknown Title")
-        local release_date = Utils.safe_string(book.release_date, "")
-        if release_date ~= "" then
-            display_text = display_text .. " (" .. release_date .. ")"
-        end
+        local display_text = book.title
+        if book.release_date then display_text = display_text .. " (" .. book.release_date .. ")" end
         if self.enable_library_check then
-            local normalized_title = Utils.normalize_title(book.title)
-            if author_books_lookup[normalized_title] then
+            if author_books_lookup[Utils.normalize_title(book.title)] then
                 display_text = Constants.ICONS.IN_LIBRARY .. " " .. display_text
             end
         end
         table.insert(items, {
             text = display_text,
-            callback = function()
-                self:showHardcoverBookDetails(book, author_name)
-            end,
+            callback = function() self:showHardcoverBookDetails(book, author_name) end,
         })
     end
-    self.all_books_menu = UIHelpers.createMenu(T(_("All Books - %1"), author_name), items)
+    self.all_books_menu = UIHelpers.createMenu(title, items)
     UIManager:show(self.all_books_menu)
 end
 
 function OPDSBrowser:showHardcoverBookDetails(book, author_name)
-    -- ... (unchanged)
     local book_author = author_name
-    if book.contributions and #book.contributions > 0 and book.contributions[1].author then
-        book_author = book.contributions[1].author.name
-    end
-    local details = T(_("Title: %1\n\nAuthor: %2"), Utils.safe_string(book.title, "Unknown"), book_author)
-    local rating_text = Utils.format_rating(book.rating, book.ratings_count)
-    if rating_text ~= "" then
-        details = details .. "\n\n" .. T(_("Rating: %1"), rating_text)
-    end
-    if book.book_series and type(book.book_series) == "table" and #book.book_series > 0 then
-        local series_info = book.book_series[1]
-        if series_info and type(series_info) == "table" and series_info.series then
-            local series_text = Utils.safe_string(series_info.series.name, "Unknown Series")
-            local series_details = Utils.safe_string(series_info.details, "")
-            if series_details ~= "" then
-                series_text = series_text .. " - " .. series_details
-            end
-            details = details .. "\n\n" .. T(_("Series: %1"), series_text)
-        end
-    end
-    local description = Utils.safe_string(book.description, "")
-    if description ~= "" then
-        details = details .. "\n\n" .. Utils.strip_html(description)
-    end
-    local release_date = Utils.safe_string(book.release_date, "")
-    if release_date ~= "" then
-        details = details .. "\n\n" .. T(_("Released: %1"), release_date)
-    end
-    local pages = Utils.safe_number(book.pages, 0)
-    if pages > 0 then
-        details = details .. "\n" .. T(_("Pages: %1"), tostring(pages))
-    end
+    if book.contributions and #book.contributions > 0 then book_author = book.contributions[1].author.name end
+    
+    local details = T(_("Title: %1\n\nAuthor: %2"), book.title, book_author)
+    if book.rating then details = details .. "\n\n" .. T(_("Rating: %1"), book.rating) end
+    if book.description then details = details .. "\n\n" .. Utils.strip_html(book.description) end
+    
     local buttons = {
-        {
-            { text = _("Download from Ephemera"), callback = function()
-                UIManager:close(self.hardcover_book_details)
-                self:downloadFromEphemera(book, book_author)
-            end },
-        },
-        {
-            { text = _("Close"), callback = function()
-                UIManager:close(self.hardcover_book_details)
-            end },
-        },
+        { { text = _("Download from Ephemera"), callback = function() UIManager:close(self.hardcover_book_details); self:downloadFromEphemera(book, book_author) end } },
+        { { text = _("Close"), callback = function() UIManager:close(self.hardcover_book_details) end } }
     }
     self.hardcover_book_details = UIHelpers.createTextViewer(book.title, details, buttons)
     UIManager:show(self.hardcover_book_details)
 end
 
 function OPDSBrowser:downloadFromEphemera(book, author)
-    -- ... (unchanged)
     if not self.ephemera_client:isConfigured() then
-        UIHelpers.showError(_("Ephemera URL not configured"))
+        UIHelpers.showError(_("Ephemera not configured"))
         return
     end
     local loading = UIHelpers.showLoading(_("Searching Ephemera..."))
     UIManager:show(loading)
-    local search_string = author .. " " .. book.title
-    local ok, results = self.ephemera_client:search(search_string)
+    local ok, results = self.ephemera_client:search(author .. " " .. book.title)
     UIManager:close(loading)
     if not ok then
-        UIHelpers.showError(T(_("Ephemera search failed: %1"), results))
+        UIHelpers.showError("Search failed")
         return
     end
-    results = self.ephemera_client:filterResults(results, { 
-        epub_only = true,
-        english_only = true 
-    })
-    if #results == 0 then
-        UIHelpers.showInfo(_("No English EPUB books found"))
-        return
-    end
-    local top_results = Utils.table_slice(results, 1, math.min(Constants.MAX_SEARCH_RESULTS, #results))
-    self:showEphemeraResults(top_results)
+    results = self.ephemera_client:filterResults(results, { epub_only = true, english_only = true })
+    self:showEphemeraResults(Utils.table_slice(results, 1, 5))
 end
 
 function OPDSBrowser:getAuthorBooksFromLibrary(author)
-    -- ... (unchanged)
-    if not self.enable_library_check then return {} end
-    if not self.opds_url or self.opds_url == "" then return {} end
+    if not self.enable_library_check or not self.opds_url then return {} end
     local cache_key = Utils.generate_cache_key("author", author)
-    local cached_data, age = CacheManager:get(cache_key)
-    if cached_data then return cached_data end
+    local cached = CacheManager:get(cache_key)
+    if cached then return cached end
+    
     local query = url.escape(author)
-    local base_url = self.opds_url .. "/catalog?q=" .. query
-    local all_xml = self.opds_client:fetchAllPages(base_url, Constants.DEFAULT_PAGE_SIZE, self.library_check_page_limit)
-    if not all_xml then
-        CacheManager:set(cache_key, {})
-        return {}
-    end
+    local all_xml = self.opds_client:fetchAllPages(self.opds_url .. "/catalog?q=" .. query, Constants.DEFAULT_PAGE_SIZE, self.library_check_page_limit)
+    if not all_xml then return {} end
+    
     local books = self.opds_client:parseBookloreOPDSFeed(all_xml, self.use_publisher_as_series)
-    local title_lookup = {}
-    for _, book in ipairs(books) do
-        local normalized_title = Utils.normalize_title(book.title)
-        title_lookup[normalized_title] = true
-    end
-    CacheManager:set(cache_key, title_lookup)
-    return title_lookup
+    local lookup = {}
+    for _, b in ipairs(books) do lookup[Utils.normalize_title(b.title)] = true end
+    CacheManager:set(cache_key, lookup)
+    return lookup
 end
 
 function OPDSBrowser:showSearchHistory()
-    -- ... (unchanged)
     local history = HistoryManager:getSearchHistory()
-    if #history == 0 then
-        UIHelpers.showInfo(_("No search history"))
-        return
-    end
     local items = {}
     for _, query in ipairs(history) do
         table.insert(items, {
             text = query,
             callback = function()
                 UIManager:close(self.history_menu)
-                self:performLibrarySearch(query)
             end,
         })
     end
@@ -2257,42 +1090,107 @@ function OPDSBrowser:showSearchHistory()
 end
 
 function OPDSBrowser:showRecentBooks()
-    -- ... (unchanged)
     local recent = HistoryManager:getRecentBooks()
-    if #recent == 0 then
-        UIHelpers.showInfo(_("No recently viewed books"))
-        return
-    end
     local items = {}
-    for _, book_info in ipairs(recent) do
-        local display_text = Utils.safe_string(book_info.title, "Unknown")
-        if book_info.author then
-            display_text = display_text .. " - " .. book_info.author
-        end
+    for _, book in ipairs(recent) do
         table.insert(items, {
-            text = display_text,
-            callback = function()
-                if book_info.download_url then
-                    self:showBookDetails(book_info)
-                else
-                    UIHelpers.showInfo(_("Limited book information available"))
-                end
-            end,
+            text = book.title,
+            callback = function() self:showBookDetails(book) end,
         })
     end
     self.recent_menu = UIHelpers.createMenu(_("Recently Viewed"), items)
     UIManager:show(self.recent_menu)
 end
 
--- ============================================================================
--- LIBRARY SYNC FUNCTIONS
--- ============================================================================
+function OPDSBrowser:showSettings()
+    local items = {
+        { text = _("OPDS Settings"), callback = function() self:showOPDSSettings() end },
+        { text = _("Ephemera Settings"), callback = function() self:showEphemeraSettings() end },
+        { text = _("Hardcover Settings"), callback = function() self:showHardcoverSettings() end },
+        { text = _("Plugin Settings"), callback = function() self:showPluginSettings() end }
+    }
+    local menu = UIHelpers.createMenu(_("Settings"), items, { scrollable = true })
+    UIManager:show(menu)
+end
 
--- Build placeholder library
+function OPDSBrowser:showOPDSSettings()
+    local fields = {
+        { text = self.opds_url, hint = _("URL"), input_type = "string" },
+        { text = self.opds_username, hint = _("User"), input_type = "string" },
+        { text = self.opds_password, hint = _("Pass"), input_type = "string" },
+    }
+    UIHelpers.createMultiInputDialog(_("OPDS Settings"), fields, function(fv)
+        self:saveSettings({ opds_url = fv[1], opds_username = fv[2], opds_password = fv[3] })
+    end)
+end
+
+function OPDSBrowser:showEphemeraSettings()
+    local fields = { { text = self.ephemera_url, hint = _("URL"), input_type = "string" } }
+    UIHelpers.createMultiInputDialog(_("Ephemera Settings"), fields, function(fv)
+        self:saveSettings({ ephemera_url = fv[1] })
+    end)
+end
+
+function OPDSBrowser:showHardcoverSettings()
+    local fields = {
+        { text = self.hardcover_token, hint = _("Token"), input_type = "string" },
+        { text = self.enable_library_check and "YES" or "NO", hint = _("Check Lib?"), input_type = "string" },
+        { text = tostring(self.library_check_page_limit), hint = _("Limit"), input_type = "number" },
+    }
+    UIHelpers.createMultiInputDialog(_("Hardcover Settings"), fields, function(fv)
+        self:saveSettings({ hardcover_token = fv[1], enable_library_check = fv[2], library_check_page_limit = fv[3] })
+    end)
+end
+
+function OPDSBrowser:showPluginSettings()
+    local fields = {
+        { text = self.download_dir, hint = _("Dir"), input_type = "string" },
+        { text = self.use_publisher_as_series and "YES" or "NO", hint = _("Pub Series?"), input_type = "string" },
+        { text = self.library_sync.base_library_path, hint = _("Sync Path"), input_type = "string" },
+    }
+    UIHelpers.createMultiInputDialog(_("Plugin Settings"), fields, function(fv)
+        self:saveSettings({ download_dir = fv[1], use_publisher_as_series = fv[2], library_sync_path = fv[3] })
+    end)
+end
+
+function OPDSBrowser:saveSettings(new_values)
+    local updates = {}
+    if new_values.opds_url then updates.opds_url = new_values.opds_url; self.opds_url = new_values.opds_url end
+    if new_values.opds_username then updates.opds_username = new_values.opds_username; self.opds_username = new_values.opds_username end
+    if new_values.opds_password then updates.opds_password = new_values.opds_password; self.opds_password = new_values.opds_password end
+    if new_values.ephemera_url then updates.ephemera_url = new_values.ephemera_url; self.ephemera_url = new_values.ephemera_url end
+    if new_values.download_dir then updates.download_dir = new_values.download_dir; self.download_dir = new_values.download_dir end
+    if new_values.hardcover_token then updates.hardcover_token = new_values.hardcover_token; self.hardcover_token = new_values.hardcover_token end
+    if new_values.use_publisher_as_series then updates.use_publisher_as_series = Utils.safe_boolean(new_values.use_publisher_as_series); self.use_publisher_as_series = updates.use_publisher_as_series end
+    if new_values.enable_library_check then updates.enable_library_check = Utils.safe_boolean(new_values.enable_library_check); self.enable_library_check = updates.enable_library_check end
+    if new_values.library_check_page_limit then updates.library_check_page_limit = tonumber(new_values.library_check_page_limit); self.library_check_page_limit = updates.library_check_page_limit end
+    if new_values.library_sync_path then updates.library_sync_path = new_values.library_sync_path; LibrarySyncManager:init(new_values.library_sync_path) end
+
+    SettingsManager:setAll(updates)
+    self.opds_client:setCredentials(self.opds_url, self.opds_username, self.opds_password)
+    self.hardcover_client:setToken(self.hardcover_token)
+    self.ephemera_client:setBaseURL(self.ephemera_url)
+    if new_values.opds_url or new_values.ephemera_url or new_values.hardcover_token then CacheManager:clear() end
+    UIHelpers.showSuccess(_("Settings saved"))
+end
+
+function OPDSBrowser:showCacheInfo()
+    local stats = CacheManager:getCacheStats()
+    local details = string.format("Entries: %d", stats.total_entries)
+    local buttons = { { { text = _("Clear"), callback = function() UIManager:close(self.cache_info); CacheManager:clear() end } }, { { text = _("Close"), callback = function() UIManager:close(self.cache_info) end } } }
+    self.cache_info = UIHelpers.createTextViewer(_("Cache Info"), details, buttons)
+    UIManager:show(self.cache_info)
+end
+
+function OPDSBrowser:showWorkflowHealthDialog()
+    local ok, issues = self:checkWorkflowHealth()
+    local msg = ok and "Status: OK\n\nAll systems operational." or "Status: Issues Detected\n\n" .. table.concat(issues, "\n")
+    self.health_dialog = UIHelpers.createTextViewer(_("Workflow Health"), msg, { { { text = _("Close"), callback = function() UIManager:close(self.health_dialog) end } } })
+    UIManager:show(self.health_dialog)
+end
+
 function OPDSBrowser:buildPlaceholderLibrary()
     if not self:ensureNetwork() then return end
-    
-    -- Go straight to sync without confirmation dialog
     self:performLibrarySync()
 end
 
@@ -2300,8 +1198,7 @@ function OPDSBrowser:performLibrarySync()
     local loading = UIHelpers.showLoading(_("Fetching library catalog..."))
     UIManager:show(loading)
     
-    local full_url = self.opds_url .. "/catalog"
-    local all_xml = self.opds_client:fetchAllPages(full_url, Constants.DEFAULT_PAGE_SIZE, 0)
+    local all_xml = self.opds_client:fetchAllPages(self.opds_url .. "/catalog", Constants.DEFAULT_PAGE_SIZE, 0)
     
     if not all_xml then
         UIManager:close(loading)
@@ -2317,17 +1214,12 @@ function OPDSBrowser:performLibrarySync()
         return
     end
     
-    UIManager:show(loading)
-    UIManager:forceRePaint()
-
     local progress_count = 0
     local last_update_time = os.time()
     local ok, result = self.library_sync:syncLibrary(books, function(current, total)
         progress_count = progress_count + 1
-        -- Update every 50 items AND ensure at least 0.5s between updates to show progress
         local current_time = os.time()
         if progress_count % 50 == 0 or (current_time - last_update_time) >= 1 then
-            -- Close old message and show new one (simple and reliable)
             UIManager:close(loading)
             loading = UIHelpers.showLoading(T(_("Syncing... %1/%2"), current, total))
             UIManager:show(loading)
@@ -2343,23 +1235,10 @@ function OPDSBrowser:performLibrarySync()
         return
     end
     
-    local summary = T(
-        _("Library Sync Complete!\n\n") ..
-        _("Created: %1\n") ..
-        _("Updated: %2\n") ..
-        _("Skipped: %3\n") ..
-        _("Failed: %4\n") ..
-        _("Orphans removed: %5\n") ..
-        _("Total: %6\n\n") ..
-        _("Location: %7"),
-        result.created, result.updated, result.skipped, result.failed, result.deleted_orphans, 
-        result.total,
-        self.library_sync.base_library_path
-    )
+    local summary = T(_("Library Sync Complete!\n\nCreated: %1\nUpdated: %2\nSkipped: %3\nFailed: %4\nTotal: %5"),
+        result.created, result.updated, result.skipped, result.failed, result.total)
     
     UIHelpers.showInfo(summary, 10)
-
-    -- Removed "Recently Added" and "Currently Reading" updates
 
     UIManager:scheduleIn(0.5, function()
         local FileManager = require("apps/filemanager/filemanager")
@@ -2369,7 +1248,6 @@ function OPDSBrowser:performLibrarySync()
     end)
 end
 
--- Cleanup functions
 function OPDSBrowser:onCloseDocument()
     self:stopQueueRefresh()
     CacheManager:savePersistentCache()
