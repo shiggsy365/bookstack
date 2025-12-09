@@ -109,7 +109,7 @@ function LibrarySyncManager:getBookDirectory(book)
     return target_dir
 end
 
--- Generate filename with series ordering prefix
+-- Generate filename with series ordering prefix and (PH) suffix
 function LibrarySyncManager:generateFilename(book)
     local filename = PlaceholderGenerator:generateFilename(book)
     
@@ -124,7 +124,10 @@ function LibrarySyncManager:generateFilename(book)
         end
     end
     
-    return filename
+    -- NEW: Add (PH) suffix before the extension
+    -- Filename is typically "Author_-_Title.epub" at this point
+    local name = filename:gsub("%.epub$", "")
+    return name .. " - (PH).epub"
 end
 
 -- Sync library from book list
