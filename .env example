@@ -2,27 +2,40 @@
 PUID = 1001
 PGID = 1001
 
-##### - Install, Library and Ingest Folders - #####
-BKL_CONFIG = /path/to/booklore
-INGEST_FOLDER = /mnt/ingest
-BOOK_LIBRARY = /mnt/books
-EPH_CONFIG = /path/to/ephemera
-
-##### - Ports to run and host Booklore and Ephemera - #####
-BOOKLORE_PORT = 6060
-EPH_PORT = 8286
-BOOKLORE_HOSTNAME = booklore.example.co.uk
-EPHEMERA_HOSTNAME = ephemera.example.co.uk
-
-##### - Link to A Archive - #####
-AA_URL = https://anna
-
 ##### - Time Zone - #####
 TZ = Europe/London
 
-##### - MariaDB settings - #####
+##### - Install, Library and Ingest Folders - #####
+BOOKSTACK_INSTALL = /opt/docker/apps/bookstack
+INGEST_FOLDER = /mnt/books/ingest
+BOOK_LIBRARY = /mnt/books/library
+
+##### - Booklore Settings - #####
+BOOKLORE_PORT = 6060
+BOOKLORE_URL=http://booklore:6060/api/v1/opds
+BOOKLORE_USER=#####
+BOOKLORE_PASS=#####
+BOOKLORE_HOSTNAME = booklore.yourdomain.com
+
+##### - Ephemera Settings - #####
+EPHEMERA_PORT = 8286
+EPHEMERA_URL=http://ephemera:8286
+
+##### - Bookstackweb Settings - #####
+BOOKSTACKWEB_HOSTNAME = bookstackweb.yourdomain.com
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=youremail@gmail.com
+SMTP_PASS=#####
+
+##### - Link to Anna's Archive - #####
+AA_URL = https://annas-archive.org/
+
+##### - MariaDB Settings (Leave Static) - #####
 DATABASE_URL=jdbc:mariadb://mariadb:3306/booklore
 DB_USER=booklore
-DB_PASSWORD=Changeme2025!
-MYSQL_ROOT_PASSWORD=Changeme2025!
 MYSQL_DATABASE=booklore
+
+##### - MariaDB Settings (Change These) - #####
+DB_PASSWORD=BookLoreApp_2025!
+MYSQL_ROOT_PASSWORD=MariaDBRoot_2025!
