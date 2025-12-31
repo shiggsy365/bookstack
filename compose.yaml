@@ -64,8 +64,8 @@ services:
       PUID: ${PUID}
       PGID: ${PGID}
     volumes:
-      - ${BOOKSTACK_FOLDER}/ephemera/data:/app/data
-      - ${BOOKSTACK_FOLDER}/ephemera/downloads:/app/downloads
+      - ${BOOKSTACK_INSTALL}/ephemera/data:/app/data
+      - ${BOOKSTACK_INSTALL}/ephemera/downloads:/app/downloads
       - ${INGEST_FOLDER}:/app/ingest
     dns:
       - 1.1.1.1
@@ -112,7 +112,7 @@ services:
 
   bookstackweb:
     build:
-      context: ${BOOKSTACK_FOLDER}
+      context: ${BOOKSTACK_INSTALL}
     container_name: bookstackweb
     expose:
       - "5000"
