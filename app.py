@@ -1,3 +1,4 @@
+import os
 import requests
 import xml.etree.ElementTree as ET
 import base64
@@ -41,14 +42,14 @@ def clean_html(raw_html):
 def parse_opds_feed(xml_content, base_url):
     root = ET.fromstring(xml_content)
     entries = []
-
+    
     for entry in root.findall('atom:entry', NAMESPACES):
         title_elem = entry.find('atom:title', NAMESPACES)
         id_elem = entry.find('atom:id', NAMESPACES)
-
+        
         summary_elem = entry.find('atom:summary', NAMESPACES)
         content_elem = entry.find('atom:content', NAMESPACES)
-
+        
         title_text = title_elem.text if title_elem is not None else "Unknown Title"
         if title_text in ['Libraries', 'Shelves', 'Magic Shelves']:
             continue
@@ -61,7 +62,7 @@ def parse_opds_feed(xml_content, base_url):
             'series_index': None,
             'description': ""
         }
-
+        
         series_id = None
         for meta in entry.findall('atom:meta', NAMESPACES):
             prop = meta.get('property')
@@ -82,6 +83,7 @@ def parse_opds_feed(xml_content, base_url):
             raw_desc = summary_elem.text or ""
         elif content_elem is not None:
             raw_desc = content_elem.text or ""
+        
         obj['description'] = clean_html(raw_desc)
 
         author = entry.find('atom:author/atom:name', NAMESPACES)
@@ -91,7 +93,7 @@ def parse_opds_feed(xml_content, base_url):
         for link in entry.findall('atom:link', NAMESPACES):
             raw_href = link.get('href')
             link_rel = link.get('rel') or ''
-
+            
             # Convert relative URLs to use our proxy (only for images)
             if raw_href:
                 if raw_href.startswith('/') and ('image' in link_rel or 'thumbnail' in link_rel):
@@ -105,7 +107,7 @@ def parse_opds_feed(xml_content, base_url):
                     absolute_href = urljoin(base_url, raw_href)
             else:
                 absolute_href = ""
-
+            
             l = {
                 'href': absolute_href,
                 'rel': link_rel,
@@ -121,7 +123,7 @@ def handle_settings():
     if request.method == 'POST':
         data = request.json
         kindle_email = data.get('kindle_email', '')
-
+        
         resp = make_response(jsonify({'status': 'saved'}))
         resp.set_cookie('kindle_email', kindle_email, max_age=365*24*60*60)  # 1 year
         return resp
@@ -134,22 +136,22 @@ def image_proxy():
     url = request.args.get('url')
     if not url:
         return '', 404
-
+    
     # If it's a relative URL, prepend BOOKLORE_URL base
     if url.startswith('/'):
         base = BOOKLORE_URL.split('/api/v1/opds')[0] if '/api/v1/opds' in BOOKLORE_URL else BOOKLORE_URL.rsplit('/', 1)[0]
         url = base + url
-
+    
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         if BOOKLORE_USER and BOOKLORE_PASS:
             auth_str = f"{BOOKLORE_USER}:{BOOKLORE_PASS}"
             encoded_auth = base64.b64encode(auth_str.encode('ascii')).decode('ascii')
             headers['Authorization'] = f"Basic {encoded_auth}"
-
+        
         resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
-
+        
         return resp.content, resp.status_code, {'Content-Type': resp.headers.get('Content-Type', 'image/jpeg')}
     except:
         return '', 404
@@ -157,21 +159,21 @@ def image_proxy():
 @app.route('/api/opds/browse')
 def opds_browse():
     target_url = request.args.get('url')
-
+    
     print(f"=== OPDS BROWSE REQUEST ===", flush=True)
     print(f"Input URL: {target_url}", flush=True)
     print(f"BOOKLORE_URL env: {BOOKLORE_URL}", flush=True)
     print(f"BOOKLORE_USER env: {BOOKLORE_USER}", flush=True)
-
+    
     if not target_url:
         target_url = BOOKLORE_URL
     elif not target_url.startswith('http'):
         # Relative path - prepend BOOKLORE_URL
         base_url = BOOKLORE_URL.rstrip('/')
         target_url = base_url + target_url
-
+    
     print(f"Final target_url: {target_url}", flush=True)
-
+    
     if 'shiggsy.co.uk' in target_url and target_url.startswith('http://'):
         target_url = target_url.replace('http://', 'https://', 1)
 
@@ -186,14 +188,14 @@ def opds_browse():
             auth_str = f"{BOOKLORE_USER}:{BOOKLORE_PASS}"
             encoded_auth = base64.b64encode(auth_str.encode('ascii')).decode('ascii')
             headers['Authorization'] = f"Basic {encoded_auth}"
-
+        
         resp = requests.get(target_url, headers=headers, timeout=15, allow_redirects=True)
-
+        
         print(f"Response status: {resp.status_code}", flush=True)
         print(f"Response headers: {dict(resp.headers)}", flush=True)
         if resp.status_code == 403:
             print(f"403 response body: {resp.text[:500]}", flush=True)
-
+        
         if resp.status_code == 403:
             return jsonify({
                 'error': f'403 Forbidden',
@@ -201,17 +203,17 @@ def opds_browse():
                 'url': target_url,
                 'response': resp.text[:200]
             }), 403
-
+        
         resp.raise_for_status()
-
+        
         entries = parse_opds_feed(resp.content, target_url)
         is_acquisition = any(any(l['rel'] and 'acquisition' in l['rel'] for l in e['links']) for e in entries)
-
+        
         return jsonify({
             'entries': entries,
             'type': 'acquisition' if is_acquisition else 'navigation'
         })
-          except requests.exceptions.HTTPError as e:
+    except requests.exceptions.HTTPError as e:
         return jsonify({'error': f"HTTP Error: {str(e)}"}), resp.status_code if 'resp' in locals() else 500
     except Exception as e:
         return jsonify({'error': f"Connection Error: {str(e)}"}), 500
@@ -221,24 +223,24 @@ def search_ephemera():
     query = request.args.get('q', '')
     if not query:
         return jsonify([])
-
+    
     try:
         ephemera_url = EPHEMERA_URL.rstrip('/')
         resp = requests.get(f"{ephemera_url}/api/search", params={'q': query}, timeout=15)
         resp.raise_for_status()
         data = resp.json()
-
+        
         if isinstance(data, dict) and 'results' in data:
             results = data.get('results', [])
         elif isinstance(data, list):
             results = data
         else:
             results = []
-
+        
         # Filter for EPUB format
         filtered = [book for book in results if book.get('format', '').upper() == 'EPUB']
         return jsonify(filtered)
-
+        
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Connection error: {str(e)}'}), 500
     except Exception as e:
@@ -267,7 +269,7 @@ def get_queue():
         resp = requests.get(f"{ephemera_url}/api/queue", timeout=10)
         resp.raise_for_status()
         return jsonify(resp.json())
-
+        
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Connection error: {str(e)}'}), 500
     except Exception as e:
@@ -278,27 +280,27 @@ def send_to_kindle():
     kindle_email = request.cookies.get('kindle_email', '')
     if not kindle_email:
         return jsonify({'error': 'Kindle email not configured'}), 400
-
+    
     data = request.json
     download_url = data.get('url')
     if not download_url:
         return jsonify({'error': 'No URL provided'}), 400
-
+    
     try:
         # Download the book with auth
         headers = {
             'User-Agent': 'Mozilla/5.0 (Kobo) AppleWebkit/537.36'
         }
-
+        
         # Always add auth for OPDS downloads
         if BOOKLORE_USER and BOOKLORE_PASS:
             auth_str = f"{BOOKLORE_USER}:{BOOKLORE_PASS}"
             encoded_auth = base64.b64encode(auth_str.encode('ascii')).decode('ascii')
             headers['Authorization'] = f"Basic {encoded_auth}"
-
+        
         resp = requests.get(download_url, headers=headers, timeout=30)
         resp.raise_for_status()
-
+        
         # Get filename from URL or content-disposition
         filename = 'book.epub'
         if 'content-disposition' in resp.headers:
@@ -307,29 +309,29 @@ def send_to_kindle():
                 filename = cd.split('filename=')[1].strip('"\'')
         else:
             filename = download_url.split('/')[-1].split('?')[0] or 'book.epub'
-
+        
         if not SMTP_USER or not SMTP_PASS:
             return jsonify({'error': 'SMTP credentials not configured in server'}), 500
-
+        
         msg = MIMEMultipart()
         msg['From'] = SMTP_USER
         msg['To'] = kindle_email
         msg['Subject'] = 'Book from OPDS'
-
+        
         part = MIMEBase('application', 'octet-stream')
         part.set_payload(resp.content)
         encoders.encode_base64(part)
         part.add_header('Content-Disposition', f'attachment; filename={filename}')
         msg.attach(part)
-
+        
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
         server.quit()
-
+        
         return jsonify({'status': 'sent', 'filename': filename})
-
+        
     except requests.exceptions.RequestException as e:
         return jsonify({'error': f'Download error: {str(e)}'}), 500
     except Exception as e:
