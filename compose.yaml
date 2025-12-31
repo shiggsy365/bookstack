@@ -1,10 +1,6 @@
 services:
   booklore:
-    build:
-      # using the develop branch as it supports series in OPDS
-      context: https://github.com/booklore-app/booklore.git#develop
-      dockerfile: Dockerfile
-      # image: booklore/booklore:develop
+    image: booklore/booklore:latest
     container_name: booklore
     environment:
       - USER_ID=${PUID}
@@ -20,7 +16,7 @@ services:
     ports:
       - "${BOOKLORE_PORT}:${BOOKLORE_PORT}"
     volumes:
-      - ${BKL_CONFIG}/data:/app/data
+      - ${BOOKSTACK_INSTALL}/booklore/data:/app/data
       - ${BOOK_LIBRARY}:/books
       - ${INGEST_FOLDER}:/bookdrop
     restart: unless-stopped
@@ -33,7 +29,7 @@ services:
     profiles:
       - required
       - all
-
+      
   mariadb:
     image: lscr.io/linuxserver/mariadb:11.4.5
     container_name: mariadb
@@ -46,7 +42,7 @@ services:
       - MYSQL_USER=${DB_USER}
       - MYSQL_PASSWORD=${DB_PASSWORD}
     volumes:
-      - ${BKL_CONFIG}/mariadb/config:/config
+      - ${BOOKSTACK_INSTALL}/mariadb/config:/config
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "mariadb-admin", "ping", "-h", "localhost" ]
@@ -59,22 +55,21 @@ services:
     container_name: ephemera
     restart: unless-stopped
     ports:
-      - "8286:8286"
+      - "${EPHEMERA_PORT}:${EPHEMERA_PORT}"
     environment:
-      AA_BASE_URL: https://annas-archive.org
+      AA_BASE_URL: ${AA_URL}
       FLARESOLVERR_URL: http://flaresolverr:8191
       LG_BASE_URL: #https://gen.com
       AA_API_KEY:
       PUID: ${PUID}
       PGID: ${PGID}
     volumes:
-      - ${EPH_CONFIG}/data:/app/data
-      - ${EPH_CONFIG}/downloads:/app/downloads
+      - ${BOOKSTACK_FOLDER}/ephemera/data:/app/data
+      - ${BOOKSTACK_FOLDER}/ephemera/downloads:/app/downloads
       - ${INGEST_FOLDER}:/app/ingest
     dns:
       - 1.1.1.1
       - 1.0.0.1
-
     healthcheck:
       test:
         [
@@ -85,3 +80,65 @@ services:
           "--spider",
           "http://127.0.0.1:8286/health",
         ]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    profiles:
+      - required
+      - all
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=${TZ}
+    dns:
+      - 1.1.1.1
+      - 1.0.0.1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8191/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    profiles:
+      - required
+      - all
+
+  bookstackweb:
+    build:
+      context: ${BOOKSTACK_FOLDER}
+    container_name: bookstackweb
+    expose:
+      - "5000"
+    environment:
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - EPHEMERA_URL=${EPHEMERA_URL}
+      - BOOKLORE_URL=${BOOKLORE_URL}
+      - BOOKLORE_USER=${BOOKLORE_USER}
+      - BOOKLORE_PASS=${BOOKLORE_PASS}
+    depends_on:
+      - ephemera
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kobo-app.rule=Host(`${BOOKSTACKWEB_HOSTNAME}`)"
+      - "traefik.http.routers.kobo-app.entrypoints=websecure"
+      - "traefik.http.routers.kobo-app.tls=true"
+      - "traefik.http.routers.kobo-app.tls.certresolver=letsencrypt"
+      - "traefik.http.services.kobo-app.loadbalancer.server.port=5000"
+    profiles:
+      - required
+      - all
+
+
+
+      
