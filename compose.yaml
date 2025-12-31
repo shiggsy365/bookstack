@@ -130,11 +130,11 @@ services:
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.kobo-app.rule=Host(`${BOOKSTACKWEB_HOSTNAME}`)"
-      - "traefik.http.routers.kobo-app.entrypoints=websecure"
-      - "traefik.http.routers.kobo-app.tls=true"
-      - "traefik.http.routers.kobo-app.tls.certresolver=letsencrypt"
-      - "traefik.http.services.kobo-app.loadbalancer.server.port=5000"
+      - "traefik.http.routers.bookstackweb.rule=Host(`${BOOKSTACKWEB_HOSTNAME}`)"
+      - "traefik.http.routers.bookstackweb.entrypoints=websecure"
+      - "traefik.http.routers.bookstackweb.tls=true"
+      - "traefik.http.routers.bookstackweb.tls.certresolver=letsencrypt"
+      - "traefik.http.services.bookstackweb.loadbalancer.server.port=5000"
     profiles:
       - required
       - all
