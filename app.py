@@ -367,9 +367,17 @@ def search_bookseriesinorder():
         all_h3 = soup.find_all('h3')
         print(f"[BSIO] Page has {len(all_h2)} h2 tags and {len(all_h3)} h3 tags", flush=True)
 
+        # Debug: print what's in the h2 tags
+        for idx, h2 in enumerate(all_h2):
+            print(f"[BSIO] H2 #{idx}: text='{h2.get_text(strip=True)[:100]}', has_link={h2.find('a') is not None}", flush=True)
+
         # Try to find all links that might be author pages
         all_links = soup.find_all('a', href=True)
         print(f"[BSIO] Page has {len(all_links)} total links", flush=True)
+
+        # Debug: Show first 5 links to understand structure
+        for idx, link in enumerate(all_links[:5]):
+            print(f"[BSIO] Link #{idx}: text='{link.get_text(strip=True)[:30]}', href='{link.get('href', '')}'", flush=True)
 
         # Strategy 1: Look for article elements
         articles = soup.find_all('article')
