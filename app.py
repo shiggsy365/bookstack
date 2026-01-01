@@ -349,17 +349,34 @@ def search_bookseriesinorder():
         search_url = f"https://www.bookseriesinorder.com/?s={query}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
+        print(f"[BSIO] Searching for: {query}", flush=True)
+        print(f"[BSIO] URL: {search_url}", flush=True)
+
         resp = requests.get(search_url, headers=headers, timeout=15)
         resp.raise_for_status()
+
+        print(f"[BSIO] Response status: {resp.status_code}", flush=True)
+        print(f"[BSIO] Response length: {len(resp.content)}", flush=True)
 
         soup = BeautifulSoup(resp.content, 'html.parser')
         authors = []
 
         # Try multiple selectors to find article elements
         articles = soup.find_all('article')
+        print(f"[BSIO] Found {len(articles)} article elements", flush=True)
+
         if not articles:
             # Fallback: try finding divs with class containing 'post'
             articles = soup.find_all('div', class_=lambda x: x and 'post' in x)
+            print(f"[BSIO] Fallback: Found {len(articles)} div.post elements", flush=True)
+
+        # Debug: print first article structure if available
+        if articles and len(articles) > 0:
+            print(f"[BSIO] First article classes: {articles[0].get('class')}", flush=True)
+            h_tags = articles[0].find_all(['h1', 'h2', 'h3'])
+            print(f"[BSIO] Found {len(h_tags)} heading tags in first article", flush=True)
+            for h in h_tags[:3]:
+                print(f"[BSIO]   - {h.name}: {h.get_text(strip=True)[:50]}", flush=True)
 
         for article in articles:
             # Try to find title with multiple approaches
@@ -369,9 +386,14 @@ def search_bookseriesinorder():
             if not title_elem:
                 title_elem = article.find('h1', class_='entry-title')
             if not title_elem:
+                title_elem = article.find('h1')
+            if not title_elem:
                 continue
 
             link_elem = title_elem.find('a')
+            if not link_elem:
+                # Try to find any link in the title area
+                link_elem = article.find('a')
             if not link_elem:
                 continue
 
@@ -396,17 +418,24 @@ def search_bookseriesinorder():
                 if p_elem:
                     description = p_elem.get_text(strip=True)
 
+            print(f"[BSIO] Found author: {author_name}", flush=True)
+
             authors.append({
                 'name': author_name,
                 'url': author_url,
                 'description': description
             })
 
+        print(f"[BSIO] Total authors found: {len(authors)}", flush=True)
         return jsonify(authors)
 
     except requests.exceptions.RequestException as e:
+        print(f"[BSIO] Request error: {str(e)}", flush=True)
         return jsonify({'error': f'Connection error: {str(e)}'}), 500
     except Exception as e:
+        print(f"[BSIO] Error: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': f'Error: {str(e)}'}), 500
 
 @app.route('/api/bookseriesinorder/author')
