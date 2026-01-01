@@ -375,9 +375,27 @@ def search_bookseriesinorder():
         all_links = soup.find_all('a', href=True)
         print(f"[BSIO] Page has {len(all_links)} total links", flush=True)
 
-        # Debug: Show first 5 links to understand structure
-        for idx, link in enumerate(all_links[:5]):
-            print(f"[BSIO] Link #{idx}: text='{link.get_text(strip=True)[:30]}', href='{link.get('href', '')}'", flush=True)
+        # Debug: Show first 10 links to understand structure, skip navigation
+        for idx, link in enumerate(all_links[:15]):
+            href = link.get('href', '')
+            text = link.get_text(strip=True)[:50]
+            # Look for links that might be author pages
+            if 'bookseriesinorder.com' in href and href not in ['https://www.bookseriesinorder.com', 'https://www.bookseriesinorder.com/']:
+                print(f"[BSIO] Link #{idx}: text='{text}', href='{href}'", flush=True)
+
+        # Look for common WordPress content containers
+        content_areas = [
+            soup.find('main'),
+            soup.find('div', id='content'),
+            soup.find('div', class_='site-content'),
+            soup.find('div', class_='hfeed'),
+            soup.find('ul', class_='search-results'),
+            soup.find('div', class_='search-results')
+        ]
+
+        for idx, area in enumerate(content_areas):
+            if area:
+                print(f"[BSIO] Found content area #{idx}: {area.name}.{area.get('class', [])} with {len(area.find_all('a', href=True))} links", flush=True)
 
         # Strategy 1: Look for article elements
         articles = soup.find_all('article')
