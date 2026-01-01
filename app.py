@@ -679,10 +679,12 @@ def get_author_books():
                 # Skip non-series headers and comments/reply sections
                 skip_headers = [
                     'about the author', 'author bio', 'biography', 'share this', 'related', 'tags',
-                    'leave a reply', 'responses to', 'comments'
+                    'leave a reply', 'responses to', 'comments', 'chronological order', 'similar authors',
+                    'also read', 'recommended', 'you may also like'
                 ]
                 if any(skip in series_name.lower() for skip in skip_headers):
                     print(f"[BSIO-Author] Skipping header: {series_name}", flush=True)
+                    current_series = None  # Reset current series so nothing gets added to it
                     continue
 
                 if series_name and len(series_name) > 0:
@@ -731,6 +733,17 @@ def get_author_books():
                 if len(book_text) > 200:
                     continue
 
+                # Skip if it's a concatenated numbered list (e.g., "1: Book1 2: Book2 3: Book3")
+                # These typically have multiple numbers followed by colons
+                if re.search(r'\d+:.*\d+:.*\d+:', book_text):
+                    print(f"[BSIO-Author]   - Skipped paragraph (numbered list): {book_text[:50]}", flush=True)
+                    continue
+
+                # Skip if it contains phrases like "Then read" or "Read in order"
+                if any(phrase in book_text.lower() for phrase in ['then read', 'read in', 'in order', 'order to read']):
+                    print(f"[BSIO-Author]   - Skipped paragraph (instructions): {book_text[:50]}", flush=True)
+                    continue
+
                 # Try to find Amazon link
                 amazon_link = ''
                 link_elem = elem.find('a', href=True)
@@ -753,6 +766,12 @@ def get_author_books():
 
                     # Skip if it's a comment or form element
                     if any(skip in book_text.lower() for skip in ['name', 'email', 'comment', 'ago', 'months ago', 'year ago', 'weeks ago']):
+                        continue
+
+                    # Skip if it's just an author name (too short, no year, no special chars)
+                    # Books typically have at least 10 chars and contain numbers or special formatting
+                    if len(book_text) < 10 or not re.search(r'[\d\(\)]', book_text):
+                        print(f"[BSIO-Author]   - Skipped (not a book): {book_text[:50]}", flush=True)
                         continue
 
                     # Try to find Amazon link
