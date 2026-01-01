@@ -10,6 +10,7 @@ from email.mime.base import MIMEBase
 from email import encoders
 from urllib.parse import urljoin, urlparse
 from flask import Flask, render_template, request, jsonify, make_response
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -336,6 +337,134 @@ def send_to_kindle():
         return jsonify({'error': f'Download error: {str(e)}'}), 500
     except Exception as e:
         return jsonify({'error': f'Email error: {str(e)}'}), 500
+
+@app.route('/api/bookseriesinorder/search')
+def search_bookseriesinorder():
+    query = request.args.get('q', '')
+    if not query:
+        return jsonify([])
+
+    try:
+        # Search bookseriesinorder.com
+        search_url = f"https://www.bookseriesinorder.com/?s={query}"
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+        resp = requests.get(search_url, headers=headers, timeout=15)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.content, 'html.parser')
+        authors = []
+
+        # Find all article elements that contain author results
+        articles = soup.find_all('article', class_='post')
+
+        for article in articles:
+            # Get the title link
+            title_elem = article.find('h2', class_='entry-title')
+            if not title_elem:
+                continue
+
+            link_elem = title_elem.find('a')
+            if not link_elem:
+                continue
+
+            author_name = link_elem.get_text(strip=True)
+            author_url = link_elem.get('href', '')
+
+            # Get the excerpt/description
+            excerpt_elem = article.find('div', class_='entry-summary')
+            description = ''
+            if excerpt_elem:
+                # Get first paragraph
+                p_elem = excerpt_elem.find('p')
+                if p_elem:
+                    description = p_elem.get_text(strip=True)
+
+            authors.append({
+                'name': author_name,
+                'url': author_url,
+                'description': description
+            })
+
+        return jsonify(authors)
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Connection error: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Error: {str(e)}'}), 500
+
+@app.route('/api/bookseriesinorder/author')
+def get_author_books():
+    author_url = request.args.get('url', '')
+    if not author_url:
+        return jsonify({'error': 'No URL provided'}), 400
+
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+        resp = requests.get(author_url, headers=headers, timeout=15)
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.content, 'html.parser')
+
+        # Find the author name from the page title or h1
+        author_name = ''
+        h1_elem = soup.find('h1', class_='entry-title')
+        if h1_elem:
+            author_name = h1_elem.get_text(strip=True)
+
+        series_list = []
+
+        # Find all series sections
+        # BookSeriesInOrder typically uses h3 headers for series names
+        content = soup.find('div', class_='entry-content')
+        if not content:
+            return jsonify({'author': author_name, 'series': []})
+
+        current_series = None
+
+        for elem in content.find_all(['h3', 'ul', 'ol', 'p']):
+            if elem.name == 'h3':
+                # New series header
+                series_name = elem.get_text(strip=True)
+                if series_name and len(series_name) > 0:
+                    current_series = {
+                        'name': series_name,
+                        'books': []
+                    }
+                    series_list.append(current_series)
+
+            elif (elem.name == 'ul' or elem.name == 'ol') and current_series is not None:
+                # Books list for current series
+                for li in elem.find_all('li', recursive=False):
+                    book_text = li.get_text(strip=True)
+
+                    # Try to find Amazon link
+                    amazon_link = ''
+                    link_elem = li.find('a', href=True)
+                    if link_elem:
+                        href = link_elem.get('href', '')
+                        if 'amazon.com' in href or 'amzn.to' in href:
+                            amazon_link = href
+
+                    if book_text:
+                        current_series['books'].append({
+                            'title': book_text,
+                            'amazon_link': amazon_link
+                        })
+
+        # Remove empty series
+        series_list = [s for s in series_list if len(s['books']) > 0]
+
+        return jsonify({
+            'author': author_name,
+            'series': series_list
+        })
+
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': f'Connection error: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': f'Error: {str(e)}'}), 500
 
 @app.route('/')
 def index():
