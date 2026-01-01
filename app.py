@@ -453,13 +453,6 @@ def search_bookseriesinorder():
             if len(authors) == 0:
                 print(f"[BSIO] No authors from h2/h3, trying Strategy 4: collect all author page links", flush=True)
 
-                # Navigation links to skip
-                skip_paths = [
-                    '/', '/characters/', '/authors/', '/book-release-calendar/',
-                    '/about/', '/contact/', '/privacy-policy/', '/tag/', '/category/',
-                    '/page/', '/?s='
-                ]
-
                 seen_urls = set()
 
                 for link in all_links:
@@ -472,18 +465,40 @@ def search_bookseriesinorder():
 
                     # Check if this is a bookseriesinorder.com author page
                     if 'bookseriesinorder.com' in href:
-                        # Skip navigation and non-author pages
+                        # Normalize URL
+                        if not href.startswith('http'):
+                            href = 'https://www.bookseriesinorder.com' + href
+
+                        # Skip homepage
+                        if href in ['https://www.bookseriesinorder.com', 'https://www.bookseriesinorder.com/']:
+                            continue
+
+                        # Skip navigation and non-author pages using more specific checks
+                        # Extract path from URL
+                        if '?' in href:
+                            path_part = href.split('?')[0]
+                        else:
+                            path_part = href
+
+                        # Skip specific paths
+                        skip_patterns = [
+                            '/characters/', '/authors/', '/book-release-calendar/',
+                            '/about/', '/contact/', '/privacy-policy/', '/tag/', '/category/',
+                            '/page/'
+                        ]
+
                         should_skip = False
-                        for skip_path in skip_paths:
-                            if skip_path in href:
+                        for pattern in skip_patterns:
+                            if pattern in path_part:
                                 should_skip = True
                                 break
 
-                        if should_skip or href in seen_urls:
-                            continue
+                        # Skip if it's a search URL
+                        if '?s=' in href:
+                            should_skip = True
 
-                        # Check if URL ends with homepage
-                        if href in ['https://www.bookseriesinorder.com', 'https://www.bookseriesinorder.com/']:
+                        # Skip if we've seen this URL or if it should be skipped
+                        if should_skip or href in seen_urls:
                             continue
 
                         seen_urls.add(href)
