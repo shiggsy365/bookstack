@@ -448,6 +448,61 @@ def search_bookseriesinorder():
                         })
                     else:
                         print(f"[BSIO] Skipped (not valid author page): {author_url}", flush=True)
+
+            # Strategy 4: If no authors found yet, collect all bookseriesinorder.com links
+            if len(authors) == 0:
+                print(f"[BSIO] No authors from h2/h3, trying Strategy 4: collect all author page links", flush=True)
+
+                # Navigation links to skip
+                skip_paths = [
+                    '/', '/characters/', '/authors/', '/book-release-calendar/',
+                    '/about/', '/contact/', '/privacy-policy/', '/tag/', '/category/',
+                    '/page/', '/?s='
+                ]
+
+                seen_urls = set()
+
+                for link in all_links:
+                    href = link.get('href', '')
+                    text = link.get_text(strip=True)
+
+                    # Skip if no text or href
+                    if not text or not href:
+                        continue
+
+                    # Check if this is a bookseriesinorder.com author page
+                    if 'bookseriesinorder.com' in href:
+                        # Skip navigation and non-author pages
+                        should_skip = False
+                        for skip_path in skip_paths:
+                            if skip_path in href:
+                                should_skip = True
+                                break
+
+                        if should_skip or href in seen_urls:
+                            continue
+
+                        # Check if URL ends with homepage
+                        if href in ['https://www.bookseriesinorder.com', 'https://www.bookseriesinorder.com/']:
+                            continue
+
+                        seen_urls.add(href)
+
+                        # Look for description nearby
+                        description = ''
+                        parent = link.parent
+                        if parent:
+                            # Try to find description text near the link
+                            next_sibling = link.find_next_sibling()
+                            if next_sibling and next_sibling.name == 'p':
+                                description = next_sibling.get_text(strip=True)[:200]
+
+                        print(f"[BSIO] Found author via link collection: {text}", flush=True)
+                        authors.append({
+                            'name': text,
+                            'url': href,
+                            'description': description
+                        })
         else:
             # Process articles normally
             for article in articles:
