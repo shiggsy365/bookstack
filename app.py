@@ -8,7 +8,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, quote_plus
 from flask import Flask, render_template, request, jsonify, make_response
 from bs4 import BeautifulSoup
 
@@ -345,8 +345,9 @@ def search_bookseriesinorder():
         return jsonify([])
 
     try:
-        # Search bookseriesinorder.com
-        search_url = f"https://www.bookseriesinorder.com/?s={query}"
+        # Search bookseriesinorder.com with properly encoded query
+        encoded_query = quote_plus(query)
+        search_url = f"https://www.bookseriesinorder.com/?s={encoded_query}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
         print(f"[BSIO] Searching for: {query}", flush=True)
@@ -361,70 +362,104 @@ def search_bookseriesinorder():
         soup = BeautifulSoup(resp.content, 'html.parser')
         authors = []
 
-        # Try multiple selectors to find article elements
+        # Log the page structure to understand what we're working with
+        all_h2 = soup.find_all('h2')
+        all_h3 = soup.find_all('h3')
+        print(f"[BSIO] Page has {len(all_h2)} h2 tags and {len(all_h3)} h3 tags", flush=True)
+
+        # Try to find all links that might be author pages
+        all_links = soup.find_all('a', href=True)
+        print(f"[BSIO] Page has {len(all_links)} total links", flush=True)
+
+        # Strategy 1: Look for article elements
         articles = soup.find_all('article')
         print(f"[BSIO] Found {len(articles)} article elements", flush=True)
 
         if not articles:
-            # Fallback: try finding divs with class containing 'post'
-            articles = soup.find_all('div', class_=lambda x: x and 'post' in x)
-            print(f"[BSIO] Fallback: Found {len(articles)} div.post elements", flush=True)
+            # Strategy 2: Look for divs with post-related classes
+            articles = soup.find_all('div', class_=lambda x: x and any(c in str(x).lower() for c in ['post', 'search-result', 'result']))
+            print(f"[BSIO] Fallback: Found {len(articles)} div elements with post/result classes", flush=True)
 
-        # Debug: print first article structure if available
-        if articles and len(articles) > 0:
-            print(f"[BSIO] First article classes: {articles[0].get('class')}", flush=True)
-            h_tags = articles[0].find_all(['h1', 'h2', 'h3'])
-            print(f"[BSIO] Found {len(h_tags)} heading tags in first article", flush=True)
-            for h in h_tags[:3]:
-                print(f"[BSIO]   - {h.name}: {h.get_text(strip=True)[:50]}", flush=True)
+        if not articles:
+            # Strategy 3: Look for any container with h2/h3 headings that have links
+            # This is a more generic approach
+            print(f"[BSIO] Using generic strategy - looking for heading links", flush=True)
+            for h_tag in soup.find_all(['h2', 'h3']):
+                link = h_tag.find('a', href=True)
+                if link:
+                    author_name = link.get_text(strip=True)
+                    author_url = link.get('href', '')
 
-        for article in articles:
-            # Try to find title with multiple approaches
-            title_elem = article.find('h2', class_='entry-title')
-            if not title_elem:
-                title_elem = article.find('h2')
-            if not title_elem:
-                title_elem = article.find('h1', class_='entry-title')
-            if not title_elem:
-                title_elem = article.find('h1')
-            if not title_elem:
-                continue
+                    if author_url and author_url != '#' and 'bookseriesinorder.com' in author_url:
+                        # Try to find description nearby
+                        description = ''
+                        # Look for next sibling that might contain description
+                        next_elem = h_tag.find_next_sibling()
+                        if next_elem and next_elem.name in ['p', 'div']:
+                            description = next_elem.get_text(strip=True)[:200]
 
-            link_elem = title_elem.find('a')
-            if not link_elem:
-                # Try to find any link in the title area
-                link_elem = article.find('a')
-            if not link_elem:
-                continue
+                        print(f"[BSIO] Found author via heading: {author_name}", flush=True)
+                        authors.append({
+                            'name': author_name,
+                            'url': author_url,
+                            'description': description
+                        })
+        else:
+            # Process articles normally
+            for article in articles:
+                # Try to find title with multiple approaches
+                title_elem = article.find('h2', class_='entry-title')
+                if not title_elem:
+                    title_elem = article.find('h2')
+                if not title_elem:
+                    title_elem = article.find('h3', class_='entry-title')
+                if not title_elem:
+                    title_elem = article.find('h3')
+                if not title_elem:
+                    title_elem = article.find('h1')
+                if not title_elem:
+                    continue
 
-            author_name = link_elem.get_text(strip=True)
-            author_url = link_elem.get('href', '')
+                link_elem = title_elem.find('a')
+                if not link_elem:
+                    # Try to find any link in the article
+                    link_elem = article.find('a', href=True)
+                if not link_elem:
+                    continue
 
-            # Skip if URL doesn't look like an author page
-            if not author_url or author_url == '#':
-                continue
+                author_name = link_elem.get_text(strip=True)
+                author_url = link_elem.get('href', '')
 
-            # Get the excerpt/description
-            excerpt_elem = article.find('div', class_='entry-summary')
-            if not excerpt_elem:
-                excerpt_elem = article.find('div', class_=lambda x: x and 'summary' in x.lower() if x else False)
-            if not excerpt_elem:
-                excerpt_elem = article.find('div', class_=lambda x: x and 'excerpt' in x.lower() if x else False)
+                # Skip if URL doesn't look valid
+                if not author_url or author_url == '#':
+                    continue
 
-            description = ''
-            if excerpt_elem:
-                # Get first paragraph
-                p_elem = excerpt_elem.find('p')
-                if p_elem:
-                    description = p_elem.get_text(strip=True)
+                # Get the excerpt/description
+                excerpt_elem = article.find('div', class_='entry-summary')
+                if not excerpt_elem:
+                    excerpt_elem = article.find('div', class_=lambda x: x and 'summary' in x.lower() if x else False)
+                if not excerpt_elem:
+                    excerpt_elem = article.find('div', class_=lambda x: x and 'excerpt' in x.lower() if x else False)
+                if not excerpt_elem:
+                    excerpt_elem = article.find('p')
 
-            print(f"[BSIO] Found author: {author_name}", flush=True)
+                description = ''
+                if excerpt_elem:
+                    # Get text content
+                    if excerpt_elem.name == 'p':
+                        description = excerpt_elem.get_text(strip=True)
+                    else:
+                        p_elem = excerpt_elem.find('p')
+                        if p_elem:
+                            description = p_elem.get_text(strip=True)
 
-            authors.append({
-                'name': author_name,
-                'url': author_url,
-                'description': description
-            })
+                print(f"[BSIO] Found author: {author_name}", flush=True)
+
+                authors.append({
+                    'name': author_name,
+                    'url': author_url,
+                    'description': description
+                })
 
         print(f"[BSIO] Total authors found: {len(authors)}", flush=True)
         return jsonify(authors)
