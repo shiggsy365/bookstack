@@ -355,12 +355,19 @@ def search_bookseriesinorder():
         soup = BeautifulSoup(resp.content, 'html.parser')
         authors = []
 
-        # Find all article elements that contain author results
-        articles = soup.find_all('article', class_='post')
+        # Try multiple selectors to find article elements
+        articles = soup.find_all('article')
+        if not articles:
+            # Fallback: try finding divs with class containing 'post'
+            articles = soup.find_all('div', class_=lambda x: x and 'post' in x)
 
         for article in articles:
-            # Get the title link
+            # Try to find title with multiple approaches
             title_elem = article.find('h2', class_='entry-title')
+            if not title_elem:
+                title_elem = article.find('h2')
+            if not title_elem:
+                title_elem = article.find('h1', class_='entry-title')
             if not title_elem:
                 continue
 
@@ -371,8 +378,17 @@ def search_bookseriesinorder():
             author_name = link_elem.get_text(strip=True)
             author_url = link_elem.get('href', '')
 
+            # Skip if URL doesn't look like an author page
+            if not author_url or author_url == '#':
+                continue
+
             # Get the excerpt/description
             excerpt_elem = article.find('div', class_='entry-summary')
+            if not excerpt_elem:
+                excerpt_elem = article.find('div', class_=lambda x: x and 'summary' in x.lower() if x else False)
+            if not excerpt_elem:
+                excerpt_elem = article.find('div', class_=lambda x: x and 'excerpt' in x.lower() if x else False)
+
             description = ''
             if excerpt_elem:
                 # Get first paragraph
