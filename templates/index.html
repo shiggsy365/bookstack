@@ -145,18 +145,19 @@
             var content = document.getElementById('opds-content');
             content.innerHTML = '';
             opdsHistory = [];
-            
+
             var intro = document.createElement('p');
             intro.style.margin = '0 0 15px 0';
             intro.style.color = '#666';
             intro.innerText = 'Select a book from your cloud library to download it to your Kindle.';
             content.appendChild(intro);
-            
+
             var menu = [
                 {title: 'Recent Books', path: 'recent', isRecent: true},
-                {title: 'Authors', path: '/authors'}
+                {title: 'Authors', path: '/authors'},
+                {title: 'Book Series in Order', path: 'bookseriesinorder', isBSIO: true}
             ];
-            
+
             for (var i = 0; i < menu.length; i++) {
                 var div = document.createElement('div');
                 div.className = 'opds-item';
@@ -165,6 +166,8 @@
                     return function() {
                         if (item.isRecent) {
                             browseRecentBooks();
+                        } else if (item.isBSIO) {
+                            showBSIOSearch();
                         } else {
                             browseOPDS(item.path);
                         }
@@ -630,6 +633,178 @@
                     div.innerHTML = '<b>' + (item.title || item.filename || 'Unknown') + '</b><br>' +
                         '<small>Status: ' + item.status + '</small>';
                     list.appendChild(div);
+                }
+            });
+        }
+
+        function showBSIOSearch() {
+            var content = document.getElementById('opds-content');
+            content.innerHTML = '';
+
+            var back = document.createElement('div');
+            back.className = 'opds-item';
+            back.innerHTML = '<b>&larr; Back</b>';
+            back.onclick = function() {
+                renderOPDSMenu();
+            };
+            content.appendChild(back);
+
+            var header = document.createElement('div');
+            header.className = 'section-header';
+            header.innerText = 'Search Book Series in Order';
+            content.appendChild(header);
+
+            var card = document.createElement('div');
+            card.className = 'card';
+
+            var p = document.createElement('p');
+            p.style.marginTop = '0';
+            p.style.color = '#666';
+            p.innerText = 'Search for an author to see their book series';
+            card.appendChild(p);
+
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.id = 'bsio-search-input';
+            input.placeholder = 'Enter author name (e.g., Lee Child)';
+            card.appendChild(input);
+
+            var button = document.createElement('button');
+            button.className = 'btn';
+            button.innerText = 'Search';
+            button.onclick = searchBSIOAuthors;
+            card.appendChild(button);
+
+            content.appendChild(card);
+
+            var resultsDiv = document.createElement('div');
+            resultsDiv.id = 'bsio-results';
+            content.appendChild(resultsDiv);
+        }
+
+        function searchBSIOAuthors() {
+            var query = document.getElementById('bsio-search-input').value;
+            if (!query) return;
+
+            var results = document.getElementById('bsio-results');
+            results.innerHTML = '<center>Searching...</center>';
+
+            ajax('GET', '/api/bookseriesinorder/search?q=' + encodeURIComponent(query), null, function(err, data) {
+                results.innerHTML = '';
+
+                if (err || !data) {
+                    results.innerHTML = '<center>Error searching</center>';
+                    return;
+                }
+
+                if (data.error) {
+                    results.innerHTML = '<center>' + data.error + '</center>';
+                    return;
+                }
+
+                if (!data.length) {
+                    results.innerHTML = '<center>No authors found</center>';
+                    return;
+                }
+
+                showBSIOAuthorList(data);
+            });
+        }
+
+        function showBSIOAuthorList(authors) {
+            var results = document.getElementById('bsio-results');
+            results.innerHTML = '';
+
+            var header = document.createElement('div');
+            header.className = 'section-header';
+            header.innerText = 'Authors Found (' + authors.length + ')';
+            results.appendChild(header);
+
+            for (var i = 0; i < authors.length; i++) {
+                var author = authors[i];
+                var div = document.createElement('div');
+                div.className = 'opds-item';
+
+                var html = '<b>' + author.name + '</b>';
+                if (author.description) {
+                    html += '<br><small style="color:#666;">' + author.description + '</small>';
+                }
+
+                div.innerHTML = html;
+                div.onclick = (function(url, name) {
+                    return function() {
+                        showBSIOAuthorBooks(url, name);
+                    };
+                })(author.url, author.name);
+
+                results.appendChild(div);
+            }
+        }
+
+        function showBSIOAuthorBooks(authorUrl, authorName) {
+            var content = document.getElementById('opds-content');
+            content.innerHTML = '<center>Loading...</center>';
+
+            ajax('GET', '/api/bookseriesinorder/author?url=' + encodeURIComponent(authorUrl), null, function(err, data) {
+                if (err || !data) {
+                    content.innerHTML = '<center>Error loading author books</center>';
+                    return;
+                }
+
+                if (data.error) {
+                    content.innerHTML = '<center>' + data.error + '</center>';
+                    return;
+                }
+
+                content.innerHTML = '';
+
+                var back = document.createElement('div');
+                back.className = 'opds-item';
+                back.innerHTML = '<b>&larr; Back</b>';
+                back.onclick = function() {
+                    showBSIOSearch();
+                };
+                content.appendChild(back);
+
+                var header = document.createElement('div');
+                header.className = 'section-header';
+                header.innerText = data.author || authorName;
+                content.appendChild(header);
+
+                if (!data.series || data.series.length === 0) {
+                    var noBooks = document.createElement('p');
+                    noBooks.style.textAlign = 'center';
+                    noBooks.style.color = '#666';
+                    noBooks.innerText = 'No series found for this author';
+                    content.appendChild(noBooks);
+                    return;
+                }
+
+                for (var i = 0; i < data.series.length; i++) {
+                    var series = data.series[i];
+
+                    var seriesHeader = document.createElement('div');
+                    seriesHeader.style.fontSize = '28px';
+                    seriesHeader.style.fontWeight = 'bold';
+                    seriesHeader.style.marginTop = '20px';
+                    seriesHeader.style.marginBottom = '10px';
+                    seriesHeader.innerHTML = series.name + ' <small style="color:#666;">(' + series.books.length + ' books)</small>';
+                    content.appendChild(seriesHeader);
+
+                    for (var j = 0; j < series.books.length; j++) {
+                        var book = series.books[j];
+                        var bookDiv = document.createElement('div');
+                        bookDiv.className = 'opds-item';
+                        bookDiv.style.cursor = 'default';
+
+                        var bookHtml = '<b>' + book.title + '</b>';
+                        if (book.amazon_link) {
+                            bookHtml += '<br><a href="' + book.amazon_link + '" target="_blank" style="color:#666; font-size:21px;">View on Amazon</a>';
+                        }
+
+                        bookDiv.innerHTML = bookHtml;
+                        content.appendChild(bookDiv);
+                    }
                 }
             });
         }
