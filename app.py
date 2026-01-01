@@ -635,14 +635,29 @@ def get_author_books():
 
         series_list = []
 
+        # Debug: Show page structure
+        all_divs = soup.find_all('div', class_=True)
+        print(f"[BSIO-Author] Page has {len(all_divs)} divs with classes", flush=True)
+
+        # Show first 10 div classes
+        for idx, div in enumerate(all_divs[:10]):
+            classes = ' '.join(div.get('class', []))
+            print(f"[BSIO-Author] Div #{idx}: classes='{classes}'", flush=True)
+
         # Find all series sections
         content = soup.find('div', class_='entry-content')
         if not content:
             content = soup.find('main')
         if not content:
             content = soup.find('article')
+        if not content:
+            # Try to find any div with 'content' in class name
+            content = soup.find('div', class_=lambda x: x and 'content' in ' '.join(x).lower())
+        if not content:
+            # Last resort: use body
+            content = soup.find('body')
 
-        print(f"[BSIO-Author] Content area found: {content is not None}", flush=True)
+        print(f"[BSIO-Author] Content area found: {content is not None}, type: {content.name if content else None}", flush=True)
 
         if not content:
             return jsonify({'author': author_name, 'series': []})
