@@ -390,7 +390,23 @@ def search_bookseriesinorder():
                     author_name = link.get_text(strip=True)
                     author_url = link.get('href', '')
 
-                    if author_url and author_url != '#' and 'bookseriesinorder.com' in author_url:
+                    print(f"[BSIO] Found h2/h3 with link: '{author_name}' -> {author_url}", flush=True)
+
+                    # Accept links that:
+                    # 1. Are not empty or just #
+                    # 2. Start with http/https (absolute URLs) OR start with / (relative URLs)
+                    # 3. Look like author pages (not search results, categories, tags, etc.)
+                    is_valid = False
+                    if author_url and author_url != '#':
+                        if 'bookseriesinorder.com' in author_url and '/tag/' not in author_url and '/category/' not in author_url:
+                            is_valid = True
+                        elif author_url.startswith('/') and author_url not in ['/', '/?s=']:
+                            # Relative URL - make it absolute
+                            author_url = 'https://www.bookseriesinorder.com' + author_url
+                            if '/tag/' not in author_url and '/category/' not in author_url:
+                                is_valid = True
+
+                    if is_valid:
                         # Try to find description nearby
                         description = ''
                         # Look for next sibling that might contain description
@@ -404,6 +420,8 @@ def search_bookseriesinorder():
                             'url': author_url,
                             'description': description
                         })
+                    else:
+                        print(f"[BSIO] Skipped (not valid author page): {author_url}", flush=True)
         else:
             # Process articles normally
             for article in articles:
