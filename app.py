@@ -671,13 +671,16 @@ def get_author_books():
         # Try h2, h3, and h4 for series headers
         current_series = None
 
-        for elem in content.find_all(['h2', 'h3', 'h4', 'ul', 'ol']):
+        for elem in content.find_all(['h2', 'h3', 'h4', 'ul', 'ol', 'p', 'table']):
             if elem.name in ['h2', 'h3', 'h4']:
                 # New series header
                 series_name = elem.get_text(strip=True)
 
-                # Skip non-series headers
-                skip_headers = ['about the author', 'author bio', 'biography', 'share this', 'related', 'tags']
+                # Skip non-series headers and comments/reply sections
+                skip_headers = [
+                    'about the author', 'author bio', 'biography', 'share this', 'related', 'tags',
+                    'leave a reply', 'responses to', 'comments'
+                ]
                 if any(skip in series_name.lower() for skip in skip_headers):
                     print(f"[BSIO-Author] Skipping header: {series_name}", flush=True)
                     continue
@@ -690,10 +693,67 @@ def get_author_books():
                     series_list.append(current_series)
                     print(f"[BSIO-Author] Found series: {series_name}", flush=True)
 
+                    # Debug: show what comes after this header
+                    next_sibling = elem.find_next_sibling()
+                    if next_sibling:
+                        print(f"[BSIO-Author]   Next sibling: {next_sibling.name}, classes: {next_sibling.get('class', [])}", flush=True)
+
+            elif elem.name == 'table' and current_series is not None:
+                # Books in a table (common format)
+                for row in elem.find_all('tr'):
+                    cells = row.find_all(['td', 'th'])
+                    if len(cells) > 0:
+                        # First cell usually contains the book title
+                        book_text = cells[0].get_text(strip=True)
+
+                        # Try to find Amazon link in any cell
+                        amazon_link = ''
+                        for cell in cells:
+                            link_elem = cell.find('a', href=True)
+                            if link_elem:
+                                href = link_elem.get('href', '')
+                                if 'amazon.com' in href or 'amzn.to' in href:
+                                    amazon_link = href
+                                    break
+
+                        if book_text and book_text.lower() not in ['title', 'book', 'year', 'date']:
+                            current_series['books'].append({
+                                'title': book_text,
+                                'amazon_link': amazon_link
+                            })
+                            print(f"[BSIO-Author]   - Book (table): {book_text[:50]}", flush=True)
+
+            elif elem.name == 'p' and current_series is not None:
+                # Books in paragraphs (each p is a book)
+                book_text = elem.get_text(strip=True)
+
+                # Skip if it's just a description paragraph
+                if len(book_text) > 200:
+                    continue
+
+                # Try to find Amazon link
+                amazon_link = ''
+                link_elem = elem.find('a', href=True)
+                if link_elem:
+                    href = link_elem.get('href', '')
+                    if 'amazon.com' in href or 'amzn.to' in href:
+                        amazon_link = href
+
+                if book_text and '(' in book_text:  # Usually books have (year) in them
+                    current_series['books'].append({
+                        'title': book_text,
+                        'amazon_link': amazon_link
+                    })
+                    print(f"[BSIO-Author]   - Book (p): {book_text[:50]}", flush=True)
+
             elif (elem.name == 'ul' or elem.name == 'ol') and current_series is not None:
                 # Books list for current series
                 for li in elem.find_all('li', recursive=False):
                     book_text = li.get_text(strip=True)
+
+                    # Skip if it's a comment or form element
+                    if any(skip in book_text.lower() for skip in ['name', 'email', 'comment', 'ago', 'months ago', 'year ago', 'weeks ago']):
+                        continue
 
                     # Try to find Amazon link
                     amazon_link = ''
@@ -708,7 +768,7 @@ def get_author_books():
                             'title': book_text,
                             'amazon_link': amazon_link
                         })
-                        print(f"[BSIO-Author]   - Book: {book_text[:50]}", flush=True)
+                        print(f"[BSIO-Author]   - Book (list): {book_text[:50]}", flush=True)
 
         # Remove empty series
         series_list = [s for s in series_list if len(s['books']) > 0]
