@@ -858,17 +858,30 @@
 
                             var bookHtml = '<b>' + book.title + '</b><br>';
 
-                            // Add library status
-                            var inLibrary = libraryStatus[book.title] || false;
+                            // Check library status (it's now an object with in_library property)
+                            var libStatus = libraryStatus[book.title] || {in_library: false};
+                            var inLibrary = libStatus.in_library || false;
+
                             if (inLibrary) {
-                                bookHtml += '<small style="color:#0a0; font-weight:bold;">IN LIBRARY</small> ';
+                                bookHtml += '<small style="color:#0a0; font-weight:bold;">IN LIBRARY';
+                                if (libStatus.match_score && libStatus.match_score < 100) {
+                                    bookHtml += ' (' + libStatus.match_score + '% match)';
+                                }
+                                bookHtml += '</small> ';
+
+                                // Show "Send to EReader" button for books in library
+                                if (libStatus.download_url) {
+                                    bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px; background:#0a0;" onclick="sendToKindle(\'' + libStatus.download_url.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to EReader</button>';
+                                }
                             } else {
                                 bookHtml += '<small style="color:#666;">NOT IN LIBRARY</small> ';
-                            }
 
-                            // Add Search Ephemera button
-                            var searchQuery = (data.author || authorName) + ' ' + book.title;
-                            bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px;" onclick="searchEphemeraFor(\'' + searchQuery.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Search Ephemera</button>';
+                                // Show "Search Ephemera" button for books not in library
+                                var searchQuery = (data.author || authorName) + ' ' + book.title;
+                                // Remove text in parentheses from search query
+                                searchQuery = searchQuery.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+                                bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px;" onclick="searchEphemeraFor(\'' + searchQuery.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Search Ephemera</button>';
+                            }
 
                             if (book.amazon_link) {
                                 bookHtml += '<br><a href="' + book.amazon_link + '" target="_blank" style="color:#666; font-size:18px; margin-top:5px; display:inline-block;">View on Amazon</a>';

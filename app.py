@@ -842,25 +842,74 @@ def check_library():
         # Check which books are in library
         results = {}
         for book_title in book_titles:
-            # Normalize title for comparison
-            title_lower = book_title.lower()
-            # Remove year from title for comparison (e.g., "Book Title (2020)")
-            title_clean = re.sub(r'\s*\([0-9]{4}\)\s*$', '', title_lower)
+            # Normalize title for comparison - remove text in brackets and year
+            title_normalized = re.sub(r'\([^)]*\)', '', book_title)  # Remove anything in parentheses
+            title_normalized = re.sub(r'\s+', ' ', title_normalized).strip()  # Clean up extra spaces
+            title_lower = title_normalized.lower()
 
-            found = False
+            print(f"[Library Check] Checking '{book_title}' -> normalized: '{title_normalized}'", flush=True)
+
+            found_entry = None
+            best_match_score = 0
+
             for entry in entries:
-                entry_title_lower = entry['title'].lower()
-                # Simple fuzzy match - check if cleaned title is in entry title or vice versa
-                if title_clean in entry_title_lower or entry_title_lower in title_clean:
-                    found = True
-                    break
+                # Normalize OPDS entry title the same way
+                entry_title = entry['title']
+                entry_normalized = re.sub(r'\([^)]*\)', '', entry_title)
+                entry_normalized = re.sub(r'\s+', ' ', entry_normalized).strip()
+                entry_lower = entry_normalized.lower()
 
-            results[book_title] = found
+                # Calculate match score
+                # Perfect match gets 100
+                if title_lower == entry_lower:
+                    match_score = 100
+                # Title contains entry or entry contains title
+                elif title_lower in entry_lower or entry_lower in title_lower:
+                    # Calculate overlap percentage
+                    if len(title_lower) > len(entry_lower):
+                        match_score = int((len(entry_lower) / len(title_lower)) * 100)
+                    else:
+                        match_score = int((len(title_lower) / len(entry_lower)) * 100)
+                else:
+                    # Check word-by-word match
+                    title_words = set(title_lower.split())
+                    entry_words = set(entry_lower.split())
+                    common_words = title_words & entry_words
+                    if len(common_words) > 0:
+                        match_score = int((len(common_words) / max(len(title_words), len(entry_words))) * 100)
+                    else:
+                        match_score = 0
+
+                # Consider it a match if score is 70% or higher
+                if match_score >= 70 and match_score > best_match_score:
+                    best_match_score = match_score
+                    # Find the acquisition link
+                    download_url = None
+                    for link in entry['links']:
+                        if link['rel'] and 'acquisition' in link['rel']:
+                            download_url = link['href']
+                            break
+
+                    found_entry = {
+                        'in_library': True,
+                        'match_score': match_score,
+                        'opds_title': entry_title,
+                        'download_url': download_url
+                    }
+
+            if found_entry:
+                print(f"[Library Check] Found match: '{found_entry['opds_title']}' (score: {found_entry['match_score']}%)", flush=True)
+                results[book_title] = found_entry
+            else:
+                print(f"[Library Check] No match found", flush=True)
+                results[book_title] = {'in_library': False}
 
         return jsonify({'results': results})
 
     except Exception as e:
         print(f"[Library Check] Error: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
         return jsonify({'results': {}})
 
 @app.route('/')
