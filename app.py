@@ -503,6 +503,24 @@ def search_bookseriesinorder():
 
                         seen_urls.add(href)
 
+                        # Filter out junk/promotional links
+                        junk_phrases = [
+                            'book notification', 'click here', 'check out this great series',
+                            'privacy policy', 'cookie policy', 'terms of service',
+                            'click', 'here', 'notification'
+                        ]
+
+                        is_junk = False
+                        text_lower = text.lower()
+                        for junk in junk_phrases:
+                            if junk in text_lower:
+                                is_junk = True
+                                print(f"[BSIO] Skipped junk link: {text}", flush=True)
+                                break
+
+                        if is_junk:
+                            continue
+
                         # Look for description nearby
                         description = ''
                         parent = link.parent
@@ -596,6 +614,7 @@ def get_author_books():
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
+        print(f"[BSIO-Author] Fetching: {author_url}", flush=True)
         resp = requests.get(author_url, headers=headers, timeout=15)
         resp.raise_for_status()
 
@@ -607,26 +626,54 @@ def get_author_books():
         if h1_elem:
             author_name = h1_elem.get_text(strip=True)
 
+        if not author_name:
+            h1_elem = soup.find('h1')
+            if h1_elem:
+                author_name = h1_elem.get_text(strip=True)
+
+        print(f"[BSIO-Author] Author name: {author_name}", flush=True)
+
         series_list = []
 
         # Find all series sections
-        # BookSeriesInOrder typically uses h3 headers for series names
         content = soup.find('div', class_='entry-content')
+        if not content:
+            content = soup.find('main')
+        if not content:
+            content = soup.find('article')
+
+        print(f"[BSIO-Author] Content area found: {content is not None}", flush=True)
+
         if not content:
             return jsonify({'author': author_name, 'series': []})
 
+        # Count h2, h3, h4 tags
+        h2_tags = content.find_all('h2')
+        h3_tags = content.find_all('h3')
+        h4_tags = content.find_all('h4')
+        print(f"[BSIO-Author] Found {len(h2_tags)} h2, {len(h3_tags)} h3, {len(h4_tags)} h4 tags", flush=True)
+
+        # Try h2, h3, and h4 for series headers
         current_series = None
 
-        for elem in content.find_all(['h3', 'ul', 'ol', 'p']):
-            if elem.name == 'h3':
+        for elem in content.find_all(['h2', 'h3', 'h4', 'ul', 'ol']):
+            if elem.name in ['h2', 'h3', 'h4']:
                 # New series header
                 series_name = elem.get_text(strip=True)
+
+                # Skip non-series headers
+                skip_headers = ['about the author', 'author bio', 'biography', 'share this', 'related', 'tags']
+                if any(skip in series_name.lower() for skip in skip_headers):
+                    print(f"[BSIO-Author] Skipping header: {series_name}", flush=True)
+                    continue
+
                 if series_name and len(series_name) > 0:
                     current_series = {
                         'name': series_name,
                         'books': []
                     }
                     series_list.append(current_series)
+                    print(f"[BSIO-Author] Found series: {series_name}", flush=True)
 
             elif (elem.name == 'ul' or elem.name == 'ol') and current_series is not None:
                 # Books list for current series
@@ -646,9 +693,12 @@ def get_author_books():
                             'title': book_text,
                             'amazon_link': amazon_link
                         })
+                        print(f"[BSIO-Author]   - Book: {book_text[:50]}", flush=True)
 
         # Remove empty series
         series_list = [s for s in series_list if len(s['books']) > 0]
+
+        print(f"[BSIO-Author] Total series with books: {len(series_list)}", flush=True)
 
         return jsonify({
             'author': author_name,
@@ -656,9 +706,68 @@ def get_author_books():
         })
 
     except requests.exceptions.RequestException as e:
+        print(f"[BSIO-Author] Request error: {str(e)}", flush=True)
         return jsonify({'error': f'Connection error: {str(e)}'}), 500
     except Exception as e:
+        print(f"[BSIO-Author] Error: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': f'Error: {str(e)}'}), 500
+
+@app.route('/api/opds/check-library', methods=['POST'])
+def check_library():
+    """Check if books are in the OPDS library"""
+    data = request.json
+    book_titles = data.get('titles', [])
+    author_name = data.get('author', '')
+
+    if not book_titles:
+        return jsonify({'results': {}})
+
+    try:
+        # Search the OPDS library for the author
+        search_url = f"{BOOKLORE_URL}/search?q={author_name}"
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Kobo) AppleWebkit/537.36'
+        }
+
+        if BOOKLORE_USER and BOOKLORE_PASS:
+            auth_str = f"{BOOKLORE_USER}:{BOOKLORE_PASS}"
+            encoded_auth = base64.b64encode(auth_str.encode('ascii')).decode('ascii')
+            headers['Authorization'] = f"Basic {encoded_auth}"
+
+        resp = requests.get(search_url, headers=headers, timeout=10)
+
+        if resp.status_code != 200:
+            return jsonify({'results': {}})
+
+        # Parse OPDS feed
+        entries = parse_opds_feed(resp.content, search_url)
+
+        # Check which books are in library
+        results = {}
+        for book_title in book_titles:
+            # Normalize title for comparison
+            title_lower = book_title.lower()
+            # Remove year from title for comparison (e.g., "Book Title (2020)")
+            title_clean = re.sub(r'\s*\([0-9]{4}\)\s*$', '', title_lower)
+
+            found = False
+            for entry in entries:
+                entry_title_lower = entry['title'].lower()
+                # Simple fuzzy match - check if cleaned title is in entry title or vice versa
+                if title_clean in entry_title_lower or entry_title_lower in title_clean:
+                    found = True
+                    break
+
+            results[book_title] = found
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        print(f"[Library Check] Error: {str(e)}", flush=True)
+        return jsonify({'results': {}})
 
 @app.route('/')
 def index():

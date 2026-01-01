@@ -822,33 +822,74 @@
                     return;
                 }
 
+                // Collect all book titles to check library status
+                var allTitles = [];
                 for (var i = 0; i < data.series.length; i++) {
-                    var series = data.series[i];
-
-                    var seriesHeader = document.createElement('div');
-                    seriesHeader.style.fontSize = '28px';
-                    seriesHeader.style.fontWeight = 'bold';
-                    seriesHeader.style.marginTop = '20px';
-                    seriesHeader.style.marginBottom = '10px';
-                    seriesHeader.innerHTML = series.name + ' <small style="color:#666;">(' + series.books.length + ' books)</small>';
-                    container.appendChild(seriesHeader);
-
-                    for (var j = 0; j < series.books.length; j++) {
-                        var book = series.books[j];
-                        var bookDiv = document.createElement('div');
-                        bookDiv.className = 'opds-item';
-                        bookDiv.style.cursor = 'default';
-
-                        var bookHtml = '<b>' + book.title + '</b>';
-                        if (book.amazon_link) {
-                            bookHtml += '<br><a href="' + book.amazon_link + '" target="_blank" style="color:#666; font-size:21px;">View on Amazon</a>';
-                        }
-
-                        bookDiv.innerHTML = bookHtml;
-                        container.appendChild(bookDiv);
+                    for (var j = 0; j < data.series[i].books.length; j++) {
+                        allTitles.push(data.series[i].books[j].title);
                     }
                 }
+
+                // Check library status
+                ajax('POST', '/api/opds/check-library', {titles: allTitles, author: data.author || authorName}, function(libErr, libData) {
+                    var libraryStatus = {};
+                    if (!libErr && libData && libData.results) {
+                        libraryStatus = libData.results;
+                    }
+
+                    // Render series with library status
+                    for (var i = 0; i < data.series.length; i++) {
+                        var series = data.series[i];
+
+                        var seriesHeader = document.createElement('div');
+                        seriesHeader.style.fontSize = '28px';
+                        seriesHeader.style.fontWeight = 'bold';
+                        seriesHeader.style.marginTop = '20px';
+                        seriesHeader.style.marginBottom = '10px';
+                        seriesHeader.innerHTML = series.name + ' <small style="color:#666;">(' + series.books.length + ' books)</small>';
+                        container.appendChild(seriesHeader);
+
+                        for (var j = 0; j < series.books.length; j++) {
+                            var book = series.books[j];
+                            var bookDiv = document.createElement('div');
+                            bookDiv.className = 'opds-item';
+                            bookDiv.style.cursor = 'default';
+                            bookDiv.style.padding = '10px';
+
+                            var bookHtml = '<b>' + book.title + '</b><br>';
+
+                            // Add library status
+                            var inLibrary = libraryStatus[book.title] || false;
+                            if (inLibrary) {
+                                bookHtml += '<small style="color:#0a0; font-weight:bold;">IN LIBRARY</small> ';
+                            } else {
+                                bookHtml += '<small style="color:#666;">NOT IN LIBRARY</small> ';
+                            }
+
+                            // Add Search Ephemera button
+                            var searchQuery = (data.author || authorName) + ' ' + book.title;
+                            bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px;" onclick="searchEphemeraFor(\'' + searchQuery.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Search Ephemera</button>';
+
+                            if (book.amazon_link) {
+                                bookHtml += '<br><a href="' + book.amazon_link + '" target="_blank" style="color:#666; font-size:18px; margin-top:5px; display:inline-block;">View on Amazon</a>';
+                            }
+
+                            bookDiv.innerHTML = bookHtml;
+                            container.appendChild(bookDiv);
+                        }
+                    }
+                });
             });
+        }
+
+        function searchEphemeraFor(query) {
+            // Switch to Request tab, then to Ephemera search
+            switchTab('search');
+            showEphemeraSearch();
+
+            // Set the search query and trigger search
+            document.getElementById('search-input').value = query;
+            performSearch();
         }
 
         loadSettings();
