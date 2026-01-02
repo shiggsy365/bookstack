@@ -631,6 +631,21 @@ def get_author_books():
             if h1_elem:
                 author_name = h1_elem.get_text(strip=True)
 
+        # Clean up author name - remove common suffixes
+        if author_name:
+            # Remove common patterns like "Book Series in Order", "Books in Order", etc.
+            patterns_to_remove = [
+                r'\s+Book Series in Order\s*$',
+                r'\s+Books in Order\s*$',
+                r'\s+Series in Order\s*$',
+                r'\s+Book Series\s*$',
+                r'\s+Books\s*$',
+                r'\s+Series\s*$'
+            ]
+            for pattern in patterns_to_remove:
+                author_name = re.sub(pattern, '', author_name, flags=re.IGNORECASE)
+            author_name = author_name.strip()
+
         print(f"[BSIO-Author] Author name: {author_name}", flush=True)
 
         series_list = []
@@ -815,12 +830,15 @@ def check_library():
     book_titles = data.get('titles', [])
     author_name = data.get('author', '')
 
+    print(f"[Library Check] Received request with {len(book_titles)} titles and author: '{author_name}'", flush=True)
+
     if not book_titles:
         return jsonify({'results': {}})
 
     try:
         # Search the OPDS library for the author
         search_url = f"{BOOKLORE_URL}/search?q={author_name}"
+        print(f"[Library Check] OPDS search URL: {search_url}", flush=True)
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Kobo) AppleWebkit/537.36'
@@ -838,6 +856,12 @@ def check_library():
 
         # Parse OPDS feed
         entries = parse_opds_feed(resp.content, search_url)
+
+        print(f"[Library Check] OPDS search returned {len(entries)} entries for author '{author_name}'", flush=True)
+
+        # Log first 5 OPDS entries for debugging
+        for idx, entry in enumerate(entries[:5]):
+            print(f"[Library Check]   OPDS entry #{idx}: '{entry['title']}'", flush=True)
 
         # Check which books are in library
         results = {}
