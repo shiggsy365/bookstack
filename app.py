@@ -385,9 +385,6 @@ def search_bookseriesinorder():
             soup.find('div', class_='search-results')
         ]
 
-        for idx, area in enumerate(content_areas):
-            if area:
-
         # Strategy 1: Look for article elements
         articles = soup.find_all('article')
 
@@ -403,7 +400,6 @@ def search_bookseriesinorder():
                 if link:
                     author_name = link.get_text(strip=True)
                     author_url = link.get('href', '')
-
 
                     # Accept links that:
                     # 1. Are not empty or just #
@@ -432,7 +428,6 @@ def search_bookseriesinorder():
                             'url': author_url,
                             'description': description
                         })
-                    else:
 
             # Strategy 4: If no authors found yet, collect all bookseriesinorder.com links
             if len(authors) == 0:
@@ -680,10 +675,6 @@ def get_author_books():
                     }
                     series_list.append(current_series)
 
-                    # Debug: show what comes after this header
-                    next_sibling = elem.find_next_sibling()
-                    if next_sibling:
-
             elif elem.name == 'table' and current_series is not None:
                 # Books in a table (common format)
                 for row in elem.find_all('tr'):
@@ -817,10 +808,6 @@ def check_library():
         # Parse OPDS feed
         entries = parse_opds_feed(resp.content, search_url)
 
-
-        # Log first 5 OPDS entries for debugging
-        for idx, entry in enumerate(entries[:5]):
-
         # Check which books are in library
         results = {}
         for idx, book_title in enumerate(book_titles):
@@ -828,9 +815,6 @@ def check_library():
             title_normalized = re.sub(r'\([^)]*\)', '', book_title)  # Remove anything in parentheses
             title_normalized = re.sub(r'\s+', ' ', title_normalized).strip()  # Clean up extra spaces
             title_lower = title_normalized.lower()
-
-            # Only log first 3 books to avoid spam
-            if idx < 3:
 
             found_entry = None
             best_match_score = 0
@@ -901,8 +885,6 @@ def check_library():
             if found_entry:
                 results[book_title] = found_entry
             else:
-                # Only log first 3 non-matches to avoid spam
-                if idx < 3:
                 results[book_title] = {'in_library': False}
 
         # Log summary
