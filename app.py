@@ -836,8 +836,9 @@ def check_library():
         return jsonify({'results': {}})
 
     try:
-        # Search the OPDS library for the author
-        search_url = f"{BOOKLORE_URL}/search?q={author_name}"
+        # Search the OPDS library for the author (URL encode the query)
+        encoded_author = quote_plus(author_name)
+        search_url = f"{BOOKLORE_URL}/search?q={encoded_author}"
         print(f"[Library Check] OPDS search URL: {search_url}", flush=True)
 
         headers = {
@@ -852,7 +853,10 @@ def check_library():
         resp = requests.get(search_url, headers=headers, timeout=10)
 
         if resp.status_code != 200:
+            print(f"[Library Check] OPDS search failed with status {resp.status_code}", flush=True)
             return jsonify({'results': {}})
+
+        print(f"[Library Check] OPDS search succeeded, response length: {len(resp.content)} bytes", flush=True)
 
         # Parse OPDS feed
         entries = parse_opds_feed(resp.content, search_url)
@@ -865,13 +869,15 @@ def check_library():
 
         # Check which books are in library
         results = {}
-        for book_title in book_titles:
+        for idx, book_title in enumerate(book_titles):
             # Normalize title for comparison - remove text in brackets and year
             title_normalized = re.sub(r'\([^)]*\)', '', book_title)  # Remove anything in parentheses
             title_normalized = re.sub(r'\s+', ' ', title_normalized).strip()  # Clean up extra spaces
             title_lower = title_normalized.lower()
 
-            print(f"[Library Check] Checking '{book_title}' -> normalized: '{title_normalized}'", flush=True)
+            # Only log first 3 books to avoid spam
+            if idx < 3:
+                print(f"[Library Check] Checking book #{idx}: '{book_title}' -> normalized: '{title_normalized}'", flush=True)
 
             found_entry = None
             best_match_score = 0
@@ -922,11 +928,17 @@ def check_library():
                     }
 
             if found_entry:
-                print(f"[Library Check] Found match: '{found_entry['opds_title']}' (score: {found_entry['match_score']}%)", flush=True)
+                print(f"[Library Check] ✓ MATCH: '{book_title}' -> '{found_entry['opds_title']}' (score: {found_entry['match_score']}%)", flush=True)
                 results[book_title] = found_entry
             else:
-                print(f"[Library Check] No match found", flush=True)
+                # Only log first 3 non-matches to avoid spam
+                if idx < 3:
+                    print(f"[Library Check] ✗ No match for: '{book_title}'", flush=True)
                 results[book_title] = {'in_library': False}
+
+        # Log summary
+        matches_found = sum(1 for r in results.values() if r.get('in_library', False))
+        print(f"[Library Check] Summary: {matches_found}/{len(book_titles)} books found in library", flush=True)
 
         return jsonify({'results': results})
 
