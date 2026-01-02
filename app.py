@@ -836,8 +836,9 @@ def check_library():
         return jsonify({'results': {}})
 
     try:
-        # Search the OPDS library for the author
-        search_url = f"{BOOKLORE_URL}/search?q={author_name}"
+        # Search the OPDS library for the author (URL encode the query)
+        encoded_author = quote_plus(author_name)
+        search_url = f"{BOOKLORE_URL}/catalog?q={encoded_author}"
         print(f"[Library Check] OPDS search URL: {search_url}", flush=True)
 
         headers = {
@@ -852,7 +853,10 @@ def check_library():
         resp = requests.get(search_url, headers=headers, timeout=10)
 
         if resp.status_code != 200:
+            print(f"[Library Check] OPDS search failed with status {resp.status_code}", flush=True)
             return jsonify({'results': {}})
+
+        print(f"[Library Check] OPDS search succeeded, response length: {len(resp.content)} bytes", flush=True)
 
         # Parse OPDS feed
         entries = parse_opds_feed(resp.content, search_url)
@@ -865,13 +869,15 @@ def check_library():
 
         # Check which books are in library
         results = {}
-        for book_title in book_titles:
+        for idx, book_title in enumerate(book_titles):
             # Normalize title for comparison - remove text in brackets and year
             title_normalized = re.sub(r'\([^)]*\)', '', book_title)  # Remove anything in parentheses
             title_normalized = re.sub(r'\s+', ' ', title_normalized).strip()  # Clean up extra spaces
             title_lower = title_normalized.lower()
 
-            print(f"[Library Check] Checking '{book_title}' -> normalized: '{title_normalized}'", flush=True)
+            # Only log first 3 books to avoid spam
+            if idx < 3:
+                print(f"[Library Check] Checking book #{idx}: '{book_title}' -> normalized: '{title_normalized}'", flush=True)
 
             found_entry = None
             best_match_score = 0
@@ -883,26 +889,44 @@ def check_library():
                 entry_normalized = re.sub(r'\s+', ' ', entry_normalized).strip()
                 entry_lower = entry_normalized.lower()
 
-                # Calculate match score
+                # Calculate match score with improved algorithm
                 # Perfect match gets 100
                 if title_lower == entry_lower:
                     match_score = 100
-                # Title contains entry or entry contains title
-                elif title_lower in entry_lower or entry_lower in title_lower:
-                    # Calculate overlap percentage
-                    if len(title_lower) > len(entry_lower):
-                        match_score = int((len(entry_lower) / len(title_lower)) * 100)
-                    else:
-                        match_score = int((len(title_lower) / len(entry_lower)) * 100)
                 else:
-                    # Check word-by-word match
-                    title_words = set(title_lower.split())
-                    entry_words = set(entry_lower.split())
+                    # Word-by-word matching with smart scoring
+                    # Remove punctuation and filter out very short words
+                    title_words = set(w.strip(',.;:!?/') for w in title_lower.split() if len(w.strip(',.;:!?/')) > 0)
+                    entry_words = set(w.strip(',.;:!?/') for w in entry_lower.split() if len(w.strip(',.;:!?/')) > 0)
+
+                    # Remove common filler words for better matching
+                    filler_words = {'a', 'an', 'the', 'and', 'or', 'but'}
+                    title_significant = title_words - filler_words
+                    entry_significant = entry_words - filler_words
+
                     common_words = title_words & entry_words
-                    if len(common_words) > 0:
-                        match_score = int((len(common_words) / max(len(title_words), len(entry_words))) * 100)
-                    else:
+                    common_significant = title_significant & entry_significant
+
+                    if len(common_words) == 0:
                         match_score = 0
+                    else:
+                        # If all words from the shorter title are in the longer title
+                        shorter_word_count = min(len(title_words), len(entry_words))
+                        longer_word_count = max(len(title_words), len(entry_words))
+
+                        # Check if all significant words from shorter title are in longer
+                        shorter_sig_count = min(len(title_significant), len(entry_significant))
+
+                        if len(common_words) == shorter_word_count:
+                            # All words from shorter title are in longer title
+                            # This is a strong match (e.g., "The Visitor" in "Running Blind / The Visitor")
+                            match_score = 85
+                        elif len(common_significant) == shorter_sig_count and shorter_sig_count >= 1:
+                            # All significant words match (at least 1 significant word)
+                            match_score = 80
+                        else:
+                            # Partial match - calculate percentage
+                            match_score = int((len(common_words) / longer_word_count) * 100)
 
                 # Consider it a match if score is 70% or higher
                 if match_score >= 70 and match_score > best_match_score:
@@ -922,11 +946,17 @@ def check_library():
                     }
 
             if found_entry:
-                print(f"[Library Check] Found match: '{found_entry['opds_title']}' (score: {found_entry['match_score']}%)", flush=True)
+                print(f"[Library Check] ✓ MATCH: '{book_title}' -> '{found_entry['opds_title']}' (score: {found_entry['match_score']}%)", flush=True)
                 results[book_title] = found_entry
             else:
-                print(f"[Library Check] No match found", flush=True)
+                # Only log first 3 non-matches to avoid spam
+                if idx < 3:
+                    print(f"[Library Check] ✗ No match for: '{book_title}'", flush=True)
                 results[book_title] = {'in_library': False}
+
+        # Log summary
+        matches_found = sum(1 for r in results.values() if r.get('in_library', False))
+        print(f"[Library Check] Summary: {matches_found}/{len(book_titles)} books found in library", flush=True)
 
         return jsonify({'results': results})
 
