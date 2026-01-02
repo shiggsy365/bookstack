@@ -136,25 +136,41 @@ def handle_settings():
 def image_proxy():
     url = request.args.get('url')
     if not url:
+        print(f"[Cover] No URL provided", flush=True)
         return '', 404
-    
+
     # If it's a relative URL, prepend BOOKLORE_URL base
+    original_url = url
     if url.startswith('/'):
         base = BOOKLORE_URL.split('/api/v1/opds')[0] if '/api/v1/opds' in BOOKLORE_URL else BOOKLORE_URL.rsplit('/', 1)[0]
         url = base + url
-    
+        print(f"[Cover] Converted relative URL: {original_url} -> {url}", flush=True)
+    else:
+        print(f"[Cover] Fetching: {url}", flush=True)
+
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         if BOOKLORE_USER and BOOKLORE_PASS:
             auth_str = f"{BOOKLORE_USER}:{BOOKLORE_PASS}"
             encoded_auth = base64.b64encode(auth_str.encode('ascii')).decode('ascii')
             headers['Authorization'] = f"Basic {encoded_auth}"
-        
+
         resp = requests.get(url, headers=headers, timeout=10)
         resp.raise_for_status()
-        
-        return resp.content, resp.status_code, {'Content-Type': resp.headers.get('Content-Type', 'image/jpeg')}
-    except:
+
+        content_type = resp.headers.get('Content-Type', 'image/jpeg')
+        content_length = len(resp.content)
+        print(f"[Cover] Success: {content_length} bytes, type: {content_type}", flush=True)
+
+        return resp.content, resp.status_code, {'Content-Type': content_type}
+    except requests.exceptions.HTTPError as e:
+        print(f"[Cover] HTTP Error {e.response.status_code}: {url}", flush=True)
+        return '', 404
+    except requests.exceptions.RequestException as e:
+        print(f"[Cover] Request failed: {str(e)}", flush=True)
+        return '', 404
+    except Exception as e:
+        print(f"[Cover] Error: {str(e)}", flush=True)
         return '', 404
 
 @app.route('/api/opds/browse')
@@ -350,38 +366,14 @@ def search_bookseriesinorder():
         search_url = f"https://www.bookseriesinorder.com/?s={encoded_query}"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-        print(f"[BSIO] Searching for: {query}", flush=True)
-        print(f"[BSIO] URL: {search_url}", flush=True)
-
         resp = requests.get(search_url, headers=headers, timeout=15)
         resp.raise_for_status()
-
-        print(f"[BSIO] Response status: {resp.status_code}", flush=True)
-        print(f"[BSIO] Response length: {len(resp.content)}", flush=True)
 
         soup = BeautifulSoup(resp.content, 'html.parser')
         authors = []
 
-        # Log the page structure to understand what we're working with
-        all_h2 = soup.find_all('h2')
-        all_h3 = soup.find_all('h3')
-        print(f"[BSIO] Page has {len(all_h2)} h2 tags and {len(all_h3)} h3 tags", flush=True)
-
-        # Debug: print what's in the h2 tags
-        for idx, h2 in enumerate(all_h2):
-            print(f"[BSIO] H2 #{idx}: text='{h2.get_text(strip=True)[:100]}', has_link={h2.find('a') is not None}", flush=True)
-
         # Try to find all links that might be author pages
         all_links = soup.find_all('a', href=True)
-        print(f"[BSIO] Page has {len(all_links)} total links", flush=True)
-
-        # Debug: Show first 10 links to understand structure, skip navigation
-        for idx, link in enumerate(all_links[:15]):
-            href = link.get('href', '')
-            text = link.get_text(strip=True)[:50]
-            # Look for links that might be author pages
-            if 'bookseriesinorder.com' in href and href not in ['https://www.bookseriesinorder.com', 'https://www.bookseriesinorder.com/']:
-                print(f"[BSIO] Link #{idx}: text='{text}', href='{href}'", flush=True)
 
         # Look for common WordPress content containers
         content_areas = [
@@ -395,28 +387,23 @@ def search_bookseriesinorder():
 
         for idx, area in enumerate(content_areas):
             if area:
-                print(f"[BSIO] Found content area #{idx}: {area.name}.{area.get('class', [])} with {len(area.find_all('a', href=True))} links", flush=True)
 
         # Strategy 1: Look for article elements
         articles = soup.find_all('article')
-        print(f"[BSIO] Found {len(articles)} article elements", flush=True)
 
         if not articles:
             # Strategy 2: Look for divs with post-related classes
             articles = soup.find_all('div', class_=lambda x: x and any(c in str(x).lower() for c in ['post', 'search-result', 'result']))
-            print(f"[BSIO] Fallback: Found {len(articles)} div elements with post/result classes", flush=True)
 
         if not articles:
             # Strategy 3: Look for any container with h2/h3 headings that have links
             # This is a more generic approach
-            print(f"[BSIO] Using generic strategy - looking for heading links", flush=True)
             for h_tag in soup.find_all(['h2', 'h3']):
                 link = h_tag.find('a', href=True)
                 if link:
                     author_name = link.get_text(strip=True)
                     author_url = link.get('href', '')
 
-                    print(f"[BSIO] Found h2/h3 with link: '{author_name}' -> {author_url}", flush=True)
 
                     # Accept links that:
                     # 1. Are not empty or just #
@@ -440,18 +427,15 @@ def search_bookseriesinorder():
                         if next_elem and next_elem.name in ['p', 'div']:
                             description = next_elem.get_text(strip=True)[:200]
 
-                        print(f"[BSIO] Found author via heading: {author_name}", flush=True)
                         authors.append({
                             'name': author_name,
                             'url': author_url,
                             'description': description
                         })
                     else:
-                        print(f"[BSIO] Skipped (not valid author page): {author_url}", flush=True)
 
             # Strategy 4: If no authors found yet, collect all bookseriesinorder.com links
             if len(authors) == 0:
-                print(f"[BSIO] No authors from h2/h3, trying Strategy 4: collect all author page links", flush=True)
 
                 seen_urls = set()
 
@@ -515,7 +499,6 @@ def search_bookseriesinorder():
                         for junk in junk_phrases:
                             if junk in text_lower:
                                 is_junk = True
-                                print(f"[BSIO] Skipped junk link: {text}", flush=True)
                                 break
 
                         if is_junk:
@@ -530,7 +513,6 @@ def search_bookseriesinorder():
                             if next_sibling and next_sibling.name == 'p':
                                 description = next_sibling.get_text(strip=True)[:200]
 
-                        print(f"[BSIO] Found author via link collection: {text}", flush=True)
                         authors.append({
                             'name': text,
                             'url': href,
@@ -585,7 +567,6 @@ def search_bookseriesinorder():
                         if p_elem:
                             description = p_elem.get_text(strip=True)
 
-                print(f"[BSIO] Found author: {author_name}", flush=True)
 
                 authors.append({
                     'name': author_name,
@@ -593,14 +574,11 @@ def search_bookseriesinorder():
                     'description': description
                 })
 
-        print(f"[BSIO] Total authors found: {len(authors)}", flush=True)
         return jsonify(authors)
 
     except requests.exceptions.RequestException as e:
-        print(f"[BSIO] Request error: {str(e)}", flush=True)
         return jsonify({'error': f'Connection error: {str(e)}'}), 500
     except Exception as e:
-        print(f"[BSIO] Error: {str(e)}", flush=True)
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Error: {str(e)}'}), 500
@@ -614,7 +592,6 @@ def get_author_books():
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
 
-        print(f"[BSIO-Author] Fetching: {author_url}", flush=True)
         resp = requests.get(author_url, headers=headers, timeout=15)
         resp.raise_for_status()
 
@@ -646,18 +623,15 @@ def get_author_books():
                 author_name = re.sub(pattern, '', author_name, flags=re.IGNORECASE)
             author_name = author_name.strip()
 
-        print(f"[BSIO-Author] Author name: {author_name}", flush=True)
 
         series_list = []
 
         # Debug: Show page structure
         all_divs = soup.find_all('div', class_=True)
-        print(f"[BSIO-Author] Page has {len(all_divs)} divs with classes", flush=True)
 
         # Show first 10 div classes
         for idx, div in enumerate(all_divs[:10]):
             classes = ' '.join(div.get('class', []))
-            print(f"[BSIO-Author] Div #{idx}: classes='{classes}'", flush=True)
 
         # Find all series sections
         content = soup.find('div', class_='entry-content')
@@ -672,7 +646,6 @@ def get_author_books():
             # Last resort: use body
             content = soup.find('body')
 
-        print(f"[BSIO-Author] Content area found: {content is not None}, type: {content.name if content else None}", flush=True)
 
         if not content:
             return jsonify({'author': author_name, 'series': []})
@@ -681,7 +654,6 @@ def get_author_books():
         h2_tags = content.find_all('h2')
         h3_tags = content.find_all('h3')
         h4_tags = content.find_all('h4')
-        print(f"[BSIO-Author] Found {len(h2_tags)} h2, {len(h3_tags)} h3, {len(h4_tags)} h4 tags", flush=True)
 
         # Try h2, h3, and h4 for series headers
         current_series = None
@@ -698,7 +670,6 @@ def get_author_books():
                     'also read', 'recommended', 'you may also like'
                 ]
                 if any(skip in series_name.lower() for skip in skip_headers):
-                    print(f"[BSIO-Author] Skipping header: {series_name}", flush=True)
                     current_series = None  # Reset current series so nothing gets added to it
                     continue
 
@@ -708,12 +679,10 @@ def get_author_books():
                         'books': []
                     }
                     series_list.append(current_series)
-                    print(f"[BSIO-Author] Found series: {series_name}", flush=True)
 
                     # Debug: show what comes after this header
                     next_sibling = elem.find_next_sibling()
                     if next_sibling:
-                        print(f"[BSIO-Author]   Next sibling: {next_sibling.name}, classes: {next_sibling.get('class', [])}", flush=True)
 
             elif elem.name == 'table' and current_series is not None:
                 # Books in a table (common format)
@@ -738,7 +707,6 @@ def get_author_books():
                                 'title': book_text,
                                 'amazon_link': amazon_link
                             })
-                            print(f"[BSIO-Author]   - Book (table): {book_text[:50]}", flush=True)
 
             elif elem.name == 'p' and current_series is not None:
                 # Books in paragraphs (each p is a book)
@@ -751,12 +719,10 @@ def get_author_books():
                 # Skip if it's a concatenated numbered list (e.g., "1: Book1 2: Book2 3: Book3")
                 # These typically have multiple numbers followed by colons
                 if re.search(r'\d+:.*\d+:.*\d+:', book_text):
-                    print(f"[BSIO-Author]   - Skipped paragraph (numbered list): {book_text[:50]}", flush=True)
                     continue
 
                 # Skip if it contains phrases like "Then read" or "Read in order"
                 if any(phrase in book_text.lower() for phrase in ['then read', 'read in', 'in order', 'order to read']):
-                    print(f"[BSIO-Author]   - Skipped paragraph (instructions): {book_text[:50]}", flush=True)
                     continue
 
                 # Try to find Amazon link
@@ -772,7 +738,6 @@ def get_author_books():
                         'title': book_text,
                         'amazon_link': amazon_link
                     })
-                    print(f"[BSIO-Author]   - Book (p): {book_text[:50]}", flush=True)
 
             elif (elem.name == 'ul' or elem.name == 'ol') and current_series is not None:
                 # Books list for current series
@@ -786,7 +751,6 @@ def get_author_books():
                     # Skip if it's just an author name (too short, no year, no special chars)
                     # Books typically have at least 10 chars and contain numbers or special formatting
                     if len(book_text) < 10 or not re.search(r'[\d\(\)]', book_text):
-                        print(f"[BSIO-Author]   - Skipped (not a book): {book_text[:50]}", flush=True)
                         continue
 
                     # Try to find Amazon link
@@ -802,12 +766,10 @@ def get_author_books():
                             'title': book_text,
                             'amazon_link': amazon_link
                         })
-                        print(f"[BSIO-Author]   - Book (list): {book_text[:50]}", flush=True)
 
         # Remove empty series
         series_list = [s for s in series_list if len(s['books']) > 0]
 
-        print(f"[BSIO-Author] Total series with books: {len(series_list)}", flush=True)
 
         return jsonify({
             'author': author_name,
@@ -815,10 +777,8 @@ def get_author_books():
         })
 
     except requests.exceptions.RequestException as e:
-        print(f"[BSIO-Author] Request error: {str(e)}", flush=True)
         return jsonify({'error': f'Connection error: {str(e)}'}), 500
     except Exception as e:
-        print(f"[BSIO-Author] Error: {str(e)}", flush=True)
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Error: {str(e)}'}), 500
@@ -830,7 +790,6 @@ def check_library():
     book_titles = data.get('titles', [])
     author_name = data.get('author', '')
 
-    print(f"[Library Check] Received request with {len(book_titles)} titles and author: '{author_name}'", flush=True)
 
     if not book_titles:
         return jsonify({'results': {}})
@@ -839,7 +798,6 @@ def check_library():
         # Search the OPDS library for the author (URL encode the query)
         encoded_author = quote_plus(author_name)
         search_url = f"{BOOKLORE_URL}/catalog?q={encoded_author}"
-        print(f"[Library Check] OPDS search URL: {search_url}", flush=True)
 
         headers = {
             'User-Agent': 'Mozilla/5.0 (Kobo) AppleWebkit/537.36'
@@ -853,19 +811,15 @@ def check_library():
         resp = requests.get(search_url, headers=headers, timeout=10)
 
         if resp.status_code != 200:
-            print(f"[Library Check] OPDS search failed with status {resp.status_code}", flush=True)
             return jsonify({'results': {}})
 
-        print(f"[Library Check] OPDS search succeeded, response length: {len(resp.content)} bytes", flush=True)
 
         # Parse OPDS feed
         entries = parse_opds_feed(resp.content, search_url)
 
-        print(f"[Library Check] OPDS search returned {len(entries)} entries for author '{author_name}'", flush=True)
 
         # Log first 5 OPDS entries for debugging
         for idx, entry in enumerate(entries[:5]):
-            print(f"[Library Check]   OPDS entry #{idx}: '{entry['title']}'", flush=True)
 
         # Check which books are in library
         results = {}
@@ -877,7 +831,6 @@ def check_library():
 
             # Only log first 3 books to avoid spam
             if idx < 3:
-                print(f"[Library Check] Checking book #{idx}: '{book_title}' -> normalized: '{title_normalized}'", flush=True)
 
             found_entry = None
             best_match_score = 0
@@ -946,22 +899,18 @@ def check_library():
                     }
 
             if found_entry:
-                print(f"[Library Check] ✓ MATCH: '{book_title}' -> '{found_entry['opds_title']}' (score: {found_entry['match_score']}%)", flush=True)
                 results[book_title] = found_entry
             else:
                 # Only log first 3 non-matches to avoid spam
                 if idx < 3:
-                    print(f"[Library Check] ✗ No match for: '{book_title}'", flush=True)
                 results[book_title] = {'in_library': False}
 
         # Log summary
         matches_found = sum(1 for r in results.values() if r.get('in_library', False))
-        print(f"[Library Check] Summary: {matches_found}/{len(book_titles)} books found in library", flush=True)
 
         return jsonify({'results': results})
 
     except Exception as e:
-        print(f"[Library Check] Error: {str(e)}", flush=True)
         import traceback
         traceback.print_exc()
         return jsonify({'results': {}})
