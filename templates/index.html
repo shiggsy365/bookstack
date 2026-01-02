@@ -830,15 +830,12 @@
                     }
                 }
 
-                console.log('[BSIO] Checking library for ' + allTitles.length + ' books, author: ' + (data.author || authorName));
 
                 // Check library status
                 ajax('POST', '/api/opds/check-library', {titles: allTitles, author: data.author || authorName}, function(libErr, libData) {
-                    console.log('[BSIO] Library check response - error:', libErr, 'data:', libData);
                     var libraryStatus = {};
                     if (!libErr && libData && libData.results) {
                         libraryStatus = libData.results;
-                        console.log('[BSIO] Library status:', libraryStatus);
                     }
 
                     // Render series with library status
