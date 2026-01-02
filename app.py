@@ -839,6 +839,12 @@ def check_library():
         # Parse OPDS feed
         entries = parse_opds_feed(resp.content, search_url)
 
+        print(f"[Library Check] OPDS search returned {len(entries)} entries for author '{author_name}'", flush=True)
+
+        # Log first 5 OPDS entries for debugging
+        for idx, entry in enumerate(entries[:5]):
+            print(f"[Library Check]   OPDS entry #{idx}: '{entry['title']}'", flush=True)
+
         # Check which books are in library
         results = {}
         for book_title in book_titles:
