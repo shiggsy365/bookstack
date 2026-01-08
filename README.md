@@ -36,6 +36,8 @@ To ensure successful delivery to your Kindle:
 
 Contributions, issues, and feature requests are welcome\! Feel free to check the [issues page](https://www.google.com/search?q=https://github.com/shiggsy365/bookstack/issues).
 
+[<img src="https://www.thechaoticscot.com/wp-content/uploads/2020/04/kofi-banner.png">](https://ko-fi.com/shiggsy365)
+
 ## **📜 License**
 
 Distributed under the MIT License. See LICENSE for more information.
