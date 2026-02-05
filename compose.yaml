@@ -117,7 +117,7 @@ services:
  #     - NET_RAW
     volumes:
       - ${INGEST_FOLDER}:/books
-      - /mnt/downloads/complete:/downloads
+      - ${DOWNLOAD_FOLDER}:/downloads
       - ${BOOKSTACK_INSTALL}/shelfmark/config:/config
     labels:
       - "traefik.enable=true"
