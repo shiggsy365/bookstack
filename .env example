@@ -22,6 +22,7 @@ EPHEMERA_PORT = 8286
 EPHEMERA_URL=http://ephemera:8286
 
 ##### - Bookstackweb Settings - #####
+BOOKSTACK_PORT = 5001
 BOOKSTACKWEB_HOSTNAME = bookstackweb.yourdomain.com
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587

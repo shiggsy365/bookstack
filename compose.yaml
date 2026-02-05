@@ -12,7 +12,7 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
     ports:
-      - "5000:5000"
+      - "${BOOKSTACK_PORT:-5001}:5000"
     depends_on:
       - shelfmark
       - booklore
