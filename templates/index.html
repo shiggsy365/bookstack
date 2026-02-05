@@ -978,8 +978,15 @@
                     var item = allItems[i];
                     var div = document.createElement('div');
                     div.className = 'queue-item';
+
+                    var statusHtml = 'Status: ' + item.status;
+                    if (item.status_message) {
+                        var color = item.status === 'error' ? 'red' : '#666';
+                        statusHtml += '<br><small style="color:' + color + ';">' + item.status_message + '</small>';
+                    }
+
                     div.innerHTML = '<b>' + (item.title || item.filename || 'Unknown') + '</b><br>' +
-                        '<small>Status: ' + item.status + '</small>';
+                        '<small>' + statusHtml + '</small>';
                     list.appendChild(div);
                 }
             });
