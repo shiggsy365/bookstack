@@ -6,31 +6,23 @@ PGID = 1001
 TZ = Europe/London
 
 ##### - Install, Library and Ingest Folders - #####
-BOOKSTACK_INSTALL = /opt/docker/apps/bookstack
-INGEST_FOLDER = /mnt/books/ingest
-BOOK_LIBRARY = /mnt/books/library
+BOOKSTACK_INSTALL = /apps/bookstack
+INGEST_FOLDER = /mnt/calibre/ingest
+BOOK_LIBRARY = /mnt/booksync
+BOOKSTACK_PORT = 5001
+BOOKSTACK_HOSTNAME = bookstack.example.com
 
 ##### - Booklore Settings - #####
 BOOKLORE_PORT = 6060
 BOOKLORE_URL=http://booklore:6060/api/v1/opds
-BOOKLORE_USER=#####
-BOOKLORE_PASS=#####
-BOOKLORE_HOSTNAME = booklore.yourdomain.com
+BOOKLORE_USER=##########
+BOOKLORE_PASS=##########
+BOOKLORE_HOSTNAME = booklore.example.com
 
 ##### - Ephemera Settings - #####
-EPHEMERA_PORT = 8286
-EPHEMERA_URL=http://ephemera:8286
-
-##### - Bookstackweb Settings - #####
-BOOKSTACK_PORT = 5001
-BOOKSTACKWEB_HOSTNAME = bookstackweb.yourdomain.com
-SMTP_SERVER=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=youremail@gmail.com
-SMTP_PASS=#####
-
-##### - Link to Anna's Archive - #####
-AA_URL = https://annas-archive.org/
+SHELFMARK_PORT = 8084
+SHELFMARK_HOSTNAME = shelfmark.example.com
+SHELFMARK_URL = http://shelfmark:8084
 
 ##### - MariaDB Settings (Leave Static) - #####
 DATABASE_URL=jdbc:mariadb://mariadb:3306/booklore
@@ -38,5 +30,11 @@ DB_USER=booklore
 MYSQL_DATABASE=booklore
 
 ##### - MariaDB Settings (Change These) - #####
-DB_PASSWORD=BookLoreApp_2025!
-MYSQL_ROOT_PASSWORD=MariaDBRoot_2025!
+DB_PASSWORD=##########
+MYSQL_ROOT_PASSWORD=##########
+
+##### - SMTP Settings for send to kindle - #####
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=##########
+SMTP_PASS=##########
