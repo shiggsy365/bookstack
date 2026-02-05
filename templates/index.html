@@ -883,14 +883,39 @@
                 var div = document.createElement('div');
                 div.className = 'book-card';
 
-                var title = release.title || 'Unknown';
+                var title = release.title || 'Unknown Title';
                 var source = release.source || 'Unknown Source';
-                var size = release.size ? (release.size / 1024 / 1024).toFixed(1) + ' MB' : '? MB';
-                var seeds = release.seeders !== undefined ? release.seeders + ' seeds' : '';
-                var format = release.format || 'Unknown';
+
+                // Fix Size: Use size_bytes if available, else look for size string
+                var sizeStr = '';
+                if (release.size_bytes) {
+                    sizeStr = (release.size_bytes / 1024 / 1024).toFixed(1) + ' MB';
+                } else if (release.size) {
+                    sizeStr = release.size;
+                }
+
+                // Fix Seeds: Check for null/undefined
+                var seedsStr = '';
+                if (release.seeders !== null && release.seeders !== undefined) {
+                    seedsStr = release.seeders + ' seeds';
+                }
+
+                // Fix Format & Language: Dont show 'Unknown' if missing
+                var format = release.format || '';
+                var lang = release.language || '';
+
+                // Construct metadata line with filtering
+                var metaParts = [];
+                if (source) metaParts.push(source);
+                if (lang) metaParts.push(lang);
+                if (format) metaParts.push(format);
+                if (sizeStr) metaParts.push(sizeStr);
+                if (seedsStr) metaParts.push(seedsStr);
+
+                var metaHtml = metaParts.join(' • ');
 
                 div.innerHTML = '<b>' + title + '</b><br>' +
-                    '<small>' + source + ' • ' + format + ' • ' + size + ' • ' + seeds + '</small><br>' +
+                    '<small>' + metaHtml + '</small><br>' +
                     '<button class="btn" style="margin-top:10px;" onclick=\'downloadRelease(' + JSON.stringify(release).replace(/'/g, "&#39;") + ')\'>Download</button>';
 
                 container.appendChild(div);
