@@ -27,6 +27,28 @@ services:
       - required
       - all
 
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${BOOKSTACK_INSTALL}/prowlarr/config:/config
+    ports:
+      - 9696:9696
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.prowlarr.rule=Host(`${PROWLARR_HOSTNAME}`)"
+      - "traefik.http.routers.prowlarr.tls=true"
+      - "traefik.http.services.prowlarr.loadbalancer.server.port=${PROWLARR_PORT}"
+      - "traefik.http.routers.prowlarr.tls.certresolver=letsencrypt"
+    profiles:
+      - required
+      - all
+
   booklore:
     image: booklore/booklore:latest
     container_name: booklore
@@ -82,14 +104,20 @@ services:
     image: ghcr.io/calibrain/shelfmark:latest
     container_name: shelfmark
     environment:
+      - FLASK_PORT=${SHELFMARK_PORT}
+ #     - USING_TOR=true
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
     ports:
       - "${SHELFMARK_PORT}:${SHELFMARK_PORT}"
     restart: unless-stopped
+ #   cap_add:
+ #     - NET_ADMIN
+ #     - NET_RAW
     volumes:
       - ${INGEST_FOLDER}:/books
+      - /mnt/downloads/complete:/downloads
       - ${BOOKSTACK_INSTALL}/shelfmark/config:/config
     labels:
       - "traefik.enable=true"
@@ -100,6 +128,5 @@ services:
     profiles:
       - required
       - all
-
 
 
