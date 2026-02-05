@@ -3,7 +3,7 @@ services:
     build: .
     container_name: bookstack
     environment:
-      - SHELFMARK_URL=http://shelfmark:8084
+      - SHELFMARK_URL=${SHELFMARK_URL}
       - BOOKLORE_URL=${BOOKLORE_URL}
       - BOOKLORE_USER=${BOOKLORE_USER}
       - BOOKLORE_PASS=${BOOKLORE_PASS}
@@ -12,14 +12,14 @@ services:
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
     ports:
-      - "${BOOKSTACK_PORT:-5001}:5000"
+      - "${BOOKSTACK_PORT}:5000"
     depends_on:
       - shelfmark
       - booklore
     restart: unless-stopped
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.bookstack.rule=Host(`${BOOKSTACKWEB_HOSTNAME}`)"
+      - "traefik.http.routers.bookstack.rule=Host(`${BOOKSTACK_HOSTNAME}`)"
       - "traefik.http.routers.bookstack.tls=true"
       - "traefik.http.services.bookstack.loadbalancer.server.port=5000"
       - "traefik.http.routers.bookstack.tls.certresolver=letsencrypt"
@@ -100,3 +100,6 @@ services:
     profiles:
       - required
       - all
+
+
+
