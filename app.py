@@ -16,7 +16,7 @@ app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
 # Server-side configuration
-EPHEMERA_URL = os.environ.get('EPHEMERA_URL', 'http://ephemera:8286')
+EPHEMERA_URL = os.environ.get('SHELFMARK_URL', os.environ.get('EPHEMERA_URL', 'http://shelfmark:8084'))
 BOOKLORE_URL = os.environ.get('BOOKLORE_URL', 'http://booklore:6060/api/v1/opds')
 BOOKLORE_USER = os.environ.get('BOOKLORE_USER', 'jon')
 BOOKLORE_PASS = os.environ.get('BOOKLORE_PASS', 'L1ver9001#')
@@ -237,60 +237,77 @@ def opds_browse():
 
 @app.route('/api/ephemera/search')
 def search_ephemera():
-    query = request.args.get('q', '')
+    query = request.args.get('q')
     if not query:
-        return jsonify([])
-    
+        return jsonify({'error': 'No query provided'}), 400
     try:
+        # Shelfmark API: GET /api/search?query=...
         ephemera_url = EPHEMERA_URL.rstrip('/')
-        resp = requests.get(f"{ephemera_url}/api/search", params={'q': query}, timeout=15)
+        resp = requests.get(f"{ephemera_url}/api/search", params={'query': query}, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
         
-        if isinstance(data, dict) and 'results' in data:
-            results = data.get('results', [])
-        elif isinstance(data, list):
-            results = data
-        else:
-            results = []
+        # Transform Shelfmark response to match Ephemera format
+        # Shelfmark: [{id, title, author, preview, ...}, ...]
+        # Bookstack expects: [{md5, title, authors, coverUrl, ...}, ...]
+        shelfmark_books = resp.json()
+        bookstack_books = []
         
-        # Filter for EPUB format
-        filtered = [book for book in results if book.get('format', '').upper() == 'EPUB']
-        return jsonify(filtered)
-        
-    except requests.exceptions.RequestException as e:
-        return jsonify({'error': f'Connection error: {str(e)}'}), 500
+        for book in shelfmark_books:
+            # Map fields
+            mapped_book = {
+                'md5': book.get('id'),
+                'title': book.get('title'),
+                'authors': [book.get('author')] if book.get('author') else [],
+                'coverUrl': book.get('preview'),
+                'size': book.get('size'),
+                'language': book.get('language'),
+                # Keep other fields if needed, or just what UI uses
+            }
+            bookstack_books.append(mapped_book)
+            
+        return jsonify(bookstack_books)
     except Exception as e:
-        return jsonify({'error': f'Error: {str(e)}'}), 500
+        print(f"Error searching Shelfmark: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ephemera/download', methods=['POST'])
 def request_download():
     data = request.json
-    md5, title = data.get('md5'), data.get('title')
+    md5 = data.get('md5')
+    title = data.get('title')
+    
     if not md5:
-        return jsonify({'error': 'Missing MD5'}), 400
+        return jsonify({'error': 'No MD5 provided'}), 400
+    
     try:
+        # Shelfmark API: GET /api/download?id=...
         ephemera_url = EPHEMERA_URL.rstrip('/')
-        resp = requests.post(f"{ephemera_url}/api/download/{md5}", json={'title': title}, timeout=15)
+        # Shelfmark uses GET for download queueing
+        resp = requests.get(f"{ephemera_url}/api/download", params={'id': md5}, timeout=15)
         resp.raise_for_status()
         return jsonify(resp.json())
-    except requests.exceptions.RequestException as e:
-        return jsonify({'error': f'Connection error: {str(e)}'}), 500
     except Exception as e:
-        return jsonify({'error': f'Error: {str(e)}'}), 500
+        print(f"Error downloading from Shelfmark: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ephemera/queue')
 def get_queue():
     try:
+        # Shelfmark API: GET /api/status - returns dict of categories
         ephemera_url = EPHEMERA_URL.rstrip('/')
-        resp = requests.get(f"{ephemera_url}/api/queue", timeout=10)
+        resp = requests.get(f"{ephemera_url}/api/status", timeout=10)
         resp.raise_for_status()
-        return jsonify(resp.json())
         
-    except requests.exceptions.RequestException as e:
-        return jsonify({'error': f'Connection error: {str(e)}'}), 500
+        status_data = resp.json()
+        
+        # Map 'complete' to 'done' for Bookstack UI compatibility
+        if 'complete' in status_data:
+            status_data['done'] = status_data.pop('complete')
+            
+        return jsonify(status_data)
     except Exception as e:
-        return jsonify({'error': f'Error: {str(e)}'}), 500
+        print(f"Error getting Shelfmark queue: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/opds/send-to-kindle', methods=['POST'])
 def send_to_kindle():
