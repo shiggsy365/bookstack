@@ -243,17 +243,19 @@ def search_ephemera():
     try:
         # Shelfmark API: GET /api/search?query=...
         ephemera_url = EPHEMERA_URL.rstrip('/')
+        print(f"[DEBUG] Searching Shelfmark: {ephemera_url}/api/search?query={query}", flush=True)
         resp = requests.get(f"{ephemera_url}/api/search", params={'query': query}, timeout=15)
+        
+        if resp.status_code != 200:
+            print(f"[DEBUG] Shelfmark search failed: {resp.status_code} - {resp.text}", flush=True)
         resp.raise_for_status()
         
         # Transform Shelfmark response to match Ephemera format
-        # Shelfmark: [{id, title, author, preview, ...}, ...]
-        # Bookstack expects: [{md5, title, authors, coverUrl, ...}, ...]
         shelfmark_books = resp.json()
+        print(f"[DEBUG] Shelfmark returned {len(shelfmark_books)} books", flush=True)
         bookstack_books = []
         
         for book in shelfmark_books:
-            # Map fields
             mapped_book = {
                 'md5': book.get('id'),
                 'title': book.get('title'),
@@ -261,13 +263,14 @@ def search_ephemera():
                 'coverUrl': book.get('preview'),
                 'size': book.get('size'),
                 'language': book.get('language'),
-                # Keep other fields if needed, or just what UI uses
             }
             bookstack_books.append(mapped_book)
             
         return jsonify(bookstack_books)
     except Exception as e:
-        print(f"Error searching Shelfmark: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] Error searching Shelfmark: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/ephemera/download', methods=['POST'])
@@ -293,9 +296,13 @@ def request_download():
 @app.route('/api/ephemera/queue')
 def get_queue():
     try:
-        # Shelfmark API: GET /api/status - returns dict of categories
+        # Shelfmark API: GET /api/status
         ephemera_url = EPHEMERA_URL.rstrip('/')
+        print(f"[DEBUG] Getting Shelfmark queue: {ephemera_url}/api/status", flush=True)
         resp = requests.get(f"{ephemera_url}/api/status", timeout=10)
+        
+        if resp.status_code != 200:
+            print(f"[DEBUG] Shelfmark status failed: {resp.status_code} - {resp.text}", flush=True)
         resp.raise_for_status()
         
         status_data = resp.json()
@@ -306,7 +313,9 @@ def get_queue():
             
         return jsonify(status_data)
     except Exception as e:
-        print(f"Error getting Shelfmark queue: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"[ERROR] Error getting Shelfmark queue: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/opds/send-to-kindle', methods=['POST'])
