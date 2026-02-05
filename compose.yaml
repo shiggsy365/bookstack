@@ -128,5 +128,3 @@ services:
     profiles:
       - required
       - all
-
-
