@@ -319,7 +319,8 @@ def request_download():
     data = request.json
     
     # Check if we got a full release object (Manual Selection)
-    if 'source' in data and 'id' in data:
+    # Shelfmark Release object uses 'source_id', not 'id'
+    if 'source' in data and ('source_id' in data or 'id' in data):
         print(f"[DEBUG] Manual download selection: {data.get('title')}", flush=True)
         try:
             ephemera_url = EPHEMERA_URL.rstrip('/')
