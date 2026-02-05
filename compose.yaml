@@ -29,7 +29,7 @@ services:
     profiles:
       - required
       - all
-      
+
   mariadb:
     image: lscr.io/linuxserver/mariadb:11.4.5
     container_name: mariadb
@@ -49,96 +49,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
-  ephemera:
-    image: ghcr.io/orwellianepilogue/ephemera:latest
-    container_name: ephemera
-    restart: unless-stopped
-    ports:
-      - "${EPHEMERA_PORT}:${EPHEMERA_PORT}"
+  
+  shelfmark:
+    image: ghcr.io/calibrain/shelfmark:latest
+    container_name: shelfmark
     environment:
-      AA_BASE_URL: ${AA_URL}
-      FLARESOLVERR_URL: http://flaresolverr:8191
-      LG_BASE_URL: #https://gen.com
-      AA_API_KEY:
-      PUID: ${PUID}
-      PGID: ${PGID}
-    volumes:
-      - ${BOOKSTACK_INSTALL}/ephemera/data:/app/data
-      - ${BOOKSTACK_INSTALL}/ephemera/downloads:/app/downloads
-      - ${INGEST_FOLDER}:/app/ingest
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://127.0.0.1:8286/health",
-        ]
-      interval: 30s
-      timeout: 10s
-      start_period: 40s
-      retries: 3
-    profiles:
-      - required
-      - all
-
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: flaresolverr
-    restart: unless-stopped
-    environment:
-      - LOG_LEVEL=info
-      - LOG_HTML=false
-      - CAPTCHA_SOLVER=none
+      - PUID=${PUID}
+      - PGID=${PGID}
       - TZ=${TZ}
-    dns:
-      - 1.1.1.1
-      - 1.0.0.1
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8191/health"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 3
-    profiles:
-      - required
-      - all
-
-  bookstackweb:
-    build:
-      context: ${BOOKSTACK_INSTALL}
-    container_name: bookstackweb
-    expose:
-      - "5000"
-    environment:
-      - SMTP_SERVER=${SMTP_SERVER}
-      - SMTP_PORT=${SMTP_PORT}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
-      - EPHEMERA_URL=${EPHEMERA_URL}
-      - BOOKLORE_URL=${BOOKLORE_URL}
-      - BOOKLORE_USER=${BOOKLORE_USER}
-      - BOOKLORE_PASS=${BOOKLORE_PASS}
-    depends_on:
-      - ephemera
+    ports:
+      - "${SHELFMARK_PORT}:${SHELFMARK_PORT}"
     restart: unless-stopped
+    volumes:
+      - ${INGEST_FOLDER}:/books
+      - ${BOOKSTACK_INSTALL}/shelfmark/config:/config
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.bookstackweb.rule=Host(`${BOOKSTACKWEB_HOSTNAME}`)"
-      - "traefik.http.routers.bookstackweb.entrypoints=websecure"
-      - "traefik.http.routers.bookstackweb.tls=true"
-      - "traefik.http.routers.bookstackweb.tls.certresolver=letsencrypt"
-      - "traefik.http.services.bookstackweb.loadbalancer.server.port=5000"
+      - "traefik.http.routers.shelfmark.rule=Host(`${SHELFMARK_HOSTNAME}`)"
+      - "traefik.http.routers.shelfmark.tls=true"
+      - "traefik.http.services.shelfmark.loadbalancer.server.port=${SHELFMARK_PORT}"
+      - "traefik.http.routers.shelfmark.tls.certresolver=letsencrypt"
     profiles:
       - required
       - all
-
-
-
-      
