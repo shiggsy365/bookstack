@@ -241,28 +241,35 @@ def search_ephemera():
     if not query:
         return jsonify({'error': 'No query provided'}), 400
     try:
-        # Shelfmark API: GET /api/search?query=...
+        # Shelfmark Universal Search: GET /api/metadata/search?query=...
         ephemera_url = EPHEMERA_URL.rstrip('/')
-        print(f"[DEBUG] Searching Shelfmark: {ephemera_url}/api/search?query={query}", flush=True)
-        resp = requests.get(f"{ephemera_url}/api/search", params={'query': query}, timeout=15)
+        print(f"[DEBUG] Searching Shelfmark Metadata: {ephemera_url}/api/metadata/search?query={query}", flush=True)
+        resp = requests.get(f"{ephemera_url}/api/metadata/search", params={'query': query}, timeout=30)
         
         if resp.status_code != 200:
-            print(f"[DEBUG] Shelfmark search failed: {resp.status_code} - {resp.text}", flush=True)
+            print(f"[DEBUG] Shelfmark metadata search failed: {resp.status_code} - {resp.text}", flush=True)
         resp.raise_for_status()
         
-        # Transform Shelfmark response to match Ephemera format
-        shelfmark_books = resp.json()
-        print(f"[DEBUG] Shelfmark returned {len(shelfmark_books)} books", flush=True)
-        bookstack_books = []
+        # Transform Shelfmark Metadata response to match Ephemera format for Bookstack
+        data = resp.json()
+        shelfmark_books = data.get('books', [])
+        print(f"[DEBUG] Shelfmark returned {len(shelfmark_books)} metadata results", flush=True)
         
+        bookstack_books = []
         for book in shelfmark_books:
+            # Create composite ID for release search later
+            provider = book.get('provider')
+            book_id = book.get('provider_id') or book.get('id')
+            composite_id = f"{provider}:{book_id}"
+            
             mapped_book = {
-                'md5': book.get('id'),
+                'md5': composite_id,  # Use composite ID as the unique identifier
                 'title': book.get('title'),
-                'authors': [book.get('author')] if book.get('author') else [],
-                'coverUrl': book.get('preview'),
-                'size': book.get('size'),
+                'authors': book.get('authors', []) or ([book.get('author')] if book.get('author') else []),
+                'coverUrl': book.get('cover_url') or book.get('preview'),
+                'size': 'Universal',  # Metadata doesn't have file size
                 'language': book.get('language'),
+                'format': 'Universal' # Metadata doesn't have file format
             }
             bookstack_books.append(mapped_book)
             
@@ -273,26 +280,80 @@ def search_ephemera():
         print(f"[ERROR] Error searching Shelfmark: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/ephemera/download', methods=['POST'])
-def request_download():
-    data = request.json
-    md5 = data.get('md5')
-    title = data.get('title')
-    
+@app.route('/api/ephemera/releases')
+def get_releases():
+    md5 = request.args.get('md5')
     if not md5:
         return jsonify({'error': 'No MD5 provided'}), 400
+
+    if ':' not in md5:
+         return jsonify({'error': 'Invalid MD5 format for release search'}), 400
+         
+    provider, book_id = md5.split(':', 1)
     
     try:
-        # Shelfmark API: GET /api/download?id=...
         ephemera_url = EPHEMERA_URL.rstrip('/')
-        # Shelfmark uses GET for download queueing
+        print(f"[DEBUG] Fetching releases for {provider}:{book_id}", flush=True)
+            
+        # Get releases from Shelfmark
+        releases_resp = requests.get(
+            f"{ephemera_url}/api/releases", 
+            params={'provider': provider, 'book_id': book_id},
+            timeout=45
+        )
+        releases_resp.raise_for_status()
+        releases_data = releases_resp.json()
+        releases = releases_data.get('releases', [])
+        
+        # Sort by seeders/size for better UX
+        releases.sort(key=lambda x: (x.get('seeders') or 0, x.get('size') or 0), reverse=True)
+        
+        return jsonify(releases)
+    except Exception as e:
+        print(f"[ERROR] Error getting releases: {e}", flush=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ephemera/download', methods=['POST'])
+def request_download():
+    # Now accepts a full release object OR a simple md5 for backward compat
+    data = request.json
+    
+    # Check if we got a full release object (Manual Selection)
+    if 'source' in data and 'id' in data:
+        print(f"[DEBUG] Manual download selection: {data.get('title')}", flush=True)
+        try:
+            ephemera_url = EPHEMERA_URL.rstrip('/')
+            queue_resp = requests.post(
+                f"{ephemera_url}/api/releases/download",
+                json=data,
+                timeout=15
+            )
+            queue_resp.raise_for_status()
+            return jsonify(queue_resp.json())
+        except Exception as e:
+            print(f"[ERROR] Manual download failed: {e}")
+            return jsonify({'error': str(e)}), 500
+            
+    # Legacy/Auto behavior
+    md5 = data.get('md5')
+    if not md5:
+        return jsonify({'error': 'No data provided'}), 400
+        
+    # Check if this is a composite ID but user clicked "old" button style (shouldn't happen with new UI)
+    # But let's keep the auto-select logic just in case or for CLI usage
+    if ':' in md5:
+        return jsonify({'error': 'Please use release selection for this item'}), 400
+        
+    try:
+        # Fully legacy path (direct ID)
+        ephemera_url = EPHEMERA_URL.rstrip('/')
         resp = requests.get(f"{ephemera_url}/api/download", params={'id': md5}, timeout=15)
         resp.raise_for_status()
         return jsonify(resp.json())
+            
     except Exception as e:
         print(f"Error downloading from Shelfmark: {e}")
         return jsonify({'error': str(e)}), 500
-
 @app.route('/api/ephemera/queue')
 def get_queue():
     try:

@@ -1,39 +1,188 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BookStack Web</title>
     <style>
-        body { font-family: sans-serif; background: #f0f0f0; margin: 0; padding: 0; font-size: 24px; }
-        .header { background: #fff; border-bottom: 2px solid #000; padding: 15px; text-align: center; font-size: 36px; font-weight: bold; }
-        .nav { background: #fff; border-bottom: 1px solid #000; }
-        .nav a { display: inline-block; padding: 15px; text-decoration: none; color: #666; font-weight: bold; width: 24%; text-align: center; box-sizing: border-box; font-size: 24px; }
-        .nav a.active { color: #000; border-bottom: 3px solid #000; }
-        .container { padding: 15px; }
-        .card { background: #fff; border: 1px solid #000; padding: 15px; margin-bottom: 20px; }
-        input { width: 100%; padding: 12px; border: 1px solid #ccc; margin-bottom: 10px; box-sizing: border-box; font-size: 24px; }
-        label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 21px; text-transform: uppercase; }
-        .book-card { background: #fff; border: 1px solid #000; padding: 15px; margin-bottom: 10px; font-size: 24px; }
-        .btn { background: #000; color: #fff; border: none; padding: 12px 20px; cursor: pointer; font-size: 24px; width: 100%; font-weight: bold; }
-        .queue-item { background: #fff; border: 1px solid #000; padding: 10px; margin-bottom: 5px; font-size: 24px; }
-        .hidden { display: none; }
-        #message-toast { position: fixed; bottom: 20px; left: 50%; margin-left: -100px; background: #333; color: #fff; padding: 10px 20px; width: 200px; text-align: center; font-size: 24px; }
-        .opds-item { background: #fff; border: 1px solid #000; padding: 15px; margin-bottom: 10px; cursor: pointer; font-size: 24px; }
-        .opds-item:hover { background: #f5f5f5; }
-        .book-row { display: table; width: 100%; }
-        .book-cover { display: table-cell; width: 140px; vertical-align: top; padding-right: 15px; }
-        .book-cover img { width: 140px; height: 210px; border: 1px solid #ccc; object-fit: cover; display: block; margin-bottom: 10px; }
-        .book-info { display: table-cell; vertical-align: top; }
-        .book-description { margin-top: 8px; color: #555; font-size: 21px; line-height: 1.4; }
-        p { font-size: 24px; line-height: 1.4; }
-        .section-header { font-size: 30px; font-weight: bold; padding: 15px 0; }
-        small { font-size: 21px; }
+        body {
+            font-family: sans-serif;
+            background: #f0f0f0;
+            margin: 0;
+            padding: 0;
+            font-size: 24px;
+        }
+
+        .header {
+            background: #fff;
+            border-bottom: 2px solid #000;
+            padding: 15px;
+            text-align: center;
+            font-size: 36px;
+            font-weight: bold;
+        }
+
+        .nav {
+            background: #fff;
+            border-bottom: 1px solid #000;
+        }
+
+        .nav a {
+            display: inline-block;
+            padding: 15px;
+            text-decoration: none;
+            color: #666;
+            font-weight: bold;
+            width: 24%;
+            text-align: center;
+            box-sizing: border-box;
+            font-size: 24px;
+        }
+
+        .nav a.active {
+            color: #000;
+            border-bottom: 3px solid #000;
+        }
+
+        .container {
+            padding: 15px;
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid #000;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            font-size: 24px;
+        }
+
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 21px;
+            text-transform: uppercase;
+        }
+
+        .book-card {
+            background: #fff;
+            border: 1px solid #000;
+            padding: 15px;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .btn {
+            background: #000;
+            color: #fff;
+            border: none;
+            padding: 12px 20px;
+            cursor: pointer;
+            font-size: 24px;
+            width: 100%;
+            font-weight: bold;
+        }
+
+        .queue-item {
+            background: #fff;
+            border: 1px solid #000;
+            padding: 10px;
+            margin-bottom: 5px;
+            font-size: 24px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #message-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            margin-left: -100px;
+            background: #333;
+            color: #fff;
+            padding: 10px 20px;
+            width: 200px;
+            text-align: center;
+            font-size: 24px;
+        }
+
+        .opds-item {
+            background: #fff;
+            border: 1px solid #000;
+            padding: 15px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            font-size: 24px;
+        }
+
+        .opds-item:hover {
+            background: #f5f5f5;
+        }
+
+        .book-row {
+            display: table;
+            width: 100%;
+        }
+
+        .book-cover {
+            display: table-cell;
+            width: 140px;
+            vertical-align: top;
+            padding-right: 15px;
+        }
+
+        .book-cover img {
+            width: 140px;
+            height: 210px;
+            border: 1px solid #ccc;
+            object-fit: cover;
+            display: block;
+            margin-bottom: 10px;
+        }
+
+        .book-info {
+            display: table-cell;
+            vertical-align: top;
+        }
+
+        .book-description {
+            margin-top: 8px;
+            color: #555;
+            font-size: 21px;
+            line-height: 1.4;
+        }
+
+        p {
+            font-size: 24px;
+            line-height: 1.4;
+        }
+
+        .section-header {
+            font-size: 30px;
+            font-weight: bold;
+            padding: 15px 0;
+        }
+
+        small {
+            font-size: 21px;
+        }
     </style>
 </head>
+
 <body>
     <div class="header"><b>Cloud Library</b></div>
-    
+
     <div class="nav">
         <a href="#" id="tab-cloud-btn" class="active" onclick="switchTab('cloud'); return false;">Library</a>
         <a href="#" id="tab-search-btn" onclick="switchTab('search'); return false;">Request</a>
@@ -57,10 +206,12 @@
                 <div id="search-results"></div>
             </div>
             <div id="bsio-search-container" class="hidden"></div>
+            <div id="releases-container" class="hidden"></div>
         </div>
 
         <div id="view-queue" class="hidden">
-            <p style="margin:0 0 15px 0; color:#666;">Requested books will appear in the cloud library when marked as complete below</p>
+            <p style="margin:0 0 15px 0; color:#666;">Requested books will appear in the cloud library when marked as
+                complete below</p>
             <div id="queue-list"></div>
         </div>
 
@@ -84,15 +235,15 @@
             var toast = document.getElementById('message-toast');
             toast.innerText = msg;
             toast.className = '';
-            setTimeout(function() { toast.className = 'hidden'; }, 3000);
+            setTimeout(function () { toast.className = 'hidden'; }, 3000);
         }
 
         function ajax(method, path, data, callback) {
             var xhr = new XMLHttpRequest();
             xhr.open(method, path, true);
             xhr.setRequestHeader('Content-Type', 'application/json');
-            
-            xhr.onreadystatechange = function() {
+
+            xhr.onreadystatechange = function () {
                 if (xhr.readyState === 4) {
                     if (xhr.status >= 200 && xhr.status < 300) {
                         try {
@@ -110,12 +261,12 @@
                     }
                 }
             };
-            
+
             xhr.send(data ? JSON.stringify(data) : null);
         }
 
         function loadSettings() {
-            ajax('GET', '/api/settings', null, function(err, data) {
+            ajax('GET', '/api/settings', null, function (err, data) {
                 if (data) {
                     document.getElementById('kindle-email').value = data.kindle_email || '';
                 }
@@ -126,8 +277,8 @@
             var data = {
                 kindle_email: document.getElementById('kindle-email').value
             };
-            
-            ajax('POST', '/api/settings', data, function(err, res) {
+
+            ajax('POST', '/api/settings', data, function (err, res) {
                 if (!err) showToast('Saved');
             });
         }
@@ -162,8 +313,8 @@
             menu.appendChild(intro);
 
             var options = [
-                {title: 'Direct Search', desc: 'Search Ephemera for books', action: showEphemeraSearch},
-                {title: 'Book Series in Order', desc: 'Search for book series by author', action: showBSIOSearchInRequest}
+                { title: 'Direct Search', desc: 'Search Ephemera for books', action: showEphemeraSearch },
+                { title: 'Book Series in Order', desc: 'Search for book series by author', action: showBSIOSearchInRequest }
             ];
 
             for (var i = 0; i < options.length; i++) {
@@ -193,7 +344,7 @@
             var back = document.createElement('div');
             back.className = 'opds-item';
             back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function() {
+            back.onclick = function () {
                 renderSearchMenu();
             };
             container.appendChild(back);
@@ -243,16 +394,16 @@
             content.appendChild(intro);
 
             var menu = [
-                {title: 'Recent Books', path: 'recent', isRecent: true},
-                {title: 'Authors', path: '/authors'}
+                { title: 'Recent Books', path: 'recent', isRecent: true },
+                { title: 'Authors', path: '/authors' }
             ];
 
             for (var i = 0; i < menu.length; i++) {
                 var div = document.createElement('div');
                 div.className = 'opds-item';
                 div.innerHTML = '<b>' + menu[i].title + '</b>';
-                div.onclick = (function(item) {
-                    return function() {
+                div.onclick = (function (item) {
+                    return function () {
                         if (item.isRecent) {
                             browseRecentBooks();
                         } else {
@@ -267,13 +418,13 @@
         function browseRecentBooks() {
             var content = document.getElementById('opds-content');
             content.innerHTML = '<center>Loading...</center>';
-            
-            ajax('GET', '/api/opds/browse?url=' + encodeURIComponent('/recent?page=1&size=100'), null, function(err, data) {
+
+            ajax('GET', '/api/opds/browse?url=' + encodeURIComponent('/recent?page=1&size=100'), null, function (err, data) {
                 if (err || !data) {
                     content.innerHTML = '<center>Error loading</center>';
                     return;
                 }
-                
+
                 opdsData = data.entries || [];
                 renderRecentBooksList();
             });
@@ -282,20 +433,20 @@
         function renderRecentBooksList() {
             var content = document.getElementById('opds-content');
             content.innerHTML = '';
-            
+
             var back = document.createElement('div');
             back.className = 'opds-item';
             back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function() {
+            back.onclick = function () {
                 renderOPDSMenu();
             };
             content.appendChild(back);
-            
+
             var header = document.createElement('div');
             header.className = 'section-header';
             header.innerText = 'Recent Books';
             content.appendChild(header);
-            
+
             // Filter to only books with acquisition links
             var books = [];
             for (var i = 0; i < opdsData.length; i++) {
@@ -310,12 +461,12 @@
                     books.push(opdsData[i]);
                 }
             }
-            
+
             if (books.length === 0) {
                 content.innerHTML += '<center>No recent books found</center>';
                 return;
             }
-            
+
             // Books are already sorted by recent date from OPDS feed
             for (var i = 0; i < books.length; i++) {
                 renderBookItem(books[i]);
@@ -325,16 +476,16 @@
         function browseOPDS(path) {
             var content = document.getElementById('opds-content');
             content.innerHTML = '<center>Loading...</center>';
-            
+
             var url = path.indexOf('http') === 0 ? path : '';
             var urlParam = url ? '?url=' + encodeURIComponent(url) : '?url=' + encodeURIComponent(path);
-            
-            ajax('GET', '/api/opds/browse' + urlParam, null, function(err, data) {
+
+            ajax('GET', '/api/opds/browse' + urlParam, null, function (err, data) {
                 if (err || !data) {
                     content.innerHTML = '<center>Error loading</center>';
                     return;
                 }
-                
+
                 opdsData = data.entries || [];
                 renderOPDSList(path);
             });
@@ -343,11 +494,11 @@
         function renderOPDSList(currentPath) {
             var content = document.getElementById('opds-content');
             content.innerHTML = '';
-            
+
             var back = document.createElement('div');
             back.className = 'opds-item';
             back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function() {
+            back.onclick = function () {
                 if (opdsHistory.length === 0) {
                     renderOPDSMenu();
                 } else {
@@ -356,7 +507,7 @@
                 }
             };
             content.appendChild(back);
-            
+
             // Check if this is an author page (has books with acquisition links)
             var hasBooks = false;
             for (var i = 0; i < opdsData.length; i++) {
@@ -368,18 +519,18 @@
                 }
                 if (hasBooks) break;
             }
-            
+
             if (hasBooks) {
                 renderAuthorDrilldown();
                 return;
             }
-            
+
             // Regular navigation list
             for (var i = 0; i < opdsData.length; i++) {
                 var entry = opdsData[i];
                 var navLink = null;
                 var acqLink = null;
-                
+
                 for (var j = 0; j < entry.links.length; j++) {
                     var link = entry.links[j];
                     if (link.rel && link.rel.indexOf('subsection') !== -1) {
@@ -389,14 +540,14 @@
                         acqLink = link;
                     }
                 }
-                
+
                 var div = document.createElement('div');
                 div.className = 'opds-item';
-                
+
                 if (navLink) {
                     div.innerHTML = '<b>' + entry.title + '</b>';
-                    div.onclick = (function(path, href) {
-                        return function() {
+                    div.onclick = (function (path, href) {
+                        return function () {
                             opdsHistory.push(path);
                             browseOPDS(href);
                         };
@@ -406,24 +557,24 @@
                     if (entry.series_name) {
                         seriesInfo = '<br><small>' + entry.series_name + ' #' + (entry.series_index || '?') + '</small>';
                     }
-                    div.innerHTML = '<b>' + entry.title + '</b>' + 
-                        '<br><small>' + (entry.author || 'Unknown') + '</small>' + 
+                    div.innerHTML = '<b>' + entry.title + '</b>' +
+                        '<br><small>' + (entry.author || 'Unknown') + '</small>' +
                         seriesInfo +
                         '<br><button class="btn" style="margin-top:10px; padding:8px;" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to Kindle</button>';
                     div.onclick = null;
                 }
-                
+
                 content.appendChild(div);
             }
         }
 
         function renderAuthorDrilldown() {
             var content = document.getElementById('opds-content');
-            
+
             // Collect all unique series
             var seriesMap = {};
             var standaloneBooks = [];
-            
+
             for (var i = 0; i < opdsData.length; i++) {
                 var book = opdsData[i];
                 if (book.series_name) {
@@ -435,7 +586,7 @@
                     standaloneBooks.push(book);
                 }
             }
-            
+
             // Show series folders
             var seriesNames = [];
             for (var name in seriesMap) {
@@ -444,36 +595,36 @@
                 }
             }
             seriesNames.sort();
-            
+
             for (var i = 0; i < seriesNames.length; i++) {
                 var sName = seriesNames[i];
                 var div = document.createElement('div');
                 div.className = 'opds-item';
                 div.innerHTML = '<b>📚 Series: ' + sName + '</b> <small>(' + seriesMap[sName].length + ' books)</small>';
-                div.onclick = (function(name, books) {
-                    return function() {
+                div.onclick = (function (name, books) {
+                    return function () {
                         renderSeriesBooks(name, books);
                     };
                 })(sName, seriesMap[sName]);
                 content.appendChild(div);
             }
-            
+
             // Show standalone folder
             if (standaloneBooks.length > 0) {
                 var div = document.createElement('div');
                 div.className = 'opds-item';
                 div.innerHTML = '<b>📄 Standalone Books</b> <small>(' + standaloneBooks.length + ' books)</small>';
-                div.onclick = function() {
+                div.onclick = function () {
                     renderStandaloneBooks(standaloneBooks);
                 };
                 content.appendChild(div);
             }
-            
+
             // Show all books option
             var div = document.createElement('div');
             div.className = 'opds-item';
             div.innerHTML = '<b>📖 All Books</b> <small>(' + opdsData.length + ' books)</small>';
-            div.onclick = function() {
+            div.onclick = function () {
                 renderAllBooks(opdsData);
             };
             content.appendChild(div);
@@ -482,25 +633,25 @@
         function renderSeriesBooks(seriesName, books) {
             var content = document.getElementById('opds-content');
             content.innerHTML = '';
-            
+
             var back = document.createElement('div');
             back.className = 'opds-item';
             back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function() {
+            back.onclick = function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
             content.appendChild(back);
-            
+
             var header = document.createElement('div');
             header.className = 'section-header';
             header.innerText = seriesName;
             content.appendChild(header);
-            
+
             // Sort by series index
-            books.sort(function(a, b) {
+            books.sort(function (a, b) {
                 return (parseFloat(a.series_index) || 0) - (parseFloat(b.series_index) || 0);
             });
-            
+
             for (var i = 0; i < books.length; i++) {
                 renderBookItem(books[i]);
             }
@@ -509,20 +660,20 @@
         function renderStandaloneBooks(books) {
             var content = document.getElementById('opds-content');
             content.innerHTML = '';
-            
+
             var back = document.createElement('div');
             back.className = 'opds-item';
             back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function() {
+            back.onclick = function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
             content.appendChild(back);
-            
+
             var header = document.createElement('div');
             header.className = 'section-header';
             header.innerText = 'Standalone Books';
             content.appendChild(header);
-            
+
             for (var i = 0; i < books.length; i++) {
                 renderBookItem(books[i]);
             }
@@ -531,25 +682,25 @@
         function renderAllBooks(books) {
             var content = document.getElementById('opds-content');
             content.innerHTML = '';
-            
+
             var back = document.createElement('div');
             back.className = 'opds-item';
             back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function() {
+            back.onclick = function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
             content.appendChild(back);
-            
+
             var header = document.createElement('div');
             header.className = 'section-header';
             header.innerText = 'All Books';
             content.appendChild(header);
-            
+
             // Sort by title
-            books.sort(function(a, b) {
+            books.sort(function (a, b) {
                 return a.title.localeCompare(b.title);
             });
-            
+
             for (var i = 0; i < books.length; i++) {
                 renderBookItem(books[i]);
             }
@@ -559,7 +710,7 @@
             var content = document.getElementById('opds-content');
             var acqLink = null;
             var thumbnail = '';
-            
+
             for (var j = 0; j < book.links.length; j++) {
                 if (book.links[j].rel && book.links[j].rel.indexOf('acquisition') !== -1) {
                     acqLink = book.links[j];
@@ -568,23 +719,23 @@
                     thumbnail = book.links[j].href;
                 }
             }
-            
+
             if (!acqLink) return;
-            
+
             var div = document.createElement('div');
             div.className = 'opds-item';
             div.style.cursor = 'default';
-            
+
             var seriesInfo = '';
             if (book.series_name) {
                 seriesInfo = '<br><small style="color:#666;">' + book.series_name + ' #' + (book.series_index || '?') + '</small>';
             }
-            
+
             var description = '';
             if (book.description) {
                 description = '<div class="book-description">' + book.description + '</div>';
             }
-            
+
             var coverHtml = '<div class="book-cover">';
             if (thumbnail) {
                 coverHtml += '<img src="' + thumbnail + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
@@ -592,18 +743,18 @@
                 coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
             }
             coverHtml += '<button class="btn" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to Kindle</button></div>';
-            
+
             div.innerHTML = '<div class="book-row">' + coverHtml +
                 '<div class="book-info">' +
                 '<b>' + book.title + '</b>' + seriesInfo + description +
                 '</div></div>';
-            
+
             content.appendChild(div);
         }
 
         function sendToKindle(url) {
             showToast('Sending...');
-            ajax('POST', '/api/opds/send-to-kindle', {url: url}, function(err, res) {
+            ajax('POST', '/api/opds/send-to-kindle', { url: url }, function (err, res) {
                 if (err) {
                     showToast('Error: ' + err);
                 } else {
@@ -615,86 +766,168 @@
         function performSearch() {
             var query = document.getElementById('search-input').value;
             if (!query) return;
-            
+
             var results = document.getElementById('search-results');
             results.innerHTML = '<center>Searching...</center>';
-            
-            ajax('GET', '/api/ephemera/search?q=' + encodeURIComponent(query), null, function(err, data) {
+
+            ajax('GET', '/api/ephemera/search?q=' + encodeURIComponent(query), null, function (err, data) {
                 results.innerHTML = '';
-                
+
                 if (err || !data) {
                     results.innerHTML = '<center>Error</center>';
                     return;
                 }
-                
+
                 if (data.error) {
                     results.innerHTML = '<center>' + data.error + '</center>';
                     return;
                 }
-                
+
                 if (!data.length) {
                     results.innerHTML = '<center>No results</center>';
                     return;
                 }
-                
+
                 for (var i = 0; i < data.length; i++) {
                     var book = data[i];
                     var div = document.createElement('div');
                     div.className = 'book-card';
                     div.style.cursor = 'default';
-                    
+
                     var authors = book.authors ? book.authors.join(', ') : 'Unknown';
                     var sizeInMB = book.size ? (book.size / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown size';
-                    
+
                     var coverHtml = '<div class="book-cover">';
                     if (book.coverUrl) {
                         coverHtml += '<img src="' + book.coverUrl + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
                     } else {
                         coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
                     }
-                    coverHtml += '<button class="btn" onclick="addBook(\'' + book.md5 + '\')">Add to Queue</button>';
+                    coverHtml += '<button class="btn" onclick="showReleases(\'' + book.md5 + '\')">View Releases</button>';
                     coverHtml += '</div>';
-                    
+
                     div.innerHTML = '<div class="book-row">' + coverHtml +
                         '<div class="book-info">' +
                         '<b>' + book.title + '</b>' +
                         '<br><small style="color:#666;">' + authors + '</small>' +
                         '<br><small style="color:#666;">Language: ' + (book.language || 'Unknown') + ' • Size: ' + sizeInMB + '</small>' +
                         '</div></div>';
-                    
+
                     results.appendChild(div);
                 }
             });
         }
 
         function addBook(md5) {
-            ajax('POST', '/api/ephemera/download', {md5: md5, title: ''}, function(err, res) {
+            // Keep for backward compatibility or direct actions if needed
+            ajax('POST', '/api/ephemera/download', { md5: md5, title: '' }, function (err, res) {
                 if (!err) showToast('Queued');
+            });
+        }
+
+        function showReleases(md5) {
+            document.getElementById('ephemera-search').className = 'hidden';
+            var container = document.getElementById('releases-container');
+            container.className = '';
+            container.innerHTML = '<center>Loading releases...</center>';
+
+            ajax('GET', '/api/ephemera/releases?md5=' + encodeURIComponent(md5), null, function (err, data) {
+                if (err || !data) {
+                    container.innerHTML = '<center>Error loading releases: ' + (err || 'Unknown error') + '</center>';
+                    container.innerHTML += '<br><button class="btn" onclick="backToSearch()">Back</button>';
+                    return;
+                }
+
+                if (data.error) {
+                    container.innerHTML = '<center>' + data.error + '</center>';
+                    container.innerHTML += '<br><button class="btn" onclick="backToSearch()">Back</button>';
+                    return;
+                }
+
+                if (!data.length) {
+                    container.innerHTML = '<center>No releases found</center>';
+                    container.innerHTML += '<br><button class="btn" onclick="backToSearch()">Back</button>';
+                    return;
+                }
+
+                renderReleasesTable(container, data);
+            });
+        }
+
+        function backToSearch() {
+            document.getElementById('releases-container').className = 'hidden';
+            document.getElementById('ephemera-search').className = '';
+        }
+
+        function renderReleasesTable(container, releases) {
+            container.innerHTML = '';
+
+            var backBtn = document.createElement('button');
+            backBtn.className = 'btn';
+            backBtn.style.marginBottom = '15px';
+            backBtn.style.background = '#666';
+            backBtn.innerText = '← Back to Search';
+            backBtn.onclick = backToSearch;
+            container.appendChild(backBtn);
+
+            var header = document.createElement('div');
+            header.className = 'section-header';
+            header.innerText = 'Select a Release';
+            container.appendChild(header);
+
+            for (var i = 0; i < releases.length; i++) {
+                var release = releases[i];
+                var div = document.createElement('div');
+                div.className = 'book-card';
+
+                var title = release.title || 'Unknown';
+                var source = release.source || 'Unknown Source';
+                var size = release.size ? (release.size / 1024 / 1024).toFixed(1) + ' MB' : '? MB';
+                var seeds = release.seeders !== undefined ? release.seeders + ' seeds' : '';
+                var format = release.format || 'Unknown';
+
+                div.innerHTML = '<b>' + title + '</b><br>' +
+                    '<small>' + source + ' • ' + format + ' • ' + size + ' • ' + seeds + '</small><br>' +
+                    '<button class="btn" style="margin-top:10px;" onclick=\'downloadRelease(' + JSON.stringify(release).replace(/'/g, "&#39;") + ')\'>Download</button>';
+
+                container.appendChild(div);
+            }
+        }
+
+        function downloadRelease(release) {
+            showToast('Queueing...');
+            ajax('POST', '/api/ephemera/download', release, function (err, res) {
+                if (!err) {
+                    showToast('Queued!');
+                    backToSearch();
+                } else {
+                    showToast('Error: ' + err);
+                }
             });
         }
 
         function refreshQueue() {
             if (currentTab !== 'queue') return;
-            
+
             var list = document.getElementById('queue-list');
             list.innerHTML = '<center>Loading...</center>';
-            
-            ajax('GET', '/api/ephemera/queue', null, function(err, res) {
+
+            ajax('GET', '/api/ephemera/queue', null, function (err, res) {
                 list.innerHTML = '';
-                
+
                 if (err || !res) {
                     list.innerHTML = '<center>Error</center>';
                     return;
                 }
-                
+
                 if (res.error && typeof res.error === 'string') {
                     list.innerHTML = '<center>' + res.error + '</center>';
                     return;
                 }
-                
+
                 var allItems = [];
                 var categories = ['queued', 'downloading', 'done', 'error', 'delayed', 'cancelled', 'available'];
-                
+
                 for (var i = 0; i < categories.length; i++) {
                     var cat = categories[i];
                     if (res[cat]) {
@@ -707,7 +940,7 @@
                         }
                     }
                 }
-                
+
                 if (allItems.length === 0) {
                     list.innerHTML = '<center>Queue empty</center>';
                     return;
@@ -731,7 +964,7 @@
             var results = document.getElementById('bsio-results');
             results.innerHTML = '<center>Searching...</center>';
 
-            ajax('GET', '/api/bookseriesinorder/search?q=' + encodeURIComponent(query), null, function(err, data) {
+            ajax('GET', '/api/bookseriesinorder/search?q=' + encodeURIComponent(query), null, function (err, data) {
                 results.innerHTML = '';
 
                 if (err || !data) {
@@ -773,8 +1006,8 @@
                 }
 
                 div.innerHTML = html;
-                div.onclick = (function(url, name) {
-                    return function() {
+                div.onclick = (function (url, name) {
+                    return function () {
                         showBSIOAuthorBooksInRequest(url, name);
                     };
                 })(author.url, author.name);
@@ -787,7 +1020,7 @@
             var container = document.getElementById('bsio-search-container');
             container.innerHTML = '<center>Loading...</center>';
 
-            ajax('GET', '/api/bookseriesinorder/author?url=' + encodeURIComponent(authorUrl), null, function(err, data) {
+            ajax('GET', '/api/bookseriesinorder/author?url=' + encodeURIComponent(authorUrl), null, function (err, data) {
                 if (err || !data) {
                     container.innerHTML = '<center>Error loading author books</center>';
                     return;
@@ -803,7 +1036,7 @@
                 var back = document.createElement('div');
                 back.className = 'opds-item';
                 back.innerHTML = '<b>&larr; Back</b>';
-                back.onclick = function() {
+                back.onclick = function () {
                     showBSIOSearchInRequest();
                 };
                 container.appendChild(back);
@@ -832,7 +1065,7 @@
 
 
                 // Check library status
-                ajax('POST', '/api/opds/check-library', {titles: allTitles, author: data.author || authorName}, function(libErr, libData) {
+                ajax('POST', '/api/opds/check-library', { titles: allTitles, author: data.author || authorName }, function (libErr, libData) {
                     var libraryStatus = {};
                     if (!libErr && libData && libData.results) {
                         libraryStatus = libData.results;
@@ -860,7 +1093,7 @@
                             var bookHtml = '<b>' + book.title + '</b><br>';
 
                             // Check library status (it's now an object with in_library property)
-                            var libStatus = libraryStatus[book.title] || {in_library: false};
+                            var libStatus = libraryStatus[book.title] || { in_library: false };
                             var inLibrary = libStatus.in_library || false;
 
                             if (inLibrary) {
@@ -910,4 +1143,5 @@
         renderOPDSMenu();
     </script>
 </body>
+
 </html>
