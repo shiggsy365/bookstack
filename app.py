@@ -269,7 +269,8 @@ def search_ephemera():
                 'coverUrl': book.get('cover_url') or book.get('preview'),
                 'size': 'Universal',  # Metadata doesn't have file size
                 'language': book.get('language'),
-                'format': 'Universal' # Metadata doesn't have file format
+                'format': 'Universal', # Metadata doesn't have file format
+                'description': book.get('description')
             }
             bookstack_books.append(mapped_book)
             

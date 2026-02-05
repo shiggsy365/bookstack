@@ -806,11 +806,14 @@
                     coverHtml += '<button class="btn" onclick="showReleases(\'' + book.md5 + '\')">View Releases</button>';
                     coverHtml += '</div>';
 
+                    var description = book.description ? book.description : '';
+                    if (description.length > 200) description = description.substring(0, 200) + '...';
+
                     div.innerHTML = '<div class="book-row">' + coverHtml +
                         '<div class="book-info">' +
                         '<b>' + book.title + '</b>' +
                         '<br><small style="color:#666;">' + authors + '</small>' +
-                        '<br><small style="color:#666;">Language: ' + (book.language || 'Unknown') + ' • Size: ' + sizeInMB + '</small>' +
+                        '<br><div style="font-size:0.85em; margin-top:5px; color:#444;">' + description + '</div>' +
                         '</div></div>';
 
                     results.appendChild(div);
