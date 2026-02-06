@@ -954,7 +954,7 @@ def check_library():
             found_entry = None
             best_match_score = 0
 
-            for entry in entries:
+            for entry in entries['entries']:
                 # Normalize OPDS entry title the same way
                 entry_title = entry['title']
                 entry_normalized = re.sub(r'\([^)]*\)', '', entry_title)

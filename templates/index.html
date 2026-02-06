@@ -786,7 +786,7 @@
 
             // Format Title: [Author] | [Title] if author exists
             var displayTitle = book.title;
-            if (book.author) {
+            if (book.author && book.author !== 'undefined' && String(book.author).toLowerCase() !== 'undefined') {
                 displayTitle = book.author + " | " + book.title;
             }
 
@@ -1583,7 +1583,9 @@
 
             // Header
             var header = document.createElement('h2');
-            header.innerText = data.author + " - Published Order";
+            var authorDisplay = data.author || 'Author';
+            if (authorDisplay === 'undefined') authorDisplay = 'Author';
+            header.innerText = authorDisplay + " - Published Order";
             header.style.textAlign = 'center';
             header.style.margin = '10px 0';
             content.appendChild(header);
@@ -1638,8 +1640,8 @@
                     if (opdsHistory.length > 0) {
                         var last = opdsHistory.pop();
                         // Special handling: if last was 'javascript:void(0)' or similar
-                        if (last && last.indexOf('api') !== -1) browseOPDS(last);
-                        else renderOPDSList(last); // Fallback
+                        if (last && (last.indexOf('api') !== -1 || last.indexOf('http') !== -1)) browseOPDS(last);
+                        else renderOPDSList(last || ''); // Fallback
                     } else {
                         renderOPDSMenu();
                     }
