@@ -182,29 +182,29 @@
         small {
             font-size: 21px;
         }
-    </style>
-    .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0,0,0,0.5);
-    z-index: 1000;
-    display: none;
-    }
 
-    .modal-content {
-    background: #fff;
-    margin: 10% auto;
-    padding: 20px;
-    width: 80%;
-    max-width: 600px;
-    border: 2px solid #000;
-    max-height: 80vh;
-    overflow-y: auto;
-    font-size: 20px;
-    }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            display: none;
+        }
+
+        .modal-content {
+            background: #fff;
+            margin: 10% auto;
+            padding: 20px;
+            width: 80%;
+            max-width: 600px;
+            border: 2px solid #000;
+            max-height: 80vh;
+            overflow-y: auto;
+            font-size: 20px;
+        }
     </style>
 </head>
 
@@ -396,121 +396,7 @@
             setTimeout(function () { toast.className = 'hidden'; }, 3000);
         }
 
-        function renderPaginatedList(title, items, itemRenderer, backAction, targetElementId, pageSize) {
-            var content = document.getElementById(targetElementId || 'opds-content');
-            content.innerHTML = '';
 
-            // Update State
-            paginationState.items = items;
-            paginationState.title = title;
-            paginationState.itemRenderer = itemRenderer;
-            paginationState.backAction = backAction;
-            paginationState.pageSize = pageSize || calculatePageSize();
-            // Reset page if new list
-            paginationState.currentPage = 0;
-
-            renderCurrentPage(targetElementId);
-        }
-
-        function renderCurrentPage(targetElementId) {
-            var content = document.getElementById(targetElementId || 'opds-content');
-            content.innerHTML = '';
-
-            var totalPages = Math.ceil(paginationState.items.length / paginationState.pageSize);
-            var currentPage = paginationState.currentPage;
-
-            // --- Top Navigation Row (Back + Pagination) ---
-            var navRow = document.createElement('div');
-            navRow.className = 'nav-row';
-            navRow.style.display = 'flex';
-            navRow.style.justifyContent = 'space-between';
-            navRow.style.alignItems = 'center';
-            navRow.style.marginBottom = '15px';
-            navRow.style.paddingBottom = '10px';
-            navRow.style.borderBottom = '1px solid #ccc';
-
-            // Left: Back Button
-            var leftGroup = document.createElement('div');
-            if (paginationState.backAction) {
-                var backBtn = document.createElement('button');
-                backBtn.className = 'btn';
-                backBtn.innerHTML = '&larr; Back';
-                backBtn.style.width = 'auto';
-                backBtn.style.padding = '8px 15px';
-                backBtn.onclick = paginationState.backAction;
-                leftGroup.appendChild(backBtn);
-            }
-            navRow.appendChild(leftGroup);
-
-            // Center/Right: Title & Pagination Controls
-            var rightGroup = document.createElement('div');
-            rightGroup.style.display = 'flex';
-            rightGroup.style.alignItems = 'center';
-
-            if (totalPages > 1) {
-                var prevBtn = document.createElement('button');
-                prevBtn.className = 'btn';
-                prevBtn.innerText = '< Prev';
-                prevBtn.style.width = 'auto';
-                prevBtn.style.padding = '8px 10px';
-                prevBtn.style.marginRight = '10px';
-                prevBtn.disabled = currentPage === 0;
-                prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
-                prevBtn.onclick = function () {
-                    if (paginationState.currentPage > 0) {
-                        paginationState.currentPage--;
-                        renderCurrentPage(targetElementId);
-                        window.scrollTo(0, 0);
-                    }
-                };
-
-                var pageInfo = document.createElement('span');
-                pageInfo.innerText = (currentPage + 1) + ' / ' + totalPages;
-                pageInfo.style.margin = '0 10px';
-                pageInfo.style.fontWeight = 'bold';
-                pageInfo.style.fontSize = '18px';
-
-                var nextBtn = document.createElement('button');
-                nextBtn.className = 'btn';
-                nextBtn.innerText = 'Next >';
-                nextBtn.style.width = 'auto';
-                nextBtn.style.padding = '8px 10px';
-                nextBtn.style.marginLeft = '10px';
-                nextBtn.disabled = currentPage >= totalPages - 1;
-                nextBtn.style.opacity = nextBtn.disabled ? '0.5' : '1';
-                nextBtn.onclick = function () {
-                    if (paginationState.currentPage < totalPages - 1) {
-                        paginationState.currentPage++;
-                        renderCurrentPage(targetElementId);
-                        window.scrollTo(0, 0);
-                    }
-                };
-
-                rightGroup.appendChild(prevBtn);
-                rightGroup.appendChild(pageInfo);
-                rightGroup.appendChild(nextBtn);
-            }
-            navRow.appendChild(rightGroup);
-            content.appendChild(navRow);
-
-            // --- Items ---
-            if (paginationState.items.length === 0) {
-                content.innerHTML += '<center>No items found</center>';
-                return;
-            }
-
-            var start = currentPage * paginationState.pageSize;
-            var end = Math.min(start + paginationState.pageSize, paginationState.items.length);
-            var pageItems = paginationState.items.slice(start, end);
-
-            for (var i = 0; i < pageItems.length; i++) {
-                var itemDiv = paginationState.itemRenderer(pageItems[i]);
-                if (itemDiv) content.appendChild(itemDiv);
-            }
-
-            // Optional: Bottom Pagination (Simplified or same as top? User requested top)
-            // We can just leave it at the top for now as "Next to the back button" was spec.
-        }
 
         function ajax(method, path, data, callback) {
             var xhr = new XMLHttpRequest();
