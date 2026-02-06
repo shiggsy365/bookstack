@@ -749,6 +749,10 @@ def get_author_books():
             for pattern in patterns_to_remove:
                 author_name = re.sub(pattern, '', author_name, flags=re.IGNORECASE)
             author_name = author_name.strip()
+            
+            # Robust check for garbage names
+            if author_name.lower() in ['undefined', 'none', 'unknown', 'author']:
+                author_name = ''
 
 
         series_list = []

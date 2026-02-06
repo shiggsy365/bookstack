@@ -786,8 +786,16 @@
 
             // Format Title: [Author] | [Title] if author exists
             var displayTitle = book.title;
-            if (book.author && book.author !== 'undefined' && String(book.author).toLowerCase() !== 'undefined') {
-                displayTitle = book.author + " | " + book.title;
+            var cleanAuthor = "";
+            if (book.author) {
+                var s = String(book.author).trim();
+                if (s.toLowerCase() !== 'undefined' && s.toLowerCase() !== 'null' && s !== '') {
+                    cleanAuthor = s;
+                }
+            }
+
+            if (cleanAuthor) {
+                displayTitle = cleanAuthor + " | " + book.title;
             }
 
             var jsSafeTitle = displayTitle.replace(/'/g, "\\'");
@@ -795,10 +803,12 @@
             // Special Scraped View: Button instead of cover
             if (book._isScraped) {
                 var btnText = book._inLibrary ? "SEND TO KINDLE" : "REQUEST BOOK";
-                var btnStyle = "width:60px; height:90px; border:1px solid #000; background:#fff; font-size:12px; font-weight:bold; cursor:pointer; padding:2px; word-wrap:break-word; text-align:center; display:flex; align-items:center; justify-content:center; line-height:1.2;";
+                // Colors: Light Green (#90EE90) for Kindle, Medium Orange (#FFA500) for Request
+                var btnBg = book._inLibrary ? "#90EE90" : "#FFA500";
+                var btnStyle = "width:60px; height:90px; border:1px solid #000; background:" + btnBg + "; font-size:12px; font-weight:bold; cursor:pointer; padding:2px; word-wrap:break-word; text-align:center; display:flex; align-items:center; justify-content:center; line-height:1.2; color:#000;";
 
                 if (book._inLibrary) {
-                    var downloadUrl = book._libraryUrl || acqLink.href;
+                    var downloadUrl = book._libraryUrl || (acqLink ? acqLink.href : "");
                     var jsSafeLibraryUrl = downloadUrl.replace(/'/g, "\\'");
                     coverHtml += '<button style="' + btnStyle + '" onclick="showConfirmModal(\'' + jsSafeLibraryUrl + '\', \'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
                 } else {
@@ -1583,8 +1593,12 @@
 
             // Header
             var header = document.createElement('h2');
-            var authorDisplay = data.author || 'Author';
-            if (authorDisplay === 'undefined') authorDisplay = 'Author';
+            var authorDisplay = data.author || '';
+            if (!authorDisplay || authorDisplay.toLowerCase() === 'undefined') authorDisplay = 'Author';
+
+            // Sync cleaned author back to data for mappedBooks
+            data.author = (authorDisplay === 'Author') ? '' : authorDisplay;
+
             header.innerText = authorDisplay + " - Published Order";
             header.style.textAlign = 'center';
             header.style.margin = '10px 0';
