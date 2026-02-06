@@ -366,6 +366,27 @@
         var opdsData = [];
         var opdsType = 'navigation'; // 'navigation' or 'acquisition'
 
+        // Helper to clean strings from common garbage
+        function cleanString(s) {
+            if (s === null || s === undefined) return '';
+            var str = String(s).trim();
+            // Recursive removal of 'undefined' or 'null' prefixes
+            var changed = true;
+            while (changed) {
+                changed = false;
+                var lower = str.toLowerCase();
+                if (lower.indexOf('undefined') === 0) {
+                    str = str.substring(9).trim();
+                    changed = true;
+                } else if (lower.indexOf('null') === 0) {
+                    str = str.substring(4).trim();
+                    changed = true;
+                }
+            }
+            if (str.toLowerCase() === 'undefined' || str.toLowerCase() === 'null') return '';
+            return str;
+        }
+
         // Pagination State
         var paginationState = {
             items: [],
@@ -804,7 +825,7 @@
                 if (book._inLibrary) {
                     var downloadUrl = book._libraryUrl || (acqLink ? acqLink.href : "");
                     var jsSafeLibraryUrl = downloadUrl.replace(/'/g, "\\'");
-                    coverHtml += '<button style="' + btnStyle + '" onclick="sendToKindle(\'' + jsSafeLibraryUrl + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
+                    coverHtml += '<button style="' + btnStyle + '" onclick="showConfirmModal(\'' + jsSafeLibraryUrl + '\', \'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
                 } else {
                     coverHtml += '<button style="' + btnStyle + '" onclick="performSearch(\'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
                 }
@@ -1001,7 +1022,10 @@
 
                     for (var i = 0; i < bookItems.length; i++) {
                         var b = bookItems[i];
-                        if (!authorName && b.author) authorName = b.author;
+                        if (!authorName) {
+                            var ca = cleanString(b.author);
+                            if (ca) authorName = ca;
+                        }
 
                         // Strict Standalone: Only if series_name is truly missing/empty
                         if (b.series_name && b.series_name.trim().length > 0) {
@@ -1087,10 +1111,12 @@
                         btn.style.fontSize = '16px';
                         btn.style.fontWeight = 'bold';
 
+                        // Capture authorName from the closure, which is set at the top of this function
+                        var currentAuthorName = authorName;
+
                         btn.onclick = function () {
-                            var authorName = document.getElementById('ctx-center').innerText.trim();
-                            if (authorName) {
-                                var slug = authorName.toLowerCase().replace(/ /g, '-');
+                            if (currentAuthorName) {
+                                var slug = currentAuthorName.toLowerCase().replace(/ /g, '-');
                                 // Handle simple cases, might need better slugification for some authors
                                 var targetUrl = 'https://www.bookseriesinorder.com/' + slug + '/';
                                 var proxyUrl = '/api/bookseriesinorder/author?url=' + encodeURIComponent(targetUrl);
@@ -1194,16 +1220,19 @@
         }
 
         function performSearch(query) {
-            var q = query || document.getElementById('search-input').value;
+            var q = (query || document.getElementById('search-input').value || '').trim();
             if (!q) return;
+
+            // Clean q from " | " and other garbage
+            q = q.replace(/\|/g, ' ').replace(/\s+/g, ' ').trim();
 
             if (query) {
                 switchTab('search');
-                document.getElementById('search-input').value = query;
+                document.getElementById('search-input').value = q;
             }
 
             var results = document.getElementById('search-results');
-            var searchCard = document.getElementById('search-input-card');
+            var searchCard = document.getElementById('search-input-container'); // Corrected ID
 
             results.innerHTML = '<center>Searching...</center>';
 
@@ -1577,16 +1606,6 @@
             );
         }
 
-        // Helper to clean strings from common garbage
-        function cleanString(s) {
-            if (s === null || s === undefined) return '';
-            var str = String(s).trim();
-            // Remove 'undefined' or 'null' if it appears at the very start (concatenation bug)
-            if (str.toLowerCase().indexOf('undefined') === 0) str = str.substring(9).trim();
-            if (str.toLowerCase().indexOf('null') === 0) str = str.substring(4).trim();
-            if (str.toLowerCase() === 'undefined' || str.toLowerCase() === 'null') return '';
-            return str;
-        }
 
         // --- Scraped Data Renderer (Custom View) ---
         function renderScrapedSeriesView(data) {
