@@ -161,8 +161,10 @@
         .book-info {
             display: table-cell;
             vertical-align: top;
+            height: 100%;
+            /* Force height */
             overflow: hidden;
-            /* Truncate if too long */
+            /* Truncate */
         }
 
         .book-table {
@@ -196,9 +198,22 @@
             font-weight: bold;
             font-size: 22px;
             line-height: 1.1;
-            margin-bottom: 2px;
+            margin: 0 0 2px 0;
+            /* Tight spacing */
             height: 48px;
+            /* Fixed height for title (2 lines approx) */
             overflow: hidden;
+        }
+
+        .book-description {
+            margin: 0;
+            padding: 0;
+            font-size: 20px;
+            line-height: 1.2;
+            color: #333;
+            overflow: hidden;
+            height: 80px;
+            /* Force fit remaining space (140 - 48 - margins) */
         }
 
         .book-meta {
@@ -725,11 +740,12 @@
             var descriptionHtml = '';
             if (descText) {
                 // We add an onclick to the description container
-                descriptionHtml = '<div class="book-description" onclick="showModal(\'' + escapeHtml(descText) + '\'); event.stopPropagation();" style="cursor:pointer; height:100%;">' + descText + '</div>';
+                // Using return false to stop propagation reliably
+                descriptionHtml = '<div class="book-description" onclick="showModal(\'' + escapeHtml(descText) + '\'); event.stopPropagation(); return false;" style="cursor:pointer;">' + descText + '</div>';
             }
 
             // Title Action: Confirm Send
-            var titleAction = "confirmSendToKindle('" + acqLink.href.replace(/'/g, "\\'") + "', '" + (book.title.replace(/'/g, "\\'")) + "'); event.stopPropagation();";
+            var titleAction = "confirmSendToKindle('" + acqLink.href.replace(/'/g, "\\'") + "', '" + (book.title.replace(/'/g, "\\'")) + "'); event.stopPropagation(); return false;";
 
             div.innerHTML = coverHtml +
                 '<div class="book-info">' +
@@ -743,15 +759,27 @@
         }
 
         function confirmSendToKindle(url, title) {
-            if (confirm("Send '" + title + "' to your Kindle?")) {
-                sendToKindle(url);
+            try {
+                // Verify window.confirm exists
+                if (window.confirm("Send '" + title + "' to your Kindle?")) {
+                    sendToKindle(url);
+                }
+            } catch (e) {
+                alert("Error in confirm: " + e.message);
             }
         }
 
         // Modal Helpers
         function showModal(content) {
-            document.getElementById('modal-text').innerHTML = content;
-            document.getElementById('desc-modal').style.display = 'block';
+            try {
+                var modalText = document.getElementById('modal-text');
+                if (!modalText) { alert('Modal element missing'); return; }
+
+                modalText.innerHTML = content;
+                document.getElementById('desc-modal').style.display = 'block';
+            } catch (e) {
+                alert("Error opening modal: " + e.message);
+            }
         }
 
         function closeModal() {
