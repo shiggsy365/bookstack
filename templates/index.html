@@ -372,7 +372,8 @@
             pageSize: 10, // Default, will be calculated
             title: '',
             backAction: null,
-            itemRenderer: null
+            itemRenderer: null,
+            footerRenderer: null
         };
         var searchStateBackup = null; // Backup for search results state
 
@@ -450,12 +451,13 @@
             }
         }
 
-        function renderPaginatedList(title, items, itemRenderer, backAction, targetElementId, pageSizeOverride) {
+        function renderPaginatedList(title, items, itemRenderer, backAction, targetElementId, pageSizeOverride, footerRenderer) {
             // Update State
             paginationState.items = items;
             paginationState.title = title;
             paginationState.itemRenderer = itemRenderer;
             paginationState.backAction = backAction;
+            paginationState.footerRenderer = footerRenderer;
             // Dynamic calc unless override
             paginationState.pageSize = pageSizeOverride || calculatePageSize();
             paginationState.currentPage = 0;
@@ -485,6 +487,11 @@
             for (var i = 0; i < pageItems.length; i++) {
                 var itemDiv = paginationState.itemRenderer(pageItems[i]);
                 if (itemDiv) content.appendChild(itemDiv);
+            }
+
+            // Optional Footer (e.g. scraper button)
+            if (paginationState.footerRenderer) {
+                paginationState.footerRenderer(content);
             }
         }
 
@@ -748,7 +755,7 @@
         function renderRecentBooksList() {
             var content = document.getElementById('opds-content');
             // Render with dynamic pagination
-            renderPaginatedList('Recent Books', opdsData, createBookItemDiv, function () { renderOPDSMenu(); });
+            renderPaginatedList('Recent Books', opdsData, createBookItemDiv, function () { renderOPDSMenu(); }, null, 4);
         }
 
         // Helper to create book item div (moved from renderBookItem to return element)
@@ -941,6 +948,7 @@
                 }
 
                 // Logic separation based on content
+                var isDrilldown = (currentPath.indexOf('/authors/') !== -1 && currentPath.split('/').length > 3);
                 var isAuthorView = seriesItems.length > 0;
 
                 if (isAuthorView) {
@@ -955,9 +963,9 @@
                     var finalList = [];
 
                     if (bookItems.length > 0) {
-                        // Create Synthetic "Standalone titles" Item
+                        // Create Synthetic "Standalone Books" Item
                         var standaloneItem = {
-                            title: "[Standalone titles]",
+                            title: "[Standalone Books]",
                             isSynthetic: true,
                             books: bookItems
                         };
@@ -998,56 +1006,57 @@
                             }
                         }
                         return div;
-                    }, backAction, null, 10); // Reduced to 10 items per user request
+                    }, backAction, null, isDrilldown ? 10 : 15, isDrilldown ? function (container) {
+                        // Append "View this author's published books" button ONLY if specific author view
+                        // Logic: If path contains /authors/ and has > 3 segments (e.g. /authors/S/Stephen%20King)
+                        var btnDiv = document.createElement('div');
+                        btnDiv.style.textAlign = 'center';
+                        btnDiv.style.marginTop = '10px';
+                        btnDiv.style.padding = '10px';
 
-                    // Append "View this author's published books" button
-                    var btnDiv = document.createElement('div');
-                    btnDiv.style.textAlign = 'center';
-                    btnDiv.style.marginTop = '10px';
-                    btnDiv.style.padding = '10px';
+                        var btn = document.createElement('button');
+                        btn.innerHTML = 'View this author\'s published books';
+                        btn.className = 'nav-link';
+                        btn.style.border = '1px solid #000';
+                        btn.style.background = '#fff';
+                        btn.style.color = '#000';
+                        btn.style.padding = '8px 16px';
+                        btn.style.cursor = 'pointer';
+                        btn.style.fontSize = '16px';
+                        btn.style.fontWeight = 'bold';
 
-                    var btn = document.createElement('button');
-                    btn.innerHTML = 'View this author\'s published books';
-                    btn.className = 'nav-link';
-                    btn.style.border = '1px solid #000';
-                    btn.style.background = '#fff';
-                    btn.style.color = '#000';
-                    btn.style.padding = '8px 16px';
-                    btn.style.cursor = 'pointer';
-                    btn.style.fontSize = '16px';
-                    btn.style.fontWeight = 'bold';
+                        btn.onclick = function () {
+                            var authorName = document.getElementById('ctx-center').innerText.trim();
+                            if (authorName) {
+                                var slug = authorName.toLowerCase().replace(/ /g, '-');
+                                // Handle simple cases, might need better slugification for some authors
+                                var targetUrl = 'https://www.bookseriesinorder.com/' + slug + '/';
+                                var proxyUrl = '/api/bookseriesinorder/author?url=' + encodeURIComponent(targetUrl);
 
-                    btn.onclick = function () {
-                        var authorName = document.getElementById('ctx-center').innerText.trim();
-                        if (authorName) {
-                            var slug = authorName.toLowerCase().replace(/ /g, '-');
-                            // Handle simple cases, might need better slugification for some authors
-                            var targetUrl = 'https://www.bookseriesinorder.com/' + slug + '/';
-                            var proxyUrl = '/api/bookseriesinorder/author?url=' + encodeURIComponent(targetUrl);
+                                // Show loading
+                                var contentArea = document.getElementById('opds-content');
+                                contentArea.innerHTML = '<div style="text-align:center; padding:20px;">Loading published books...</div>';
 
-                            // Show loading
-                            content.innerHTML = '<div style="text-align:center; padding:20px;">Loading published books...</div>';
+                                ajax('GET', proxyUrl, null, function (err, data) {
+                                    if (err || !data || data.error) {
+                                        alert("Error loading data: " + (err || data.error));
+                                        renderOPDSList(currentPath); // Revert
+                                        return;
+                                    }
 
-                            ajax(proxyUrl, function (err, data) {
-                                if (err || !data || data.error) {
-                                    alert("Error loading data: " + (err || data.error));
-                                    renderOPDSList(currentPath); // Revert
-                                    return;
-                                }
+                                    // Render Scraped Data
+                                    renderScrapedSeriesView(data);
+                                });
 
-                                // Render Scraped Data
-                                renderScrapedSeriesView(data);
-                            });
+                                opdsHistory.push(currentPath); // Save history state
+                            } else {
+                                alert("Could not determine author name.");
+                            }
+                        };
 
-
-                            opdsHistory.push(currentPath); // Save history state
-                        } else {
-                            alert("Could not determine author name.");
-                        }
-                    };
-
-                    btnDiv.appendChild(btn);
-                    content.appendChild(btnDiv);
+                        btnDiv.appendChild(btn);
+                        container.appendChild(btnDiv);
+                    } : null);
 
                     return; // Done for Author View
 
@@ -1075,8 +1084,12 @@
                 return (parseFloat(a.series_index) || 0) - (parseFloat(b.series_index) || 0);
             });
 
-            // Series Books view - dynamic page size
-            renderPaginatedList(seriesName, books, createBookItemDiv, backAction);
+            // Series Books view - force 4 items per page for books
+            renderPaginatedList(seriesName, books, createBookItemDiv, backAction, null, 4);
+        }
+
+        function renderBookList(books, title, backAction) {
+            renderPaginatedList(title || 'Books', books, createBookItemDiv, backAction, null, 4);
         }
 
         // Deprecated separated renderers, now handled by combined drilldown or generic lists
