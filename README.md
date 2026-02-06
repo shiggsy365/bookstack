@@ -27,6 +27,10 @@ Bookstack acts as the "connective tissue" for your self-hosted book stack:
 
 The fastest way to get Bookstack running alongside your existing services is via Docker. Ensure you have **Booklore** and **Shelfmark** running.
 
+Use the compose.yaml file and modify the example .env file to suit your needs.
+
+Initially set up to install Booklore (Library Management), Shelfmark (Downloader), Prowlarr (Download manager usign Usenet - optional), and Bookstack (E-Reader web interface) as a full stack solution, but adapt this for personal requirements.
+
 ### Environment Variables
 
 | Variable | Description |
