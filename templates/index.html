@@ -17,9 +17,9 @@
         .header {
             background: #fff;
             border-bottom: 2px solid #000;
-            padding: 15px;
+            padding: 10px;
             text-align: center;
-            font-size: 36px;
+            font-size: 24px;
             font-weight: bold;
         }
 
@@ -30,14 +30,14 @@
 
         .nav a {
             display: inline-block;
-            padding: 15px;
+            padding: 10px;
             text-decoration: none;
             color: #666;
             font-weight: bold;
             width: 24%;
             text-align: center;
             box-sizing: border-box;
-            font-size: 24px;
+            font-size: 18px;
         }
 
         .nav a.active {
@@ -240,6 +240,7 @@
             backAction: null,
             itemRenderer: null
         };
+        var searchStateBackup = null; // Backup for search results state
 
         function calculatePageSize() {
             // Rough calculation: Window height - header/nav - padding / item height
@@ -919,6 +920,15 @@
         }
 
         function showReleases(md5) {
+            // Backup current search state
+            searchStateBackup = {
+                items: paginationState.items,
+                currentPage: paginationState.currentPage,
+                title: paginationState.title,
+                backAction: paginationState.backAction,
+                itemRenderer: paginationState.itemRenderer
+            };
+
             document.getElementById('ephemera-search').className = 'hidden';
             var container = document.getElementById('releases-container');
             container.className = '';
@@ -949,7 +959,24 @@
 
         function backToSearch() {
             document.getElementById('releases-container').className = 'hidden';
-            document.getElementById('ephemera-search').className = '';
+            var ephemera = document.getElementById('ephemera-search');
+            ephemera.className = '';
+
+            // Restore search state if available
+            if (searchStateBackup) {
+                renderPaginatedList(
+                    searchStateBackup.title,
+                    searchStateBackup.items,
+                    searchStateBackup.itemRenderer,
+                    searchStateBackup.backAction,
+                    'search-results'
+                );
+                // Restore page number logic could be added here if renderPaginatedList supported startPage
+                // For now, it resets to page 0, which is acceptable but better than empty
+                // To support page restore, we'd need to modify renderPaginatedList or manually set it:
+                paginationState.currentPage = searchStateBackup.currentPage;
+                renderCurrentPage('search-results');
+            }
         }
 
         function renderReleasesTable(container, releases) {
