@@ -716,42 +716,40 @@
             div.className = 'book-row';
 
             var seriesInfo = '';
-            if (book.series_name) {
-                seriesInfo = '<div class="book-meta">' + book.series_name + ' #' + (book.series_index || '?') + '</div>';
-            }
-
             var coverHtml = '<div class="book-cover">';
 
-            // Action for clicking image: Confirm Send
-            var imageAction = "confirmSendToKindle('" + acqLink.href.replace(/'/g, "\\'") + "', '" + (book.title.replace(/'/g, "\\'")) + "'); event.stopPropagation();";
+            // Safe Data Attributes
+            // We escape the double quotes for HTML attribute safety
+            var safeUrl = acqLink.href.replace(/"/g, '&quot;');
+            var safeTitle = book.title.replace(/"/g, '&quot;');
 
             var imgTag = '';
+            // Use handleCoverClick(this)
+            var imgAttrs = ' data-url="' + safeUrl + '" data-title="' + safeTitle + '" onclick="handleCoverClick(this); event.stopPropagation(); return false;" ';
+
             if (thumbnail) {
-                imgTag = '<img src="' + thumbnail + '" onclick="' + imageAction + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+\';">';
+                imgTag = '<img src="' + thumbnail + '" ' + imgAttrs + ' onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+\';">';
             } else {
-                imgTag = '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+" onclick="' + imageAction + '">';
+                imgTag = '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+" ' + imgAttrs + '>';
             }
 
             coverHtml += imgTag;
             coverHtml += '</div>';
 
             var descText = book.description || '';
-            // No truncation in JS. CSS handles overflow. Click to view full.
             var descriptionHtml = '';
             if (descText) {
-                // We add an onclick to the description container
-                // Using return false to stop propagation reliably
-                descriptionHtml = '<div class="book-description" onclick="showModal(\'' + escapeHtml(descText) + '\'); event.stopPropagation(); return false;" style="cursor:pointer;">' + descText + '</div>';
+                var safeDesc = escapeHtml(descText).replace(/"/g, '&quot;');
+                descriptionHtml = '<div class="book-description" data-desc="' + safeDesc + '" onclick="handleDescriptionClick(this); event.stopPropagation(); return false;" style="cursor:pointer;">' + descText + '</div>';
             }
 
-            // Title Action: Confirm Send
-            var titleAction = "confirmSendToKindle('" + acqLink.href.replace(/'/g, "\\'") + "', '" + (book.title.replace(/'/g, "\\'")) + "'); event.stopPropagation(); return false;";
+            // Title Link (Same Handler)
+            var titleHtml = '<div class="book-title" ' + imgAttrs + ' style="cursor:pointer; text-decoration:underline;">' + book.title + '</div>';
 
             div.innerHTML = coverHtml +
                 '<div class="book-info">' +
-                '<div class="book-title" onclick="' + titleAction + '" style="cursor:pointer; text-decoration:underline;">' + book.title + '</div>' +
-                '<div class="book-meta">' + (book.authors ? book.authors.join(', ') : 'Unknown') + '</div>' +
-                seriesInfo +
+                titleHtml +
+                // Removed Authors/Series per user request
                 descriptionHtml +
                 '</div>';
 
@@ -927,11 +925,7 @@
         function sendToKindle(url) {
             showToast('Sending...');
             ajax('POST', '/api/opds/send-to-kindle', { url: url }, function (err, res) {
-                if (err) {
-                    showToast('Error: ' + err);
-                } else {
-                    showToast('Sent to Kindle!');
-                }
+                if (!err) showToast('Queued');
             });
         }
 
@@ -1187,13 +1181,6 @@
 
         function sendToKindle(url) {
             showToast('Sending...');
-            // Check if we need to proxify or if URL is direct
-            // Usually we send {url: ...} to /api/kindle/send or similar
-            // Looking at existing code structure:
-            // Assuming /api/kindle/send exists or similar. The user mentioned "Send to Kindle".
-            // Let's implement a best-guess or standard implementation.
-            // If previous code didn't have it, I'll use a standard POST.
-
             ajax('POST', '/api/kindle/send', { url: url }, function (err, res) {
                 if (!err) {
                     showToast('Sent to Kindle!');
@@ -1201,6 +1188,21 @@
                     showToast('Error: ' + err);
                 }
             });
+        }
+
+        function handleCoverClick(el) {
+            try {
+                var url = el.getAttribute('data-url');
+                var title = el.getAttribute('data-title');
+                if (url && title) confirmSendToKindle(url, title);
+            } catch (e) { alert(e.message); }
+        }
+
+        function handleDescriptionClick(el) {
+            try {
+                var desc = el.getAttribute('data-desc');
+                if (desc) showModal(desc);
+            } catch (e) { alert(e.message); }
         }
 
         function refreshQueue() {
