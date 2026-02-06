@@ -685,31 +685,35 @@
             } else {
                 coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+">';
             }
-
-            // Button: We want it small and accessible.
-            // Maybe inside the cover column? Or in info?
-            // Spec said "Button underneath image" previously. Let's keep that but compact.
-            coverHtml += '<button class="btn" style="width:100%; margin-top:4px; font-size:16px; padding:2px;" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">SEND</button>';
+            // Button Removed per user feedback. Interaction moved to title.
             coverHtml += '</div>';
 
             var descText = book.description || '';
-            var readMore = '';
-            // If description exists, provide a way to read it.
-            // In rigid layout, we can't show much text.
-            // We'll add a [Info] button or link in meta.
+            // No truncation in JS. CSS handles overflow. Click to view full.
+            var descriptionHtml = '';
             if (descText) {
-                readMore = ' &nbsp;<a href="#" onclick="showModal(\'' + escapeHtml(descText) + '\'); return false;">[INFO]</a>';
+                // We add an onclick to the description container
+                descriptionHtml = '<div class="book-description" onclick="showModal(\'' + escapeHtml(descText) + '\'); event.stopPropagation();" style="cursor:pointer; height:100%;">' + descText + '</div>';
             }
+
+            // Title Action: Confirm Send
+            var titleAction = "confirmSendToKindle('" + acqLink.href.replace(/'/g, "\\'") + "', '" + (book.title.replace(/'/g, "\\'")) + "'); event.stopPropagation();";
 
             div.innerHTML = coverHtml +
                 '<div class="book-info">' +
-                '<div class="book-title">' + book.title + '</div>' +
+                '<div class="book-title" onclick="' + titleAction + '" style="cursor:pointer; text-decoration:underline;">' + book.title + '</div>' +
                 '<div class="book-meta">' + (book.authors ? book.authors.join(', ') : 'Unknown') + '</div>' +
                 seriesInfo +
-                '<div class="book-meta" style="margin-top:5px; color:#555;">' + readMore + '</div>' +
+                descriptionHtml +
                 '</div>';
 
             return div;
+        }
+
+        function confirmSendToKindle(url, title) {
+            if (confirm("Send '" + title + "' to your Kindle?")) {
+                sendToKindle(url);
+            }
         }
 
         // Modal Helpers
