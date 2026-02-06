@@ -145,7 +145,8 @@
             display: table;
             table-layout: fixed;
             /* CRITICAL for hidden overflow */
-            height: 140px;
+            height: 110px;
+            /* Reduced from 140px */
             overflow: hidden;
             width: 100%;
         }
@@ -220,7 +221,8 @@
             line-height: 20px;
             color: #333;
             overflow: hidden;
-            height: 60px;
+            height: 50px;
+            /* Reduced to fit 110px constraints */
             display: block;
         }
 
@@ -767,13 +769,15 @@
 
             var coverHtml = '<div class="book-cover">';
 
-            // Safe Data Attributes
-            var safeUrl = acqLink.href.replace(/"/g, '&quot;');
-            var safeTitle = book.title.replace(/"/g, '&quot;');
+            // Safe Data Attributes for JS args (escape single quotes)
+            var jsSafeUrl = acqLink.href.replace(/'/g, "\\'");
+            var jsSafeTitle = book.title.replace(/'/g, "\\'");
+
+            // Inline Handler Calculation
+            var inlineHandler = "showConfirmModal('" + jsSafeUrl + "', '" + jsSafeTitle + "'); return false;";
 
             // Wrappers for old browser compatibility
-            // Added event.stopPropagation()
-            var anchorStart = '<a href="javascript:void(0)" onclick="handleCoverClick(this); event.stopPropagation(); return false;" data-url="' + safeUrl + '" data-title="' + safeTitle + '" style="cursor:pointer; display:block;">';
+            var anchorStart = '<a href="javascript:void(0)" onclick="' + inlineHandler + '" style="cursor:pointer; display:block;">';
             var anchorEnd = '</a>';
 
             var imgTag = '';
@@ -791,7 +795,6 @@
             if (descText) {
                 var safeDesc = escapeHtml(descText).replace(/"/g, '&quot;');
                 // Make description a block-link
-                // REMOVED height:100% from inline style to allow CSS to control it
                 descriptionHtml = '<a href="javascript:void(0)" onclick="handleDescriptionClick(this); event.stopPropagation(); return false;" data-desc="' + safeDesc + '" style="text-decoration:none; color:#333; display:block; overflow:hidden;" class="book-description">' + descText + '</a>';
             }
 
