@@ -14,14 +14,7 @@
             font-size: 24px;
         }
 
-        .header {
-            background: #fff;
-            border-bottom: 2px solid #000;
-            padding: 10px;
-            text-align: center;
-            font-size: 24px;
-            font-weight: bold;
-        }
+
 
         .nav {
             background: #fff;
@@ -181,7 +174,7 @@
 </head>
 
 <body>
-    <div class="header"><b>Bookstack</b></div>
+
 
     <div class="nav">
         <a href="#" id="tab-cloud-btn" class="active" onclick="switchTab('cloud'); return false;">Library</a>
@@ -198,7 +191,7 @@
         <div id="view-search" class="hidden">
             <div id="search-menu"></div>
             <div id="ephemera-search" class="hidden">
-                <div class="card">
+                <div class="card" id="search-input-card">
                     <p style="margin-top:0; color:#666;">Search for a book to add to the Cloud Library</p>
                     <input type="text" id="search-input" placeholder="Search Ephemera...">
                     <button class="btn" onclick="performSearch()">Search</button>
@@ -823,22 +816,40 @@
             if (!query) return;
 
             var results = document.getElementById('search-results');
+            var searchCard = document.getElementById('search-input-card');
+
             results.innerHTML = '<center>Searching...</center>';
 
             ajax('GET', '/api/ephemera/search?q=' + encodeURIComponent(query), null, function (err, data) {
                 results.innerHTML = '';
+
+                // Helper to restore search input
+                var restoreSearch = function () {
+                    searchCard.classList.remove('hidden');
+                    results.innerHTML = '';
+                };
+
+                // Helper to show error/empty with Back button
+                var showMessage = function (msg) {
+                    searchCard.classList.add('hidden');
+                    results.innerHTML = '<center>' + msg + '</center><br><button class="btn" onclick="document.getElementById(\'search-input-card\').classList.remove(\'hidden\'); document.getElementById(\'search-results\').innerHTML=\'\';">Back</button>';
+                };
+
                 if (err || !data) {
-                    results.innerHTML = '<center>Error</center>';
+                    showMessage('Error');
                     return;
                 }
                 if (data.error) {
-                    results.innerHTML = '<center>' + data.error + '</center>';
+                    showMessage(data.error);
                     return;
                 }
                 if (!data.length) {
-                    results.innerHTML = '<center>No results</center>';
+                    showMessage('No results');
                     return;
                 }
+
+                // Hide search input on success
+                searchCard.classList.add('hidden');
 
                 // Helper for relevance sorting
                 function levenshtein(a, b) {
@@ -906,7 +917,7 @@
                             '</div></div>';
                         return div;
                     },
-                    null, // No back action here, as it's part of the search view
+                    restoreSearch, // Back action restores visibility
                     'search-results' // Target the search-results div
                 );
             });
