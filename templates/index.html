@@ -900,70 +900,102 @@
                 }
             };
 
-            // Check if this is an author page (has books with acquisition links)
-            var hasBooks = false;
+            // Split into Series (Navigation) and Books (Acquisition)
+            var seriesItems = [];
+            var bookItems = [];
+
             for (var i = 0; i < opdsData.length; i++) {
-                for (var j = 0; j < opdsData[i].links.length; j++) {
-                    if (opdsData[i].links[j].rel && opdsData[i].links[j].rel.indexOf('acquisition') !== -1) {
-                        hasBooks = true;
-                        break;
+                var entry = opdsData[i];
+                var isSeries = false;
+                var isBook = false;
+                // Check links
+                if (entry.links) {
+                    for (var j = 0; j < entry.links.length; j++) {
+                        var rel = entry.links[j].rel || '';
+                        if (rel.indexOf('subsection') !== -1) isSeries = true;
+                        if (rel.indexOf('acquisition') !== -1) isBook = true;
                     }
                 }
-                if (hasBooks) break;
+
+                // Categorize
+                if (isSeries) {
+                    seriesItems.push(entry);
+                } else if (isBook) {
+                    bookItems.push(entry);
+                }
             }
 
-            // if (hasBooks) {
-            //    renderAuthorDrilldown(backAction); 
-            //    return;
-            // }
+            // Logic separation based on content
+            var isAuthorView = seriesItems.length > 0;
 
-            // Sort: Navigation/Series (subsection) first, then Books (acquisition)
-            opdsData.sort(function (a, b) {
-                var aIsNav = a.links.some(function (l) { return l.rel && l.rel.indexOf('subsection') !== -1; });
-                var bIsNav = b.links.some(function (l) { return l.rel && l.rel.indexOf('subsection') !== -1; });
-                if (aIsNav && !bIsNav) return -1;
-                if (!aIsNav && bIsNav) return 1;
-                return 0; // Keep original order otherwise
-            });
+            if (isAuthorView) {
+                // --- AUTHOR VIEW MODE ---
 
-            // Page Size Strategy: 
-            // - Navigation Lists (Authors, Series List) = 15 items
-            // - Book Lists (Acquisition) = 4 items
-            var pageSize = hasBooks ? 4 : 15;
+                // 1. Sort Series Alphabetically
+                seriesItems.sort(function (a, b) {
+                    return a.title.localeCompare(b.title);
+                });
 
-            // Render with dynamic page size
-            renderPaginatedList('', opdsData, function (entry) {
-                var navLink = null;
-                var acqLink = null;
+                // 2. Handle Standalone Books (Group them if they exist)
+                var finalList = [];
 
-                for (var j = 0; j < entry.links.length; j++) {
-                    var link = entry.links[j];
-                    if (link.rel && link.rel.indexOf('subsection') !== -1) {
-                        navLink = link;
-                    }
-                    if (link.rel && link.rel.indexOf('acquisition') !== -1) {
-                        acqLink = link;
-                    }
+                if (bookItems.length > 0) {
+                    // Create Synthetic "Standalone titles" Item
+                    var standaloneItem = {
+                        title: "[Standalone titles]",
+                        isSynthetic: true,
+                        books: bookItems
+                    };
+                    finalList.push(standaloneItem);
                 }
 
-                var div = document.createElement('div');
-                div.className = 'opds-item';
+                // 3. Add Series
+                finalList = finalList.concat(seriesItems);
 
-                if (navLink) {
-                    div.innerHTML = '<b>' + entry.title + '</b>';
-                    div.onclick = (function (path, href) {
-                        return function () {
-                            opdsHistory.push(path);
-                            browseOPDS(href);
+                // Render Navigation List (Size 15)
+                renderPaginatedList('', finalList, function (entry) {
+                    var div = document.createElement('div');
+                    div.className = 'opds-item';
+
+                    if (entry.isSynthetic) {
+                        // Synthetic Standalone Folder
+                        div.innerHTML = '<b>' + entry.title + '</b>';
+                        div.onclick = function () {
+                            // When clicked, render the book list with specific sorting
+                            renderBookList(entry.books, "Standalone Books", function () {
+                                renderOPDSList(currentPath); // Back to Author
+                            });
                         };
-                    })(currentPath, navLink.href);
-                } else if (acqLink) {
-                    // Reuse book helper if needed, but this is usually sparse info in browse view
-                    return createBookItemDiv(entry);
-                }
-                return div;
+                    } else {
+                        // Regular Series/Folder
+                        // Extract nav link
+                        var navLink = '';
+                        for (var k = 0; k < entry.links.length; k++) {
+                            if (entry.links[k].rel.indexOf('subsection') !== -1) navLink = entry.links[k].href;
+                        }
 
-            }, backAction, null, pageSize);
+                        div.innerHTML = '<b>' + entry.title + '</b>';
+                        if (navLink) {
+                            div.onclick = function () {
+                                opdsHistory.push(currentPath);
+                                browseOPDS(navLink);
+                            };
+                        }
+                    }
+                    return div;
+                }, backAction, null, 15);
+                return; // Done for Author View
+
+            } else {
+                // --- BOOK LIST MODE (Series View or Flattened) ---
+                // Continue to generic renderer, but grouped
+                // Logic below handles generic rendering if we don't return here.
+                // Actually easier to just call renderBookList here and return.
+                renderBookList(opdsData, '', backAction);
+                return;
+            }
+
+
         }
 
         function renderSeriesBooks(seriesName, books, backActionOverride) {
