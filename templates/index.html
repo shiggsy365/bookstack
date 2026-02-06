@@ -975,24 +975,50 @@
                         return a.title.localeCompare(b.title);
                     });
 
-                    // 2. Handle Standalone Books (Group them if they exist)
-                    var finalList = [];
+                    // 2. Group Books by series_name or Standalone
+                    var seriesGroups = {};
+                    var standaloneBooks = [];
+                    var authorName = "";
 
-                    if (bookItems.length > 0) {
-                        // Create Synthetic "Standalone Books" Item
-                        var standaloneItem = {
-                            title: "[Standalone Books]",
-                            isSynthetic: true,
-                            books: bookItems
-                        };
-                        finalList.push(standaloneItem);
+                    for (var i = 0; i < bookItems.length; i++) {
+                        var b = bookItems[i];
+                        if (!authorName && b.author) authorName = b.author;
+
+                        if (b.series_name) {
+                            if (!seriesGroups[b.series_name]) seriesGroups[b.series_name] = [];
+                            seriesGroups[b.series_name].push(b);
+                        } else {
+                            standaloneBooks.push(b);
+                        }
                     }
 
-                    // 3. Add Series
+                    var finalList = [];
+
+                    // [Standalone Books] at the top
+                    if (standaloneBooks.length > 0) {
+                        finalList.push({
+                            title: "[Standalone Books]",
+                            isSynthetic: true,
+                            books: standaloneBooks
+                        });
+                    }
+
+                    // Add synthetic series folders
+                    var sNames = Object.keys(seriesGroups).sort();
+                    for (var i = 0; i < sNames.length; i++) {
+                        var name = sNames[i];
+                        finalList.push({
+                            title: name,
+                            isSynthetic: true,
+                            books: seriesGroups[name]
+                        });
+                    }
+
+                    // 3. Add existing Series folders from OPDS
                     finalList = finalList.concat(seriesItems);
 
-                    // Render Navigation List (Size 15)
-                    renderPaginatedList('', finalList, function (entry) {
+                    // Render Navigation List (Size 15 or 10)
+                    renderPaginatedList(authorName || '', finalList, function (entry) {
                         var div = document.createElement('div');
                         div.className = 'opds-item';
 
