@@ -917,7 +917,21 @@
             //    return;
             // }
 
-            // Regular navigation list (6 items per page for authors/folders)
+            // Sort: Navigation/Series (subsection) first, then Books (acquisition)
+            opdsData.sort(function (a, b) {
+                var aIsNav = a.links.some(function (l) { return l.rel && l.rel.indexOf('subsection') !== -1; });
+                var bIsNav = b.links.some(function (l) { return l.rel && l.rel.indexOf('subsection') !== -1; });
+                if (aIsNav && !bIsNav) return -1;
+                if (!aIsNav && bIsNav) return 1;
+                return 0; // Keep original order otherwise
+            });
+
+            // Page Size Strategy: 
+            // - Navigation Lists (Authors, Series List) = 15 items
+            // - Book Lists (Acquisition) = 4 items
+            var pageSize = hasBooks ? 4 : 15;
+
+            // Render with dynamic page size
             renderPaginatedList('', opdsData, function (entry) {
                 var navLink = null;
                 var acqLink = null;
@@ -949,7 +963,7 @@
                 }
                 return div;
 
-            }, backAction);
+            }, backAction, null, pageSize);
         }
 
         function renderSeriesBooks(seriesName, books, backActionOverride) {
