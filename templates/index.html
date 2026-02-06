@@ -285,11 +285,15 @@
             <td id="top-nav-cell">
                 <table class="nav-table">
                     <tr>
-                        <td><a href="#" class="nav-link active" onclick="switchTab('cloud'); return false;">Library</a>
-                        </td>
-                        <td><a href="#" class="nav-link" onclick="switchTab('search'); return false;">Request</a></td>
-                        <td><a href="#" class="nav-link" onclick="switchTab('queue'); return false;">Queue</a></td>
-                        <td><a href="#" class="nav-link" onclick="switchTab('settings'); return false;">Tools</a></td>
+                        <!-- Use javascript:void(0) to prevent hash navigation issues on Kindle -->
+                        <td><a href="javascript:void(0)" class="nav-link active"
+                                onclick="switchTab('cloud'); return false;">Library</a></td>
+                        <td><a href="javascript:void(0)" class="nav-link"
+                                onclick="switchTab('search'); return false;">Request</a></td>
+                        <td><a href="javascript:void(0)" class="nav-link"
+                                onclick="switchTab('queue'); return false;">Queue</a></td>
+                        <td><a href="javascript:void(0)" class="nav-link"
+                                onclick="switchTab('settings'); return false;">Tools</a></td>
                     </tr>
                 </table>
             </td>
@@ -534,31 +538,49 @@
         }
 
         function switchTab(tab) {
-            currentTab = tab;
-            var tabs = ['search', 'cloud', 'queue', 'settings'];
-            for (var i = 0; i < tabs.length; i++) {
-                document.getElementById('view-' + tabs[i]).className = 'hidden';
-                document.getElementById('tab-' + tabs[i] + '-btn').className = '';
+            try {
+                currentTab = tab;
+                var tabs = ['search', 'cloud', 'queue', 'settings'];
+
+                // Hide all views
+                for (var i = 0; i < tabs.length; i++) {
+                    var view = document.getElementById('view-' + tabs[i]);
+                    if (view) view.className = 'hidden';
+                }
+
+                // Show selected view
+                var selectedView = document.getElementById('view-' + tab);
+                if (selectedView) selectedView.className = '';
+
+                // Update Nav Link Classes
+                var links = document.querySelectorAll('.nav-link');
+                for (var j = 0; j < links.length; j++) {
+                    links[j].className = 'nav-link'; // Reset
+                }
+
+                // Set active class based on index (Hardcoded order matches HTML)
+                if (tab === 'cloud' && links[0]) links[0].className += ' active';
+                if (tab === 'search' && links[1]) links[1].className += ' active';
+                if (tab === 'queue' && links[2]) links[2].className += ' active';
+                if (tab === 'settings' && links[3]) links[3].className += ' active';
+
+                // Context Bar Updates
+                var left = document.getElementById('ctx-left');
+                var center = document.getElementById('ctx-center');
+                var right = document.getElementById('ctx-right');
+
+                if (left) left.innerHTML = '';
+                if (center) center.innerText = (tab.charAt(0).toUpperCase() + tab.slice(1));
+                if (right) right.innerHTML = '';
+
+                // Tab Specific Actions
+                if (tab === 'queue') refreshQueue();
+                if (tab === 'cloud') renderOPDSMenu();
+                if (tab === 'search') renderSearchMenu();
+
+            } catch (e) {
+                alert("Nav Error: " + e.message);
             }
-            document.getElementById('view-' + tab).className = '';
-            // document.getElementById('tab-' + tab + '-btn').className = 'nav-link active'; // Logic handled by switchTab click? No, refactor classes.
-            // Reset active class
-            var links = document.querySelectorAll('.nav-link');
-            for (var j = 0; j < links.length; j++) links[j].className = 'nav-link';
-            // Find active one (simple check)
-            if (tab === 'cloud') links[0].className += ' active';
-            if (tab === 'search') links[1].className += ' active';
-            if (tab === 'queue') links[2].className += ' active';
-            if (tab === 'settings') links[3].className += ' active';
-
-            // Reset Context Bar default
-            document.getElementById('ctx-left').innerHTML = '';
-            document.getElementById('ctx-center').innerText = (tab.charAt(0).toUpperCase() + tab.slice(1));
-            document.getElementById('ctx-right').innerHTML = '';
-
-            if (tab === 'queue') refreshQueue();
-            if (tab === 'cloud') renderOPDSMenu();
-            if (tab === 'search') renderSearchMenu();
         }
 
         function renderSearchMenu() {
