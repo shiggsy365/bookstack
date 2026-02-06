@@ -350,7 +350,18 @@ def get_releases():
         releases = releases_data.get('releases', [])
         
         # Sort by seeders/size for better UX
-        releases.sort(key=lambda x: (x.get('seeders') or 0, x.get('size') or 0), reverse=True)
+        def sort_key(x):
+            try:
+                s = int(x.get('seeders') or 0)
+            except:
+                s = 0
+            try:
+                sz = int(x.get('size') or 0)
+            except:
+                sz = 0
+            return (s, sz)
+            
+        releases.sort(key=sort_key, reverse=True)
         
         return jsonify(releases)
     except Exception as e:

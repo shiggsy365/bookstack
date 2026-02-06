@@ -899,7 +899,7 @@
         }
 
         // Modal State for Confirm
-        var confirmUrl = null;
+        // (confirmUrl is declared globally at the top)
 
         function showConfirmModal(url, title) {
             confirmUrl = url;
@@ -1238,6 +1238,8 @@
                 alert("Error: No URL provided");
                 return;
             }
+            // Debug: confirm the button is actually firing
+            console.log("[Kindle] Sending URL:", url);
             showToast('Sending to Kindle...');
             ajax('POST', '/api/opds/send-to-kindle', { url: url }, function (err, res) {
                 if (!err) {
@@ -1342,7 +1344,7 @@
 
                         var authors = book.authors ? book.authors.join(', ') : 'Unknown';
 
-                        var coverHtml = '<div class="book-cover">';
+                        var coverHtml = '<div class="book-cover" role="button" onclick="showReleases(\'' + book.md5 + '\')" style="cursor:pointer;">';
                         if (book.coverUrl) {
                             coverHtml += '<img src="' + book.coverUrl + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
                         } else {
