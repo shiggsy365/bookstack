@@ -786,13 +786,7 @@
 
             // Format Title: [Author] | [Title] if author exists
             var displayTitle = book.title;
-            var cleanAuthor = "";
-            if (book.author) {
-                var s = String(book.author).trim();
-                if (s.toLowerCase() !== 'undefined' && s.toLowerCase() !== 'null' && s !== '') {
-                    cleanAuthor = s;
-                }
-            }
+            var cleanAuthor = cleanString(book.author);
 
             if (cleanAuthor) {
                 displayTitle = cleanAuthor + " | " + book.title;
@@ -810,7 +804,7 @@
                 if (book._inLibrary) {
                     var downloadUrl = book._libraryUrl || (acqLink ? acqLink.href : "");
                     var jsSafeLibraryUrl = downloadUrl.replace(/'/g, "\\'");
-                    coverHtml += '<button style="' + btnStyle + '" onclick="showConfirmModal(\'' + jsSafeLibraryUrl + '\', \'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
+                    coverHtml += '<button style="' + btnStyle + '" onclick="sendToKindle(\'' + jsSafeLibraryUrl + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
                 } else {
                     coverHtml += '<button style="' + btnStyle + '" onclick="performSearch(\'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
                 }
@@ -1191,22 +1185,29 @@
         }
 
         function sendToKindle(url) {
-            showToast('Sending...');
+            if (!url) return;
+            showToast('Sending to Kindle...');
             ajax('POST', '/api/opds/send-to-kindle', { url: url }, function (err, res) {
-                if (!err) showToast('Queued');
+                if (!err) showToast('Queued!');
+                else alert("Error: " + err);
             });
         }
 
-        function performSearch() {
-            var query = document.getElementById('search-input').value;
-            if (!query) return;
+        function performSearch(query) {
+            var q = query || document.getElementById('search-input').value;
+            if (!q) return;
+
+            if (query) {
+                switchTab('search');
+                document.getElementById('search-input').value = query;
+            }
 
             var results = document.getElementById('search-results');
             var searchCard = document.getElementById('search-input-card');
 
             results.innerHTML = '<center>Searching...</center>';
 
-            ajax('GET', '/api/ephemera/search?q=' + encodeURIComponent(query), null, function (err, data) {
+            ajax('GET', '/api/ephemera/search?q=' + encodeURIComponent(q), null, function (err, data) {
                 results.innerHTML = '';
 
                 // Helper to restore search input
@@ -1447,16 +1448,6 @@
             });
         }
 
-        function sendToKindle(url) {
-            showToast('Sending...');
-            ajax('POST', '/api/kindle/send', { url: url }, function (err, res) {
-                if (!err) {
-                    showToast('Sent to Kindle!');
-                } else {
-                    showToast('Error: ' + err);
-                }
-            });
-        }
 
         function handleCoverClick(el) {
             try {
@@ -1586,6 +1577,17 @@
             );
         }
 
+        // Helper to clean strings from common garbage
+        function cleanString(s) {
+            if (s === null || s === undefined) return '';
+            var str = String(s).trim();
+            // Remove 'undefined' or 'null' if it appears at the very start (concatenation bug)
+            if (str.toLowerCase().indexOf('undefined') === 0) str = str.substring(9).trim();
+            if (str.toLowerCase().indexOf('null') === 0) str = str.substring(4).trim();
+            if (str.toLowerCase() === 'undefined' || str.toLowerCase() === 'null') return '';
+            return str;
+        }
+
         // --- Scraped Data Renderer (Custom View) ---
         function renderScrapedSeriesView(data) {
             var content = document.getElementById('opds-content');
@@ -1593,8 +1595,8 @@
 
             // Header
             var header = document.createElement('h2');
-            var authorDisplay = data.author || '';
-            if (!authorDisplay || authorDisplay.toLowerCase() === 'undefined') authorDisplay = 'Author';
+            var authorDisplay = cleanString(data.author);
+            if (!authorDisplay) authorDisplay = 'Author';
 
             // Sync cleaned author back to data for mappedBooks
             data.author = (authorDisplay === 'Author') ? '' : authorDisplay;
