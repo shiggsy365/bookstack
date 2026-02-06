@@ -634,9 +634,10 @@
                         div.onclick = function () { opdsHistory.push(currentPath); browseOPDS(navLink); };
                     }
                     return div;
-                }, backAction, 'opds-content', 10, (isAuthorLevel || seriesItems.length > 0) ? function (container) {
+                }, backAction, 'opds-content', 10, isAuthorLevel ? function (container) {
                     var btnDiv = document.createElement('center'); btnDiv.style.marginTop = '10px';
                     var btn = document.createElement('button'); btn.className = 'btn';
+                    btn.type = 'button';
                     btn.innerText = "VIEW AUTHOR'S PUBLISHED BOOKS";
                     btn.onclick = function () { fetchScrapedBooks(authorName, currentPath); };
                     btnDiv.appendChild(btn); container.appendChild(btnDiv);
@@ -863,11 +864,10 @@
             var size = r.size_bytes ? (r.size_bytes / 1024 / 1024).toFixed(1) + 'MB' : (r.size || '');
             var idx = window.releaseRegistry.push(r) - 1;
 
-            var author = r.author || (r.authors && r.authors.join(', ')) || r.publisher || 'Unknown Author';
             var title = r.title || r.filename || 'Unknown Title';
 
             var html = '<div style="float:right"><button type="button" class="btn" onclick="triggerDownload(' + idx + ')">GET</button></div>';
-            html += '<b>' + author + ' - ' + title + '</b><br>';
+            html += '<b>' + title + '</b><br>';
             html += '<small>' + (r.format || '??').toUpperCase() + ' • ' + size + '</small>';
             div.innerHTML = html;
             return div;
