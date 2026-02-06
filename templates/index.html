@@ -830,8 +830,20 @@
             container.className = ''; container.innerHTML = '<center>Loading releases...</center>';
 
             ajax('GET', '/api/ephemera/releases?md5=' + encodeURIComponent(md5), null, function (err, data) {
-                if (err || !data || !data.length) { container.innerHTML = '<center>No releases</center><br><button class="btn" onclick="backToSearch()">BACK</button>'; return; }
-                renderPaginatedList('Select Release', data, createReleaseItemDiv, backToSearch, 'releases-container', 5);
+                if (err || !data || !data.length) { container.innerHTML = '<center>No releases</center><br><button type="button" class="btn" onclick="backToSearch()">BACK</button>'; return; }
+
+                // Filter for Kindle-compatible formats (epub, mobi, azw3)
+                var filtered = data.filter(function (r) {
+                    var fmt = (r.format || '').toLowerCase();
+                    return fmt === 'epub' || fmt === 'mobi' || fmt === 'azw3';
+                });
+
+                if (filtered.length === 0) {
+                    container.innerHTML = '<center>No compatible formats (EPUB/MOBI/AZW3) found</center><br><button type="button" class="btn" onclick="backToSearch()">BACK</button>';
+                    return;
+                }
+
+                renderPaginatedList('Select Release', filtered, createReleaseItemDiv, backToSearch, 'releases-container', 5);
             });
         }
 
@@ -849,8 +861,11 @@
             var size = r.size_bytes ? (r.size_bytes / 1024 / 1024).toFixed(1) + 'MB' : (r.size || '');
             var idx = window.releaseRegistry.push(r) - 1;
 
-            var html = '<div style="float:right"><button class="btn" onclick="triggerDownload(' + idx + ')">GET</button></div>';
-            html += '<b>[' + (r.author || '??') + '] ' + (r.title || '??') + '</b><br>';
+            var author = r.author || 'Unknown Author';
+            var title = r.title || 'Unknown Title';
+
+            var html = '<div style="float:right"><button type="button" class="btn" onclick="triggerDownload(' + idx + ')">GET</button></div>';
+            html += '<b>' + author + ' - ' + title + '</b><br>';
             html += '<small>' + (r.format || '??').toUpperCase() + ' • ' + size + '</small>';
             div.innerHTML = html;
             return div;
