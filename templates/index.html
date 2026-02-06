@@ -1020,9 +1020,27 @@
                     btn.onclick = function () {
                         var authorName = document.getElementById('ctx-center').innerText.trim();
                         if (authorName) {
-                            var scrapeUrl = '/api/scrape/series-order?author=' + encodeURIComponent(authorName);
-                            opdsHistory.push(currentPath);
-                            browseOPDS(scrapeUrl);
+                            var slug = authorName.toLowerCase().replace(/ /g, '-');
+                            // Handle simple cases, might need better slugification for some authors
+                            var targetUrl = 'https://www.bookseriesinorder.com/' + slug + '/';
+                            var proxyUrl = '/api/bookseriesinorder/author?url=' + encodeURIComponent(targetUrl);
+
+                            // Show loading
+                            content.innerHTML = '<div style="text-align:center; padding:20px;">Loading published books...</div>';
+
+                            ajax(proxyUrl, function (err, data) {
+                                if (err || !data || data.error) {
+                                    alert("Error loading data: " + (err || data.error));
+                                    renderOPDSList(currentPath); // Revert
+                                    return;
+                                }
+
+                                // Render Scraped Data
+                                renderScrapedSeriesView(data);
+                            });
+
+
+                            opdsHistory.push(currentPath); // Save history state
                         } else {
                             alert("Could not determine author name.");
                         }
@@ -1487,7 +1505,70 @@
             );
         }
 
-        function showBSIOAuthorBooksInRequest(authorUrl, authorName) {
+        // --- Scraped Data Renderer (Custom View) ---
+        function renderScrapedSeriesView(data) {
+            var content = document.getElementById('opds-content');
+            content.innerHTML = '';
+
+            // Header
+            var header = document.createElement('h2');
+            header.innerText = data.author + " - Published Order";
+            header.style.textAlign = 'center';
+            header.style.margin = '10px 0';
+            content.appendChild(header);
+
+            // Series List (Vertical List of Series Headers)
+            if (data.series && data.series.length > 0) {
+                renderPaginatedList(data.author, data.series, function (series) {
+                    var div = document.createElement('div');
+                    div.className = 'opds-item';
+
+                    var bookCount = series.books ? series.books.length : 0;
+                    div.innerHTML = '<b>' + series.name + '</b> (' + bookCount + ' books)';
+
+                    div.onclick = function () {
+                        // Render Books in this Series
+                        // We convert these books to compatible format for renderBookList
+                        var mappedBooks = (series.books || []).map(function (b, idx) {
+                            return {
+                                title: b.title,
+                                author: data.author,
+                                series_index: idx + 1,
+                                // Use Google Search link for acquisition
+                                links: [{ rel: 'acquisition', href: 'https://google.com/search?q=' + encodeURIComponent(data.author + ' ' + b.title) }]
+                            };
+                        });
+
+                        // Determine Series Name for Header
+                        var headerTitle = series.name;
+
+                        renderBookList(mappedBooks, headerTitle, function () {
+                            renderScrapedSeriesView(data); // Back to Series List
+                        });
+                    };
+                    return div;
+                }, function () {
+                    // Back Action
+                    if (opdsHistory.length > 0) {
+                        var last = opdsHistory.pop();
+                        // Special handling: if last was 'javascript:void(0)' or similar
+                        if (last && last.indexOf('api') !== -1) browseOPDS(last);
+                        else renderOPDSList(last); // Fallback
+                    } else {
+                        renderOPDSMenu();
+                    }
+                }, null, 10);
+            } else {
+                content.innerHTML += '<div style="text-align:center">No published books found via external source.</div>';
+
+                var backBtn = document.createElement('button');
+                backBtn.innerText = "Back";
+                backBtn.onclick = function () { renderOPDSList(currentPath); };
+                content.appendChild(backBtn);
+            }
+        }
+
+        function showBSIOSearchInRequest(authorUrl, authorName) {
             var container = document.getElementById('bsio-search-container');
             container.innerHTML = '<center>Loading...</center>';
 
