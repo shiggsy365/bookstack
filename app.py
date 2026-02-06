@@ -458,6 +458,10 @@ def send_to_kindle():
             encoded_auth = base64.b64encode(auth_str.encode('ascii')).decode('ascii')
             headers['Authorization'] = f"Basic {encoded_auth}"
         
+        if download_url.startswith('/'):
+            # Internal relative URL, resolve to localhost
+            download_url = f"http://127.0.0.1:5000{download_url}"
+        
         resp = requests.get(download_url, headers=headers, timeout=30)
         resp.raise_for_status()
         
