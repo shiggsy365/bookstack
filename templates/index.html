@@ -949,7 +949,7 @@
 
                 // Logic separation based on content
                 var isDrilldown = (currentPath.indexOf('/authors/') !== -1 && currentPath.split('/').length > 3);
-                var isAuthorView = seriesItems.length > 0;
+                var isAuthorView = seriesItems.length > 0 || isDrilldown;
 
                 if (isAuthorView) {
                     // --- AUTHOR VIEW MODE ---
