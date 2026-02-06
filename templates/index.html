@@ -364,7 +364,7 @@
     <div id="confirm-modal" class="modal-overlay" style="display:none;">
         <div style="text-align:center; padding-top:20px;">
             <p id="confirm-text" style="font-size:24px; font-weight:bold; margin-bottom:20px;">Send to Kindle?</p>
-            <button id="confirm-yes-btn" class="btn"
+            <button id="confirm-yes-btn" class="btn" onclick="sendConfirmToKindle()"
                 style="width:100%; height: 50px; margin-bottom:10px; background:#000; color:#fff;">SEND</button>
             <button class="btn" style="width:100%; height: 50px;" onclick="closeConfirmModal()">CANCEL</button>
         </div>
@@ -372,7 +372,7 @@
 
     <script>
         var confirmUrl = null;
-        function handleConfirmYes() {
+        function sendConfirmToKindle() {
             if (confirmUrl) {
                 sendToKindle(confirmUrl);
             }
@@ -649,6 +649,7 @@
             menu.className = ''; // Explicitly show menu
             ephemera.className = 'hidden';
             bsio.className = 'hidden';
+            document.getElementById('releases-container').className = 'hidden';
 
             var intro = document.createElement('p');
             intro.style.margin = '0 0 15px 0';
@@ -906,12 +907,6 @@
             // Use innerHTML for better compatibility than innerText
             document.getElementById('confirm-text').innerHTML = "Send '" + title + "' to your Kindle?";
             document.getElementById('confirm-modal').style.display = 'block';
-
-            // Bind Yes Button via JS (more compatible for Kindle)
-            document.getElementById('confirm-yes-btn').onclick = function () {
-                if (confirmUrl) sendToKindle(confirmUrl);
-                closeConfirmModal();
-            };
         }
 
         function closeConfirmModal() {
@@ -1456,51 +1451,41 @@
             }
         }
 
+        var releasesTracker = [];
         function renderReleasesTable(container, releases) {
+            releasesTracker = releases;
             container.innerHTML = '';
-            var table = document.createElement('table');
-            table.style.width = '100%';
-            table.style.borderCollapse = 'collapse';
-            table.style.fontSize = '24px'; // Larger for Kindle
-            table.innerHTML = '<thead><tr style="border-bottom:2px solid #000;"><th align="left">Format</th><th align="left">Size</th><th align="left">Action</th></tr></thead>';
+            var html = '<table class="releases-table" style="width:100%; border-collapse:collapse; font-size:20px;">';
+            html += '<thead><tr style="border-bottom:2px solid #000;"><th align="left">Details</th><th align="left">Action</th></tr></thead>';
+            html += '<tbody>';
 
-            var tbody = document.createElement('tbody');
             for (var i = 0; i < releases.length; i++) {
-                (function (release) {
-                    var tr = document.createElement('tr');
-                    tr.style.borderBottom = '1px solid #ccc';
+                var r = releases[i];
+                var author = r.author || 'Unknown Author';
+                var title = r.title || 'Unknown Title';
+                var format = r.format || '??';
+                var size = '';
+                if (r.size_bytes) size = (r.size_bytes / 1024 / 1024).toFixed(1) + 'MB';
+                else if (r.size) size = r.size;
 
-                    var tdFmt = document.createElement('td');
-                    tdFmt.innerText = release.format || '??';
-
-                    var tdSize = document.createElement('td');
-                    if (release.size_bytes) tdSize.innerText = (release.size_bytes / 1024 / 1024).toFixed(1) + 'MB';
-                    else tdSize.innerText = release.size || '--';
-
-                    var tdBtn = document.createElement('td');
-                    var btn = document.createElement('button');
-                    btn.className = 'btn';
-                    btn.style.padding = '10px 15px';
-                    btn.innerText = 'GET';
-                    btn.onclick = function () { downloadRelease(release); };
-                    tdBtn.appendChild(btn);
-
-                    tr.appendChild(tdFmt);
-                    tr.appendChild(tdSize);
-                    tr.appendChild(tdBtn);
-                    tbody.appendChild(tr);
-                })(releases[i]);
+                html += '<tr style="border-bottom:1px solid #ccc;">';
+                html += '<td style="padding:10px 5px;">';
+                html += '<b>' + author + ' - ' + title + '</b><br>';
+                html += '<small style="color:#666;">' + format + ' &bull; ' + size + '</small>';
+                html += '</td>';
+                html += '<td style="vertical-align:middle;">';
+                html += '<button class="btn" onclick="triggerDownloadByIndex(' + i + ')">GET</button>';
+                html += '</td>';
+                html += '</tr>';
             }
-            table.appendChild(tbody);
-            container.appendChild(table);
+            html += '</tbody></table>';
+            html += '<br><button class="btn" onclick="backToSearch()" style="width:100%; height:50px;">Back to Results</button>';
+            container.innerHTML = html;
+        }
 
-            var backBtn = document.createElement('button');
-            backBtn.className = 'btn';
-            backBtn.style.width = '100%';
-            backBtn.style.marginTop = '20px';
-            backBtn.innerText = 'Back to Results';
-            backBtn.onclick = function () { backToSearch(); };
-            container.appendChild(backBtn);
+        function triggerDownloadByIndex(idx) {
+            var release = releasesTracker[idx];
+            if (release) downloadRelease(release);
         }
 
         function downloadRelease(release) {
