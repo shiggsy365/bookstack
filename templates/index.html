@@ -143,9 +143,8 @@
             padding: 4px;
             background: #fff;
             display: table;
-            /* CRITICAL: Must be table */
             table-layout: fixed;
-            /* CRITICAL: For truncation */
+            /* CRITICAL for hidden overflow */
             height: 140px;
             overflow: hidden;
             width: 100%;
@@ -208,29 +207,31 @@
         .book-title a {
             color: #000;
             text-decoration: none;
+            display: block;
+            margin: 0;
+            padding: 0;
+            line-height: 1.0;
         }
 
         .book-description {
             margin: 0;
             padding: 0;
             font-size: 18px;
-            /* Readable but compact */
             line-height: 1.1;
             color: #333;
             overflow: hidden;
             height: 90px;
-            /* Maximize space */
+            display: block;
+            /* Ensure it respects height */
         }
 
-        .book-description {
+        .book-description a {
+            color: #333;
+            text-decoration: none;
+            display: block;
+            height: 100%;
             margin: 0;
             padding: 0;
-            font-size: 20px;
-            line-height: 1.2;
-            color: #333;
-            overflow: hidden;
-            height: 80px;
-            /* Force fit remaining space (140 - 48 - margins) */
         }
 
         .book-meta {
@@ -334,9 +335,20 @@
     </table>
 
     <!-- MODAL -->
+    <!-- MODAL: Description -->
     <div id="desc-modal" class="modal-overlay">
         <div class="modal-content" id="modal-text"></div>
         <button class="btn" style="width:100%; height: 50px;" onclick="closeModal()">CLOSE</button>
+    </div>
+
+    <!-- MODAL: Confirm Send -->
+    <div id="confirm-modal" class="modal-overlay" style="display:none;">
+        <div style="text-align:center; padding-top:20px;">
+            <p id="confirm-text" style="font-size:24px; font-weight:bold; margin-bottom:20px;">Send to Kindle?</p>
+            <button id="confirm-yes-btn" class="btn"
+                style="width:100%; height: 50px; margin-bottom:10px; background:#000; color:#fff;">SEND</button>
+            <button class="btn" style="width:100%; height: 50px;" onclick="closeConfirmModal()">CANCEL</button>
+        </div>
     </div>
 
     <script>
@@ -772,15 +784,31 @@
             return div;
         }
 
-        function confirmSendToKindle(url, title) {
+        // Modal State for Confirm
+        var confirmUrl = null;
+
+        function showConfirmModal(url, title) {
+            confirmUrl = url;
+            document.getElementById('confirm-text').innerText = "Send '" + title + "' to your Kindle?";
+            document.getElementById('confirm-modal').style.display = 'block';
+
+            // Bind Yes Button
+            document.getElementById('confirm-yes-btn').onclick = function () {
+                sendToKindle(confirmUrl);
+                closeConfirmModal();
+            };
+        }
+
+        function closeConfirmModal() {
+            document.getElementById('confirm-modal').style.display = 'none';
+        }
+
+        function handleCoverClick(el) {
             try {
-                // Verify window.confirm exists
-                if (window.confirm("Send '" + title + "' to your Kindle?")) {
-                    sendToKindle(url);
-                }
-            } catch (e) {
-                alert("Error in confirm: " + e.message);
-            }
+                var url = el.getAttribute('data-url');
+                var title = el.getAttribute('data-title');
+                if (url && title) showConfirmModal(url, title);
+            } catch (e) { alert(e.message); }
         }
 
         // Modal Helpers
