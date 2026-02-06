@@ -807,6 +807,9 @@
 
             if (!acqLink) return null;
 
+            var div = document.createElement('div');
+            div.className = 'book-row';
+
             // IMPORTANT: Initialize these to empty strings to avoid "undefined" concatenation
             var anchorStart = '';
             var anchorEnd = '';
@@ -1019,12 +1022,12 @@
                 if (currentPath.indexOf('://') !== -1) pathDepth -= 2;
 
                 // Selected Author detection: 
-                // 1. Path suggests an author
-                // 2. Either it's an acquisition feed (books) OR we are deep in the author tree
-                var isDrilldown = isAuthorPath && (opdsType === 'acquisition' || pathDepth >= 3);
+                // Segments: /opds/authors/L/Name -> 4 segments
+                var isAuthorLevel = isAuthorPath && pathDepth === 4;
+                var isDrilldown = isAuthorPath && (opdsType === 'acquisition' || pathDepth >= 4);
 
-                // Navigation/Grouping Mode: if we have series folders OR if we are in an author's book list
-                var isAuthorView = seriesItems.length > 0 || isDrilldown;
+                // Grouping Mode: if we have series folders OR if we are AT an author's list
+                var isAuthorView = seriesItems.length > 0 || isAuthorLevel;
 
                 if (isAuthorView) {
                     // --- AUTHOR VIEW MODE ---
