@@ -105,16 +105,12 @@ services:
     container_name: shelfmark
     environment:
       - FLASK_PORT=${SHELFMARK_PORT}
- #     - USING_TOR=true
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
     ports:
       - "${SHELFMARK_PORT}:${SHELFMARK_PORT}"
     restart: unless-stopped
- #   cap_add:
- #     - NET_ADMIN
- #     - NET_RAW
     volumes:
       - ${INGEST_FOLDER}:/books
       - ${DOWNLOAD_FOLDER}:/downloads
@@ -128,3 +124,4 @@ services:
     profiles:
       - required
       - all
+
