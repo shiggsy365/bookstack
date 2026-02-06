@@ -903,10 +903,10 @@
                 if (hasBooks) break;
             }
 
-            if (hasBooks) {
-                renderAuthorDrilldown(backAction); // Pass backAction to drilldown
-                return;
-            }
+            // if (hasBooks) {
+            //    renderAuthorDrilldown(backAction); 
+            //    return;
+            // }
 
             // Regular navigation list (6 items per page for authors/folders)
             renderPaginatedList('', opdsData, function (entry) {
