@@ -117,7 +117,28 @@ def parse_opds_feed(xml_content, base_url):
             obj['links'].append(l)
 
         entries.append(obj)
-    return entries
+    
+    feed_links = []
+    for link in root.findall('atom:link', NAMESPACES):
+        raw_href = link.get('href')
+        link_rel = link.get('rel') or ''
+        link_title = link.get('title') or ''
+        
+        if raw_href:
+             # Handle relative URLs for feed links
+             if raw_href.startswith('http'):
+                 absolute_href = raw_href
+             else:
+                 absolute_href = urljoin(base_url, raw_href)
+             
+             feed_links.append({
+                 'href': absolute_href,
+                 'rel': link_rel,
+                 'title': link_title,
+                 'type': link.get('type')
+             })
+
+    return {'entries': entries, 'feed_links': feed_links}
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def handle_settings():
@@ -223,11 +244,15 @@ def opds_browse():
         
         resp.raise_for_status()
         
-        entries = parse_opds_feed(resp.content, target_url)
+        parsed = parse_opds_feed(resp.content, target_url)
+        entries = parsed['entries']
+        feed_links = parsed['feed_links']
+        
         is_acquisition = any(any(l['rel'] and 'acquisition' in l['rel'] for l in e['links']) for e in entries)
         
         return jsonify({
             'entries': entries,
+            'feed_links': feed_links,
             'type': 'acquisition' if is_acquisition else 'navigation'
         })
     except requests.exceptions.HTTPError as e:
@@ -296,6 +321,98 @@ def search_ephemera():
         traceback.print_exc()
         print(f"[ERROR] Error searching Shelfmark: {e}", flush=True)
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/scrape/series-order')
+def scrape_series_order():
+    author = request.args.get('author')
+    if not author:
+        return jsonify({'error': 'Author is required'}), 400
+    
+    # Format author name for URL: "Stephen King" -> "stephen-king"
+    slug = author.lower().replace(' ', '-')
+    url = f"https://www.bookseriesinorder.com/{slug}/"
+    
+    print(f"[Scrape] Fetching: {url}", flush=True)
+    
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        resp = requests.get(url, headers=headers, timeout=10)
+        
+        # If 404, try identifying redirected URL or variations? 
+        # For now return error if not found.
+        if resp.status_code == 404:
+             return jsonify({'error': f'Author not found on source website ({url})', 'entries': []}), 404
+        resp.raise_for_status()
+        
+        soup = BeautifulSoup(resp.content, 'html.parser')
+        entries = []
+        
+        # Headers are usually H2 with 'Publication Order of...'
+        # The list follows immediately. It can be a UL or Table.
+        # We iterate over all content elements?
+        
+        # Strategy: Find all H2s.
+        headers = soup.find_all('h2')
+        for h2 in headers:
+            text = h2.get_text().strip()
+            if not text.startswith('Publication Order of'):
+                continue
+            
+            series_name = text.replace('Publication Order of', '').replace('Books', '').strip()
+            
+            # Find next sibling that is a list or table
+            sibling = h2.find_next_sibling()
+            while sibling and sibling.name not in ['h2', 'div', 'footer']:
+                if sibling.name == 'table':
+                    # Parse rows
+                    rows = sibling.find_all('tr')
+                    for row in rows:
+                        cols = row.find_all('td')
+                        if cols:
+                            # Usually title is first col text
+                            title = cols[0].get_text().strip()
+                            # Clean year? (Year)
+                            # Create entry
+                            if title:
+                                entries.append(create_entry(title, author, series_name, entries))
+                    break # Done with this header
+                elif sibling.name == 'ul':
+                    lis = sibling.find_all('li')
+                    for li in lis:
+                         title = li.get_text().strip()
+                         # Remove (Year) suffix if robust
+                         title = re.sub(r'\s*\(\d{4}\)$', '', title)
+                         if title:
+                            entries.append(create_entry(title, author, series_name, entries))
+                    break
+                
+                sibling = sibling.find_next_sibling()
+                
+        return jsonify({'entries': entries, 'type': 'acquisition'}) # Treat as book list
+        
+    except Exception as e:
+        print(f"[Scrape] Error: {e}", flush=True)
+        return jsonify({'error': str(e)}), 500
+
+def create_entry(title, author, series, all_entries):
+    # Calculate index based on current count in series? 
+    # Or just sequential.
+    # We will use sequential integer for simple ordering if parsing failed.
+    series_count = sum(1 for e in all_entries if e.get('series_name') == series)
+    
+    search_query = f"{author} {title}"
+    google_url = f"https://www.google.com/search?q={quote_plus(search_query)}"
+    
+    return {
+        'title': title,
+        'author': author,
+        'series_name': series,
+        'series_index': series_count + 1, 
+        'description': f"From {series}",
+        'links': [
+            {'rel': 'acquisition', 'href': google_url, 'type': 'text/html'} 
+        ]
+    }
 
 @app.route('/api/ephemera/releases')
 def get_releases():

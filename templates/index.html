@@ -894,9 +894,12 @@
                 }
 
                 opdsData = data.entries || [];
+                opdsFeedLinks = data.feed_links || [];
                 renderOPDSList(path);
             });
         }
+
+        var opdsFeedLinks = [];
 
         function renderOPDSList(currentPath) {
             try {
@@ -995,7 +998,39 @@
                             }
                         }
                         return div;
-                    }, backAction, null, 15);
+                    }, backAction, null, 10); // Reduced to 10 items per user request
+
+                    // Append "View this author's published books" button
+                    var btnDiv = document.createElement('div');
+                    btnDiv.style.textAlign = 'center';
+                    btnDiv.style.marginTop = '10px';
+                    btnDiv.style.padding = '10px';
+
+                    var btn = document.createElement('button');
+                    btn.innerHTML = 'View this author\'s published books';
+                    btn.className = 'nav-link';
+                    btn.style.border = '1px solid #000';
+                    btn.style.background = '#fff';
+                    btn.style.color = '#000';
+                    btn.style.padding = '8px 16px';
+                    btn.style.cursor = 'pointer';
+                    btn.style.fontSize = '16px';
+                    btn.style.fontWeight = 'bold';
+
+                    btn.onclick = function () {
+                        var authorName = document.getElementById('ctx-center').innerText.trim();
+                        if (authorName) {
+                            var scrapeUrl = '/api/scrape/series-order?author=' + encodeURIComponent(authorName);
+                            opdsHistory.push(currentPath);
+                            browseOPDS(scrapeUrl);
+                        } else {
+                            alert("Could not determine author name.");
+                        }
+                    };
+
+                    btnDiv.appendChild(btn);
+                    content.appendChild(btnDiv);
+
                     return; // Done for Author View
 
                 } else {
