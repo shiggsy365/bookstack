@@ -364,13 +364,20 @@
     <div id="confirm-modal" class="modal-overlay" style="display:none;">
         <div style="text-align:center; padding-top:20px;">
             <p id="confirm-text" style="font-size:24px; font-weight:bold; margin-bottom:20px;">Send to Kindle?</p>
-            <button id="confirm-yes-btn" class="btn"
+            <button id="confirm-yes-btn" class="btn" onclick="handleConfirmYes()"
                 style="width:100%; height: 50px; margin-bottom:10px; background:#000; color:#fff;">SEND</button>
             <button class="btn" style="width:100%; height: 50px;" onclick="closeConfirmModal()">CANCEL</button>
         </div>
     </div>
 
     <script>
+        var confirmUrl = null;
+        function handleConfirmYes() {
+            if (confirmUrl) {
+                sendToKindle(confirmUrl);
+            }
+            closeConfirmModal();
+        }
         var currentTab = 'cloud';
         var opdsHistory = [];
         var opdsData = [];
@@ -899,12 +906,6 @@
             // Use innerHTML for better compatibility than innerText
             document.getElementById('confirm-text').innerHTML = "Send '" + title + "' to your Kindle?";
             document.getElementById('confirm-modal').style.display = 'block';
-
-            // Bind Yes Button
-            document.getElementById('confirm-yes-btn').onclick = function () {
-                sendToKindle(confirmUrl);
-                closeConfirmModal();
-            };
         }
 
         function closeConfirmModal() {
@@ -1093,7 +1094,7 @@
                             div.innerHTML = '<b>' + entry.title + '</b>';
                             div.onclick = function () {
                                 // When clicked, render the book list with specific sorting
-                                renderBookList(entry.books, "Standalone Books", function () {
+                                renderBookList(entry.books, entry.title, function () {
                                     renderOPDSList(currentPath); // Back to Author
                                 });
                             };
@@ -1233,11 +1234,17 @@
         }
 
         function sendToKindle(url) {
-            if (!url) return;
+            if (!url) {
+                alert("Error: No URL provided");
+                return;
+            }
             showToast('Sending to Kindle...');
             ajax('POST', '/api/opds/send-to-kindle', { url: url }, function (err, res) {
-                if (!err) showToast('Queued!');
-                else alert("Error: " + err);
+                if (!err) {
+                    showToast('Queued!');
+                } else {
+                    alert("Error: " + err);
+                }
             });
         }
 
@@ -1341,7 +1348,6 @@
                         } else {
                             coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
                         }
-                        coverHtml += '<button class="btn" onclick="showReleases(\'' + book.md5 + '\')">View Releases</button>';
                         coverHtml += '</div>';
 
                         var description = book.description ? book.description : '';
@@ -1349,7 +1355,7 @@
 
                         div.innerHTML = '<div class="book-row">' + coverHtml +
                             '<div class="book-info">' +
-                            '<b>' + book.title + '</b>' +
+                            '<b role="button" onclick="showReleases(\'' + book.md5 + '\')" style="cursor:pointer; text-decoration:underline;">' + book.title + '</b>' +
                             '<br><small style="color:#666;">' + authors + '</small>' +
                             '<br><div style="font-size:0.85em; margin-top:5px; color:#444;">' + description + '</div>' +
                             '</div></div>';
@@ -1374,12 +1380,14 @@
             searchStateBackup = {
                 items: paginationState.items,
                 currentPage: paginationState.currentPage,
+                pageSize: paginationState.pageSize,
                 title: paginationState.title,
                 backAction: paginationState.backAction,
                 itemRenderer: paginationState.itemRenderer
             };
 
-            document.getElementById('ephemera-search').className = 'hidden';
+            document.getElementById('view-search').className = '';
+            document.getElementById('view-search').classList.add('hidden');
             var container = document.getElementById('releases-container');
             container.className = '';
             container.innerHTML = '<center>Loading releases...</center>';
@@ -1409,7 +1417,7 @@
 
         function backToSearch() {
             document.getElementById('releases-container').className = 'hidden';
-            var ephemera = document.getElementById('ephemera-search');
+            var ephemera = document.getElementById('view-search');
             ephemera.className = '';
 
             // Restore search state if available
@@ -1419,11 +1427,9 @@
                     searchStateBackup.items,
                     searchStateBackup.itemRenderer,
                     searchStateBackup.backAction,
-                    'search-results'
+                    'search-results',
+                    searchStateBackup.pageSize
                 );
-                // Restore page number logic could be added here if renderPaginatedList supported startPage
-                // For now, it resets to page 0, which is acceptable but better than empty
-                // To support page restore, we'd need to modify renderPaginatedList or manually set it:
                 paginationState.currentPage = searchStateBackup.currentPage;
                 renderCurrentPage('search-results');
             }
