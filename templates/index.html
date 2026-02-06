@@ -364,6 +364,7 @@
         var currentTab = 'cloud';
         var opdsHistory = [];
         var opdsData = [];
+        var opdsType = 'navigation'; // 'navigation' or 'acquisition'
 
         // Pagination State
         var paginationState = {
@@ -902,6 +903,7 @@
 
                 opdsData = data.entries || [];
                 opdsFeedLinks = data.feed_links || [];
+                opdsType = data.type || 'navigation';
                 renderOPDSList(path);
             });
         }
@@ -948,7 +950,21 @@
                 }
 
                 // Logic separation based on content
-                var isDrilldown = (currentPath.indexOf('/authors/') !== -1 && currentPath.split('/').length > 3);
+                var pathLower = currentPath.toLowerCase();
+                var pathSegments = currentPath.split('/').filter(Boolean);
+                var isAuthorPath = pathLower.indexOf('author') !== -1;
+
+                // Deep Path detection (Letter -> Author -> Book)
+                // We are at least at /authors/LETTER/AuthorName or deeper
+                var pathDepth = pathSegments.length;
+                if (currentPath.indexOf('://') !== -1) pathDepth -= 2;
+
+                // Selected Author detection: 
+                // 1. Path suggests an author
+                // 2. Either it's an acquisition feed (books) OR we are deep in the author tree
+                var isDrilldown = isAuthorPath && (opdsType === 'acquisition' || pathDepth >= 3);
+
+                // Navigation/Grouping Mode: if we have series folders OR if we are in an author's book list
                 var isAuthorView = seriesItems.length > 0 || isDrilldown;
 
                 if (isAuthorView) {
