@@ -163,7 +163,9 @@
             height: 90px;
             border: 1px solid #000;
             display: block;
-            margin: 0 auto;
+            margin: 0;
+            /* Left align */
+            cursor: pointer;
         }
 
         .book-title {
@@ -680,12 +682,18 @@
             }
 
             var coverHtml = '<div class="book-cover">';
+
+            // Action for clicking image: Confirm Send
+            var imageAction = "confirmSendToKindle('" + acqLink.href.replace(/'/g, "\\'") + "', '" + (book.title.replace(/'/g, "\\'")) + "'); event.stopPropagation();";
+
+            var imgTag = '';
             if (thumbnail) {
-                coverHtml += '<img src="' + thumbnail + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+\';">';
+                imgTag = '<img src="' + thumbnail + '" onclick="' + imageAction + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+\';">';
             } else {
-                coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+">';
+                imgTag = '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+" onclick="' + imageAction + '">';
             }
-            // Button Removed per user feedback. Interaction moved to title.
+
+            coverHtml += imgTag;
             coverHtml += '</div>';
 
             var descText = book.description || '';
