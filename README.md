@@ -11,6 +11,7 @@
 * **One-Click "Send to Kindle":** Configure your Kindle delivery address once and trigger wireless transfers directly from your library.  
 * **Request Monitoring:** Track the real-time status of your Shelfmark requests, complete with detailed error messages if downloads fail.
 * **Booklore Library Browser:** A clean, searchable view of your existing Booklore collection.
+* **View all an author's books, in series order, with flags for what is and isn't in your library:** Making download management simple.
 * **Request > Download > Add to Booklore > Send to Kindle** All from your device browser, no need for other solutions or jailbreaking devices
 
 ## **🚀 How It Works**
