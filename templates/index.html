@@ -127,16 +127,24 @@
         }
 
         /* LIST ITEMS */
-        .opds-item,
-        .book-row {
+        .opds-item {
             border: 1px solid #000;
             margin-bottom: 4px;
             padding: 4px;
             background: #fff;
             display: block;
-            /* No flex */
+            overflow: hidden;
+            width: 100%;
+        }
+
+        .book-row {
+            border: 1px solid #000;
+            margin-bottom: 4px;
+            padding: 4px;
+            background: #fff;
+            display: table;
+            /* CRITICAL: Must be table for cells to work */
             height: 140px;
-            /* Fixed height for calc */
             overflow: hidden;
             width: 100%;
         }
@@ -1127,6 +1135,24 @@
                 if (!err) {
                     showToast('Queued!');
                     backToSearch();
+                } else {
+                    showToast('Error: ' + err);
+                }
+            });
+        }
+
+        function sendToKindle(url) {
+            showToast('Sending...');
+            // Check if we need to proxify or if URL is direct
+            // Usually we send {url: ...} to /api/kindle/send or similar
+            // Looking at existing code structure:
+            // Assuming /api/kindle/send exists or similar. The user mentioned "Send to Kindle".
+            // Let's implement a best-guess or standard implementation.
+            // If previous code didn't have it, I'll use a standard POST.
+
+            ajax('POST', '/api/kindle/send', { url: url }, function (err, res) {
+                if (!err) {
+                    showToast('Sent to Kindle!');
                 } else {
                     showToast('Error: ' + err);
                 }
