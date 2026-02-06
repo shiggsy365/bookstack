@@ -334,8 +334,18 @@
                         <div id="search-results"></div>
                     </div>
 
-                    <div id="view-queue" class="hidden"></div>
-                    <div id="view-settings" class="hidden"></div>
+                    <div id="view-queue" class="hidden">
+                        <div id="queue-list"></div>
+                    </div>
+                    <div id="view-settings" class="hidden">
+                        <div class="card" style="padding:10px;">
+                            <h3>Kindle Settings</h3>
+                            <p>Enter your "Send to Kindle" email address:</p>
+                            <input type="text" id="kindle-email" placeholder="example@kindle.com">
+                            <button class="btn" style="width:100%; margin-top:10px;" onclick="saveSettings()">SAVE
+                                SETTINGS</button>
+                        </div>
+                    </div>
                     <div id="bsio-search-container" class="hidden"></div>
                     <div id="releases-container" class="hidden"></div>
                 </div>
@@ -611,6 +621,7 @@
                 if (tab === 'queue') refreshQueue();
                 if (tab === 'cloud') renderOPDSMenu();
                 if (tab === 'search') renderSearchMenu();
+                if (tab === 'settings') loadSettings();
 
             } catch (e) {
                 alert("Nav Error: " + e.message);
@@ -796,9 +807,10 @@
 
             if (!acqLink) return null;
 
-            var div = document.createElement('div');
-            // Use 'book-row' class from new CSS which enforces height
-            div.className = 'book-row';
+            // IMPORTANT: Initialize these to empty strings to avoid "undefined" concatenation
+            var anchorStart = '';
+            var anchorEnd = '';
+            var inlineHandler = '';
 
             var coverHtml = '<div class="book-cover">';
 
@@ -806,11 +818,12 @@
             var jsSafeUrl = acqLink.href.replace(/'/g, "\\'");
 
             // Format Title: [Author] | [Title] if author exists
-            var displayTitle = book.title;
+            var displayTitle = book.title || '';
             var cleanAuthor = cleanString(book.author);
 
-            if (cleanAuthor) {
-                displayTitle = cleanAuthor + " | " + book.title;
+            // Prevent redundant author in title (common in scraped results)
+            if (cleanAuthor && displayTitle.toLowerCase().indexOf(cleanAuthor.toLowerCase()) === -1) {
+                displayTitle = cleanAuthor + " | " + displayTitle;
             }
 
             var jsSafeTitle = displayTitle.replace(/'/g, "\\'");
@@ -825,18 +838,24 @@
                 if (book._inLibrary) {
                     var downloadUrl = book._libraryUrl || (acqLink ? acqLink.href : "");
                     var jsSafeLibraryUrl = downloadUrl.replace(/'/g, "\\'");
-                    coverHtml += '<button style="' + btnStyle + '" onclick="showConfirmModal(\'' + jsSafeLibraryUrl + '\', \'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
+                    inlineHandler = "showConfirmModal('" + jsSafeLibraryUrl + "', '" + jsSafeTitle + "');";
+                    coverHtml += '<button style="' + btnStyle + '" onclick="' + inlineHandler + ' event.stopPropagation(); return false;">' + btnText + '</button>';
                 } else {
-                    coverHtml += '<button style="' + btnStyle + '" onclick="performSearch(\'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
+                    inlineHandler = "performSearch('" + jsSafeTitle + "');";
+                    coverHtml += '<button style="' + btnStyle + '" onclick="' + inlineHandler + ' event.stopPropagation(); return false;">' + btnText + '</button>';
                 }
+
+                // Also make the title clickable in scraped view
+                anchorStart = '<a href="javascript:void(0)" onclick="' + inlineHandler + ' return false;" style="cursor:pointer; display:block;">';
+                anchorEnd = '</a>';
             } else {
                 // Regular View: Covers
                 // Inline Handler Calculation
-                var inlineHandler = "showConfirmModal('" + jsSafeUrl + "', '" + jsSafeTitle + "'); return false;";
+                inlineHandler = "showConfirmModal('" + jsSafeUrl + "', '" + jsSafeTitle + "');";
 
                 // Wrappers for old browser compatibility
-                var anchorStart = '<a href="javascript:void(0)" onclick="' + inlineHandler + '" style="cursor:pointer; display:block;">';
-                var anchorEnd = '</a>';
+                anchorStart = '<a href="javascript:void(0)" onclick="' + inlineHandler + ' return false;" style="cursor:pointer; display:block;">';
+                anchorEnd = '</a>';
 
                 var imgTag = '';
                 if (thumbnail) {
@@ -1232,7 +1251,7 @@
             }
 
             var results = document.getElementById('search-results');
-            var searchCard = document.getElementById('search-input-container'); // Corrected ID
+            var searchCard = document.getElementById('search-input-container');
 
             results.innerHTML = '<center>Searching...</center>';
 
