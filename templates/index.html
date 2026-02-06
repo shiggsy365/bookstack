@@ -143,10 +143,26 @@
             padding: 4px;
             background: #fff;
             display: table;
-            /* CRITICAL: Must be table for cells to work */
+            /* CRITICAL: Must be table */
+            table-layout: fixed;
+            /* CRITICAL: For truncation */
             height: 140px;
             overflow: hidden;
             width: 100%;
+        }
+
+        .book-cover {
+            display: table-cell;
+            vertical-align: top;
+            width: 70px;
+            padding-right: 5px;
+        }
+
+        .book-info {
+            display: table-cell;
+            vertical-align: top;
+            overflow: hidden;
+            /* Truncate if too long */
         }
 
         .book-table {
