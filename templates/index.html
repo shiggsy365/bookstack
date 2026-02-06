@@ -111,6 +111,8 @@
             border-radius: 0;
             min-height: 35px;
             display: inline-block;
+            appearance: none;
+            -webkit-appearance: none;
         }
 
         .btn:active {
@@ -263,14 +265,14 @@
             <td id="top-nav-cell">
                 <table class="nav-table">
                     <tr>
-                        <td><a href="javascript:void(0)" class="nav-link active"
-                                onclick="switchTab('cloud'); return false;">Library</a></td>
-                        <td><a href="javascript:void(0)" class="nav-link"
-                                onclick="switchTab('search'); return false;">Request</a></td>
-                        <td><a href="javascript:void(0)" class="nav-link"
-                                onclick="switchTab('queue'); return false;">Queue</a></td>
-                        <td><a href="javascript:void(0)" class="nav-link"
-                                onclick="switchTab('settings'); return false;">Tools</a></td>
+                        <td><button type="button" class="nav-link active" onclick="switchTab('cloud'); return false;"
+                                style="background:none; border:none; width:100%;">Library</button></td>
+                        <td><button type="button" class="nav-link" onclick="switchTab('search'); return false;"
+                                style="background:none; border:none; width:100%;">Request</button></td>
+                        <td><button type="button" class="nav-link" onclick="switchTab('queue'); return false;"
+                                style="background:none; border:none; width:100%;">Queue</button></td>
+                        <td><button type="button" class="nav-link" onclick="switchTab('settings'); return false;"
+                                style="background:none; border:none; width:100%;">Tools</button></td>
                     </tr>
                 </table>
             </td>
@@ -297,7 +299,8 @@
                             style="padding: 5px; border-bottom: 1px solid #000;">
                             <input type="text" id="search-input" placeholder="Search Title..."
                                 onkeypress="if(event.keyCode==13) performSearch()">
-                            <button class="btn" style="width:100%" onclick="performSearch()">SEARCH</button>
+                            <button type="button" class="btn" style="width:100%"
+                                onclick="performSearch()">SEARCH</button>
                         </div>
                         <div id="search-results"></div>
                     </div>
@@ -309,7 +312,8 @@
                             <h3>Kindle Settings</h3>
                             <p>Enter your "Send to Kindle" email address:</p>
                             <input type="text" id="kindle-email" placeholder="example@kindle.com">
-                            <button class="btn" style="width:100%; margin-top:10px;" onclick="saveSettings()">SAVE
+                            <button type="button" class="btn" style="width:100%; margin-top:10px;"
+                                onclick="saveSettings()">SAVE
                                 SETTINGS</button>
                         </div>
                     </div>
@@ -322,15 +326,16 @@
 
     <div id="desc-modal" class="modal-overlay">
         <div class="modal-content" id="modal-text"></div>
-        <button class="btn" style="width:100%; height: 50px;" onclick="closeModal()">CLOSE</button>
+        <button type="button" class="btn" style="width:100%; height: 50px;" onclick="closeModal()">CLOSE</button>
     </div>
 
     <div id="confirm-modal" class="modal-overlay" style="display:none;">
         <div style="text-align:center; padding-top:20px;">
             <p id="confirm-text" style="font-size:24px; font-weight:bold; margin-bottom:20px;">Send to Kindle?</p>
-            <button id="confirm-yes-btn" class="btn" onclick="sendConfirmToKindle()"
+            <button type="button" id="confirm-yes-btn" class="btn" onclick="sendConfirmToKindle()"
                 style="width:100%; height: 50px; margin-bottom:10px; background:#000; color:#fff;">SEND</button>
-            <button class="btn" style="width:100%; height: 50px;" onclick="closeConfirmModal()">CANCEL</button>
+            <button type="button" class="btn" style="width:100%; height: 50px;"
+                onclick="closeConfirmModal()">CANCEL</button>
         </div>
     </div>
 
@@ -421,9 +426,26 @@
             if (tab === 'settings') links[3].className += ' active';
 
             if (tab === 'cloud') renderOPDSMenu();
-            if (tab === 'search') performSearch(''); // Automatically trigger search view
+            if (tab === 'search') {
+                // Reset search view on tab click
+                document.getElementById('search-input').value = '';
+                document.getElementById('search-results').innerHTML = '';
+                document.getElementById('search-input-container').className = 'card';
+                window.searchResultRegistry = [];
+                updateContextBar();
+                document.getElementById('ctx-center').innerText = 'Request';
+            }
             if (tab === 'queue') refreshQueue();
             if (tab === 'settings') loadSettings();
+        }
+
+        function sendToKindle(url) {
+            if (!url) return;
+            showToast('Sending to Kindle...');
+            ajax('POST', '/api/opds/send-to-kindle', { url: url }, function (err, res) {
+                if (!err) showToast('Queued!');
+                else alert("Error: " + err);
+            });
         }
 
         // --- Pagination Logic ---
@@ -641,9 +663,9 @@
             if (book._isScraped) {
                 var btnBg = book._inLibrary ? "#90EE90" : "#FFA500";
                 var btnTxt = book._inLibrary ? "SEND TO KINDLE" : "REQUEST BOOK";
-                coverHtml += '<button class="btn" style="width:60px; height:90px; font-size:12px; background:' + btnBg + '" onclick="triggerOpdsAction(' + idx + '); event.stopPropagation();">' + btnTxt + '</button>';
+                coverHtml += '<button type="button" class="btn" style="width:60px; height:90px; font-size:12px; background:' + btnBg + '" onclick="triggerOpdsAction(' + idx + '); event.stopPropagation();">' + btnTxt + '</button>';
             } else {
-                var img = thumb || 'data:image/svg+xml;base64,...';
+                var img = thumb || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iOTAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2VlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5IiBmb250LXNpemU9IjEwIj5ObyBDb3ZlcjwvdGV4dD48L3N2Zz4=';
                 coverHtml += '<img src="' + img + '" onclick="triggerOpdsAction(' + idx + ')">';
             }
             coverHtml += '</div>';
@@ -672,6 +694,8 @@
             var display = (author && title.indexOf(author) === -1) ? author + " | " + title : title;
 
             if (book._isScraped && !book._inLibrary) {
+                switchTab('search');
+                document.getElementById('search-input').value = display;
                 performSearch(display);
             } else {
                 var url = book._libraryUrl || (acq ? acq.href : null);
@@ -764,7 +788,13 @@
             ajax('GET', '/api/ephemera/search?q=' + encodeURIComponent(q), null, function (err, data) {
                 if (err || !data || !data.length) { results.innerHTML = '<center>No results</center>'; return; }
                 inputDiv.className = 'hidden';
-                renderPaginatedList('Results', data, createSearchResultDiv, function () { inputDiv.className = 'card'; results.innerHTML = ''; renderSearchMenu(); }, 'search-results', 4);
+                window.searchResultRegistry = []; // Reset reg for new results
+                renderPaginatedList('Results', data, createSearchResultDiv, function () {
+                    inputDiv.className = 'card';
+                    results.innerHTML = '';
+                    // When clicking back from results, stay on search tab but show input
+                    updateContextBar();
+                }, 'search-results', 4);
             });
         }
 
