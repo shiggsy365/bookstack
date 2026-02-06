@@ -3,53 +3,65 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BookStack Web</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BookStack</title>
     <style>
+        /* RESET & VIEWPORT */
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: sans-serif;
-            background: #f0f0f0;
+            background: #ffffff;
+            color: #000000;
             margin: 0;
             padding: 0;
-            font-size: 24px;
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            /* CRITICAL: No scroll */
+            display: flex;
+            flex-direction: column;
+            font-size: 20px;
         }
 
-
-
-        .nav {
+        /* LAYOUT CONTAINERS */
+        #top-nav {
+            height: 45px;
+            border-bottom: 2px solid #000;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            flex-shrink: 0;
             background: #fff;
-            border-bottom: 1px solid #000;
         }
 
-        .nav a {
-            display: inline-block;
-            padding: 10px;
+        #context-bar {
+            height: 45px;
+            border-bottom: 2px solid #000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 5px;
+            flex-shrink: 0;
+            background: #fff;
+        }
+
+        #content-area {
+            flex-grow: 1;
+            overflow: hidden;
+            /* Hide overflow, use pagination */
+            padding: 5px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            /* Items start at top */
+        }
+
+        /* NAVIGATION LINKS */
+        .nav-link {
             text-decoration: none;
-            color: #666;
-            font-weight: bold;
-            width: 24%;
-            text-align: center;
-            box-sizing: border-box;
-            font-size: 18px;
-        }
-
-        .nav a.active {
-            color: #000;
-            border-bottom: 3px solid #000;
-        }
-
-        .container {
-            padding: 15px;
-        }
-
-        .card {
-            background: #fff;
-            border: 1px solid #000;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-
-        input {
             width: 100%;
             padding: 12px;
             border: 1px solid #ccc;
@@ -171,9 +183,39 @@
             font-size: 21px;
         }
     </style>
+    .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    z-index: 1000;
+    display: none;
+    }
+
+    .modal-content {
+    background: #fff;
+    margin: 10% auto;
+    padding: 20px;
+    width: 80%;
+    max-width: 600px;
+    border: 2px solid #000;
+    max-height: 80vh;
+    overflow-y: auto;
+    font-size: 20px;
+    }
+    </style>
 </head>
 
 <body>
+    <div id="desc-modal" class="modal-overlay" onclick="closeModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div id="modal-text"></div>
+            <br>
+            <button class="btn" onclick="closeModal()">Close</button>
+        </div>
+    </div>
 
 
     <div class="nav">
@@ -236,12 +278,115 @@
         var searchStateBackup = null; // Backup for search results state
 
         function calculatePageSize() {
-            // Rough calculation: Window height - header/nav - padding / item height
-            // Approx item height 120px + margins
-            var availableHeight = window.innerHeight - 150;
-            var estimatedItemHeight = 150;
-            var size = Math.floor(availableHeight / estimatedItemHeight);
-            return Math.max(3, size); // Minimum 3 items
+            // Measure available height in content-area
+            var container = document.getElementById('content-area');
+            var style = window.getComputedStyle(container);
+            var height = container.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+
+            // Assume min height for an item (safety fallback)
+            // Ideally we measure one, but for first render we guess.
+            // Book item is approx 120px + margins. List item approx 60px.
+            // Let's go conservative.
+            // Better strategy: Use fixed row heights defined in CSS (max-height: 140px).
+            // So:
+            var itemHeight = 150; // 140px max-height + 10px margins
+
+            var size = Math.floor(height / itemHeight);
+            return Math.max(1, size); // At least 1 item
+        }
+
+        function updateContextBar() {
+            var left = document.getElementById('ctx-left');
+            var center = document.getElementById('ctx-center');
+            var right = document.getElementById('ctx-right');
+
+            left.innerHTML = '';
+            center.innerHTML = '';
+            right.innerHTML = '';
+
+            // Title
+            center.innerText = paginationState.title || 'BookStack';
+
+            // Back Button
+            if (paginationState.backAction) {
+                var btn = document.createElement('button');
+                btn.className = 'btn';
+                btn.innerHTML = '&lt; BACK';
+                btn.onclick = paginationState.backAction;
+                left.appendChild(btn);
+            }
+
+            // Pagination Controls
+            var totalPages = Math.ceil(paginationState.items.length / paginationState.pageSize);
+            if (totalPages > 1) {
+                // We put page info in center or right?
+                // Center: Title (1/5)
+                center.innerText += ' (' + (paginationState.currentPage + 1) + '/' + totalPages + ')';
+
+                var prev = document.createElement('button');
+                prev.className = 'btn';
+                prev.innerHTML = '&lt;';
+                prev.style.marginRight = '5px';
+                prev.disabled = paginationState.currentPage === 0;
+                prev.onclick = function () {
+                    if (paginationState.currentPage > 0) {
+                        paginationState.currentPage--;
+                        renderCurrentPage();
+                    }
+                };
+
+                var next = document.createElement('button');
+                next.className = 'btn';
+                next.innerHTML = '&gt;';
+                next.disabled = paginationState.currentPage >= totalPages - 1;
+                next.onclick = function () {
+                    if (paginationState.currentPage < totalPages - 1) {
+                        paginationState.currentPage++;
+                        renderCurrentPage();
+                    }
+                };
+
+                right.appendChild(prev);
+                right.appendChild(next);
+            }
+        }
+
+        function renderPaginatedList(title, items, itemRenderer, backAction, targetElementId, pageSizeOverride) {
+            // Update State
+            paginationState.items = items;
+            paginationState.title = title;
+            paginationState.itemRenderer = itemRenderer;
+            paginationState.backAction = backAction;
+            // Dynamic calc unless override
+            paginationState.pageSize = pageSizeOverride || calculatePageSize();
+            paginationState.currentPage = 0;
+            // Target is usually content-area or sub-div. 
+            // NOTE: We assume targetElementId is inside content-area or IS content-area.
+            // For now, simple views reuse #opds-content.
+
+            renderCurrentPage(targetElementId);
+        }
+
+        function renderCurrentPage(targetElementId) {
+            var content = document.getElementById(targetElementId || 'opds-content');
+            content.innerHTML = '';
+
+            // Update Header/Context Bar
+            updateContextBar();
+
+            if (paginationState.items.length === 0) {
+                content.innerHTML = '<div style="text-align:center; margin-top:50px;">No items found</div>';
+                return;
+            }
+
+            var start = paginationState.currentPage * paginationState.pageSize;
+            var end = Math.min(start + paginationState.pageSize, paginationState.items.length);
+            var pageItems = paginationState.items.slice(start, end);
+
+            for (var i = 0; i < pageItems.length; i++) {
+                var itemDiv = paginationState.itemRenderer(pageItems[i]);
+                if (itemDiv) content.appendChild(itemDiv);
+            }
         }
 
         function showToast(msg) {
@@ -251,7 +396,7 @@
             setTimeout(function () { toast.className = 'hidden'; }, 3000);
         }
 
-        function renderPaginatedList(title, items, itemRenderer, backAction, targetElementId) {
+        function renderPaginatedList(title, items, itemRenderer, backAction, targetElementId, pageSize) {
             var content = document.getElementById(targetElementId || 'opds-content');
             content.innerHTML = '';
 
@@ -260,12 +405,8 @@
             paginationState.title = title;
             paginationState.itemRenderer = itemRenderer;
             paginationState.backAction = backAction;
-            paginationState.pageSize = calculatePageSize();
-            // Reset page if new list, otherwise keep (handled by caller usually, but we'll reset for new lists)
-            // For now, we assume if renderPaginatedList is called, it's a new view or refresh
-            // We'll rely on global state persistence if we want to return to same page, 
-            // but for simplicity let's reset to 0 unless specified.
-            // Actually, let's pass a 'keepPage' flag if needed, but for now reset.
+            paginationState.pageSize = pageSize || calculatePageSize();
+            // Reset page if new list
             paginationState.currentPage = 0;
 
             renderCurrentPage(targetElementId);
@@ -275,52 +416,45 @@
             var content = document.getElementById(targetElementId || 'opds-content');
             content.innerHTML = '';
 
-            // Back Button
-            if (paginationState.backAction) {
-                var back = document.createElement('div');
-                back.className = 'opds-item';
-                back.innerHTML = '<b>&larr; Back</b>';
-                back.onclick = paginationState.backAction;
-                content.appendChild(back);
-            }
-
-            // Header
-            if (paginationState.title) {
-                var header = document.createElement('div');
-                header.className = 'section-header';
-                header.innerHTML = paginationState.title + ' <small>(' + (paginationState.currentPage + 1) + '/' + Math.max(1, Math.ceil(paginationState.items.length / paginationState.pageSize)) + ')</small>';
-                content.appendChild(header);
-            }
-
-            // Slice items
-            var start = paginationState.currentPage * paginationState.pageSize;
-            var end = Math.min(start + paginationState.pageSize, paginationState.items.length);
-            var pageItems = paginationState.items.slice(start, end);
-
-            if (paginationState.items.length === 0) {
-                content.innerHTML += '<center>No items found</center>';
-                return;
-            }
-
-            // Render Items
-            for (var i = 0; i < pageItems.length; i++) {
-                var itemDiv = paginationState.itemRenderer(pageItems[i]);
-                if (itemDiv) content.appendChild(itemDiv);
-            }
-
-            // Pagination Controls
             var totalPages = Math.ceil(paginationState.items.length / paginationState.pageSize);
+            var currentPage = paginationState.currentPage;
+
+            // --- Top Navigation Row (Back + Pagination) ---
+            var navRow = document.createElement('div');
+            navRow.className = 'nav-row';
+            navRow.style.display = 'flex';
+            navRow.style.justifyContent = 'space-between';
+            navRow.style.alignItems = 'center';
+            navRow.style.marginBottom = '15px';
+            navRow.style.paddingBottom = '10px';
+            navRow.style.borderBottom = '1px solid #ccc';
+
+            // Left: Back Button
+            var leftGroup = document.createElement('div');
+            if (paginationState.backAction) {
+                var backBtn = document.createElement('button');
+                backBtn.className = 'btn';
+                backBtn.innerHTML = '&larr; Back';
+                backBtn.style.width = 'auto';
+                backBtn.style.padding = '8px 15px';
+                backBtn.onclick = paginationState.backAction;
+                leftGroup.appendChild(backBtn);
+            }
+            navRow.appendChild(leftGroup);
+
+            // Center/Right: Title & Pagination Controls
+            var rightGroup = document.createElement('div');
+            rightGroup.style.display = 'flex';
+            rightGroup.style.alignItems = 'center';
 
             if (totalPages > 1) {
-                var controls = document.createElement('div');
-                controls.style.cssText = 'display: table; width: 100%; margin-top: 20px; text-align: center;';
-
                 var prevBtn = document.createElement('button');
                 prevBtn.className = 'btn';
-                prevBtn.innerText = 'PREV';
-                prevBtn.style.width = '45%';
-                prevBtn.style.display = 'table-cell';
-                prevBtn.disabled = paginationState.currentPage === 0;
+                prevBtn.innerText = '< Prev';
+                prevBtn.style.width = 'auto';
+                prevBtn.style.padding = '8px 10px';
+                prevBtn.style.marginRight = '10px';
+                prevBtn.disabled = currentPage === 0;
                 prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
                 prevBtn.onclick = function () {
                     if (paginationState.currentPage > 0) {
@@ -330,16 +464,19 @@
                     }
                 };
 
-                var spacer = document.createElement('div');
-                spacer.style.display = 'table-cell';
-                spacer.style.width = '10%';
+                var pageInfo = document.createElement('span');
+                pageInfo.innerText = (currentPage + 1) + ' / ' + totalPages;
+                pageInfo.style.margin = '0 10px';
+                pageInfo.style.fontWeight = 'bold';
+                pageInfo.style.fontSize = '18px';
 
                 var nextBtn = document.createElement('button');
                 nextBtn.className = 'btn';
-                nextBtn.innerText = 'NEXT';
-                nextBtn.style.width = '45%';
-                nextBtn.style.display = 'table-cell';
-                nextBtn.disabled = paginationState.currentPage >= totalPages - 1;
+                nextBtn.innerText = 'Next >';
+                nextBtn.style.width = 'auto';
+                nextBtn.style.padding = '8px 10px';
+                nextBtn.style.marginLeft = '10px';
+                nextBtn.disabled = currentPage >= totalPages - 1;
                 nextBtn.style.opacity = nextBtn.disabled ? '0.5' : '1';
                 nextBtn.onclick = function () {
                     if (paginationState.currentPage < totalPages - 1) {
@@ -349,11 +486,30 @@
                     }
                 };
 
-                controls.appendChild(prevBtn);
-                controls.appendChild(spacer);
-                controls.appendChild(nextBtn);
-                content.appendChild(controls);
+                rightGroup.appendChild(prevBtn);
+                rightGroup.appendChild(pageInfo);
+                rightGroup.appendChild(nextBtn);
             }
+            navRow.appendChild(rightGroup);
+            content.appendChild(navRow);
+
+            // --- Items ---
+            if (paginationState.items.length === 0) {
+                content.innerHTML += '<center>No items found</center>';
+                return;
+            }
+
+            var start = currentPage * paginationState.pageSize;
+            var end = Math.min(start + paginationState.pageSize, paginationState.items.length);
+            var pageItems = paginationState.items.slice(start, end);
+
+            for (var i = 0; i < pageItems.length; i++) {
+                var itemDiv = paginationState.itemRenderer(pageItems[i]);
+                if (itemDiv) content.appendChild(itemDiv);
+            }
+
+            // Optional: Bottom Pagination (Simplified or same as top? User requested top)
+            // We can just leave it at the top for now as "Next to the back button" was spec.
         }
 
         function ajax(method, path, data, callback) {
@@ -409,7 +565,21 @@
                 document.getElementById('tab-' + tabs[i] + '-btn').className = '';
             }
             document.getElementById('view-' + tab).className = '';
-            document.getElementById('tab-' + tab + '-btn').className = 'active';
+            // document.getElementById('tab-' + tab + '-btn').className = 'nav-link active'; // Logic handled by switchTab click? No, refactor classes.
+            // Reset active class
+            var links = document.querySelectorAll('.nav-link');
+            for (var j = 0; j < links.length; j++) links[j].className = 'nav-link';
+            // Find active one (simple check)
+            if (tab === 'cloud') links[0].className += ' active';
+            if (tab === 'search') links[1].className += ' active';
+            if (tab === 'queue') links[2].className += ' active';
+            if (tab === 'settings') links[3].className += ' active';
+
+            // Reset Context Bar default
+            document.getElementById('ctx-left').innerHTML = '';
+            document.getElementById('ctx-center').innerText = (tab.charAt(0).toUpperCase() + tab.slice(1));
+            document.getElementById('ctx-right').innerHTML = '';
+
             if (tab === 'queue') refreshQueue();
             if (tab === 'cloud') renderOPDSMenu();
             if (tab === 'search') renderSearchMenu();
@@ -419,6 +589,11 @@
             var menu = document.getElementById('search-menu');
             var ephemera = document.getElementById('ephemera-search');
             var bsio = document.getElementById('bsio-search-container');
+
+            var left = document.getElementById('ctx-left');
+            left.innerHTML = '';
+            document.getElementById('ctx-center').innerText = 'Request';
+            document.getElementById('ctx-right').innerHTML = '';
 
             menu.innerHTML = '';
             menu.className = ''; // Explicitly show menu
@@ -519,6 +694,11 @@
             content.innerHTML = '';
             opdsHistory = [];
 
+            // Reset Context Bar for main menu
+            document.getElementById('ctx-left').innerHTML = '';
+            document.getElementById('ctx-center').innerText = 'Library';
+            document.getElementById('ctx-right').innerHTML = '';
+
             var intro = document.createElement('p');
             intro.style.margin = '0 0 15px 0';
             intro.style.color = '#666';
@@ -564,8 +744,8 @@
 
         function renderRecentBooksList() {
             var content = document.getElementById('opds-content');
-            // Render with pagination
-            renderPaginatedList('Recent Books', books, createBookItemDiv, function () { renderOPDSMenu(); });
+            // Render with dynamic pagination
+            renderPaginatedList('Recent Books', opdsData, createBookItemDiv, function () { renderOPDSMenu(); });
         }
 
         // Helper to create book item div (moved from renderBookItem to return element)
@@ -585,33 +765,65 @@
             if (!acqLink) return null;
 
             var div = document.createElement('div');
-            div.className = 'opds-item';
-            div.style.cursor = 'default';
+            // Use 'book-row' class from new CSS which enforces height
+            div.className = 'book-row';
 
             var seriesInfo = '';
             if (book.series_name) {
-                seriesInfo = '<br><small style="color:#666;">' + book.series_name + ' #' + (book.series_index || '?') + '</small>';
-            }
-
-            var description = '';
-            if (book.description) {
-                description = '<div class="book-description">' + book.description + '</div>';
+                seriesInfo = '<div class="book-meta">' + book.series_name + ' #' + (book.series_index || '?') + '</div>';
             }
 
             var coverHtml = '<div class="book-cover">';
             if (thumbnail) {
-                coverHtml += '<img src="' + thumbnail + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
+                coverHtml += '<img src="' + thumbnail + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+\';">';
             } else {
-                coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
+                coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+">';
             }
-            coverHtml += '<button class="btn" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to Kindle</button></div>';
 
-            div.innerHTML = '<div class="book-row">' + coverHtml +
+            // Button: We want it small and accessible.
+            // Maybe inside the cover column? Or in info?
+            // Spec said "Button underneath image" previously. Let's keep that but compact.
+            coverHtml += '<button class="btn" style="width:100%; margin-top:4px; font-size:16px; padding:2px;" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">SEND</button>';
+            coverHtml += '</div>';
+
+            var descText = book.description || '';
+            var readMore = '';
+            // If description exists, provide a way to read it.
+            // In rigid layout, we can't show much text.
+            // We'll add a [Info] button or link in meta.
+            if (descText) {
+                readMore = ' &nbsp;<a href="#" onclick="showModal(\'' + escapeHtml(descText) + '\'); return false;">[INFO]</a>';
+            }
+
+            div.innerHTML = coverHtml +
                 '<div class="book-info">' +
-                '<b>' + book.title + '</b>' + seriesInfo + description +
-                '</div></div>';
+                '<div class="book-title">' + book.title + '</div>' +
+                '<div class="book-meta">' + (book.authors ? book.authors.join(', ') : 'Unknown') + '</div>' +
+                seriesInfo +
+                '<div class="book-meta" style="margin-top:5px; color:#555;">' + readMore + '</div>' +
+                '</div>';
 
             return div;
+        }
+
+        // Modal Helpers
+        function showModal(content) {
+            document.getElementById('modal-text').innerHTML = content;
+            document.getElementById('desc-modal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('desc-modal').style.display = 'none';
+        }
+
+        function escapeHtml(text) {
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;")
+                .replace(/\n/g, '<br>'); // Simple newline handling for plain text
         }
 
         function browseOPDS(path) {
@@ -634,12 +846,14 @@
 
         function renderOPDSList(currentPath) {
             var content = document.getElementById('opds-content');
+            content.innerHTML = ''; // Clear loading message immediately
+
             var backAction = function () {
-                if (opdsHistory.length === 0) {
-                    renderOPDSMenu();
+                if (opdsHistory.length > 0) {
+                    var last = opdsHistory.pop();
+                    browseOPDS(last);
                 } else {
-                    var prev = opdsHistory.pop();
-                    browseOPDS(prev);
+                    renderOPDSMenu(); // Default fallback to main OPDS menu
                 }
             };
 
@@ -656,11 +870,11 @@
             }
 
             if (hasBooks) {
-                renderAuthorDrilldown();
+                renderAuthorDrilldown(backAction); // Pass backAction to drilldown
                 return;
             }
 
-            // Regular navigation list
+            // Regular navigation list (6 items per page for authors/folders)
             renderPaginatedList('', opdsData, function (entry) {
                 var navLink = null;
                 var acqLink = null;
@@ -695,71 +909,9 @@
             }, backAction);
         }
 
-        function renderAuthorDrilldown() {
+        function renderSeriesBooks(seriesName, books, backActionOverride) {
             var content = document.getElementById('opds-content');
-
-            // Collect all unique series
-            var seriesMap = {};
-            var standaloneBooks = [];
-
-            for (var i = 0; i < opdsData.length; i++) {
-                var book = opdsData[i];
-                if (book.series_name) {
-                    if (!seriesMap[book.series_name]) {
-                        seriesMap[book.series_name] = [];
-                    }
-                    seriesMap[book.series_name].push(book);
-                } else {
-                    standaloneBooks.push(book);
-                }
-            }
-
-            // Show series folders
-            var seriesNames = [];
-            for (var name in seriesMap) {
-                if (seriesMap.hasOwnProperty(name)) {
-                    seriesNames.push(name);
-                }
-            }
-            seriesNames.sort();
-
-            for (var i = 0; i < seriesNames.length; i++) {
-                var sName = seriesNames[i];
-                var div = document.createElement('div');
-                div.className = 'opds-item';
-                div.innerHTML = '<b>📚 Series: ' + sName + '</b> <small>(' + seriesMap[sName].length + ' books)</small>';
-                div.onclick = (function (name, books) {
-                    return function () {
-                        renderSeriesBooks(name, books);
-                    };
-                })(sName, seriesMap[sName]);
-                content.appendChild(div);
-            }
-
-            // Show standalone folder
-            if (standaloneBooks.length > 0) {
-                var div = document.createElement('div');
-                div.className = 'opds-item';
-                div.innerHTML = '<b>📄 Standalone Books</b> <small>(' + standaloneBooks.length + ' books)</small>';
-                div.onclick = function () {
-                    renderStandaloneBooks(standaloneBooks);
-                };
-                content.appendChild(div);
-            }
-
-            // Show all books option
-            var div = document.createElement('div');
-            div.className = 'opds-item';
-            div.innerHTML = '<b>📖 All Books</b> <small>(' + opdsData.length + ' books)</small>';
-            div.onclick = function () {
-                renderAllBooks(opdsData);
-            };
-            content.appendChild(div);
-        }
-
-        function renderSeriesBooks(seriesName, books) {
-            var content = document.getElementById('opds-content');
-            var backAction = function () {
+            var backAction = backActionOverride || function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
 
@@ -768,16 +920,18 @@
                 return (parseFloat(a.series_index) || 0) - (parseFloat(b.series_index) || 0);
             });
 
+            // Series Books view - dynamic page size
             renderPaginatedList(seriesName, books, createBookItemDiv, backAction);
         }
 
+        // Deprecated separated renderers, now handled by combined drilldown or generic lists
         function renderStandaloneBooks(books) {
             var content = document.getElementById('opds-content');
             var backAction = function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
 
-            renderPaginatedList('Standalone Books', books, createBookItemDiv, backAction);
+            renderPaginatedList('Standalone Books', books, createBookItemDiv, backAction, null, 4);
         }
 
         function renderAllBooks(books) {
@@ -791,7 +945,7 @@
                 return a.title.localeCompare(b.title);
             });
 
-            renderPaginatedList('All Books', books, createBookItemDiv, backAction);
+            renderPaginatedList('All Books', books, createBookItemDiv, backAction, null, 4);
         }
 
         // Deprecated simple renderBookItem (kept as wrapper just in case, but unused now)
@@ -918,7 +1072,8 @@
                         return div;
                     },
                     restoreSearch, // Back action restores visibility
-                    'search-results' // Target the search-results div
+                    'search-results', // Target the search-results div
+                    4 // Page size
                 );
             });
         }
