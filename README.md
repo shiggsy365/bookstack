@@ -29,7 +29,8 @@ The fastest way to get Bookstack running alongside your existing services is via
 
 Use the compose.yaml file and modify the example .env file to suit your needs.
 
-Initially set up to install Booklore (Library Management), Shelfmark (Downloader), Prowlarr (Download manager usign Usenet - optional), and Bookstack (E-Reader web interface) as a full stack solution, but adapt this for personal requirements.
+Initially set up to install Booklore (Library Management), Shelfmark (Downloader), Prowlarr (Download manager using Usenet - optional), and Bookstack (E-Reader web interface) as a full stack solution, but adapt this for personal requirements.
+Compose is configured to use Traefik on a VPS, but adapt this to whatever your network dictates.
 
 ### Environment Variables
 
