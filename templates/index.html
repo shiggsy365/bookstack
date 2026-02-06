@@ -600,7 +600,9 @@
             var pathDepth = segments.length;
             if (currentPath.indexOf('://') !== -1) pathDepth -= 2;
 
-            var isAuthorLevel = isAuthorPath && (pathDepth >= 2);
+            // Author button only shows if we are drilled into an author's list
+            // (e.g. /authors/A/AuthorName -> depth 3)
+            var isAuthorLevel = isAuthorPath && (pathDepth >= 3);
 
             if (seriesItems.length > 0 || isAuthorLevel) {
                 // Author/Series View
@@ -861,8 +863,8 @@
             var size = r.size_bytes ? (r.size_bytes / 1024 / 1024).toFixed(1) + 'MB' : (r.size || '');
             var idx = window.releaseRegistry.push(r) - 1;
 
-            var author = r.author || 'Unknown Author';
-            var title = r.title || 'Unknown Title';
+            var author = r.author || (r.authors && r.authors.join(', ')) || r.publisher || 'Unknown Author';
+            var title = r.title || r.filename || 'Unknown Title';
 
             var html = '<div style="float:right"><button type="button" class="btn" onclick="triggerDownload(' + idx + ')">GET</button></div>';
             html += '<b>' + author + ' - ' + title + '</b><br>';
