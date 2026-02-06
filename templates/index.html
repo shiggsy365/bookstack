@@ -181,7 +181,7 @@
 </head>
 
 <body>
-    <div class="header"><b>Cloud Library</b></div>
+    <div class="header"><b>Bookstack</b></div>
 
     <div class="nav">
         <a href="#" id="tab-cloud-btn" class="active" onclick="switchTab('cloud'); return false;">Library</a>
@@ -231,11 +231,135 @@
         var opdsHistory = [];
         var opdsData = [];
 
+        // Pagination State
+        var paginationState = {
+            items: [],
+            currentPage: 0,
+            pageSize: 10, // Default, will be calculated
+            title: '',
+            backAction: null,
+            itemRenderer: null
+        };
+
+        function calculatePageSize() {
+            // Rough calculation: Window height - header/nav - padding / item height
+            // Approx item height 120px + margins
+            var availableHeight = window.innerHeight - 150;
+            var estimatedItemHeight = 150;
+            var size = Math.floor(availableHeight / estimatedItemHeight);
+            return Math.max(3, size); // Minimum 3 items
+        }
+
         function showToast(msg) {
             var toast = document.getElementById('message-toast');
             toast.innerText = msg;
             toast.className = '';
             setTimeout(function () { toast.className = 'hidden'; }, 3000);
+        }
+
+        function renderPaginatedList(title, items, itemRenderer, backAction, targetElementId) {
+            var content = document.getElementById(targetElementId || 'opds-content');
+            content.innerHTML = '';
+
+            // Update State
+            paginationState.items = items;
+            paginationState.title = title;
+            paginationState.itemRenderer = itemRenderer;
+            paginationState.backAction = backAction;
+            paginationState.pageSize = calculatePageSize();
+            // Reset page if new list, otherwise keep (handled by caller usually, but we'll reset for new lists)
+            // For now, we assume if renderPaginatedList is called, it's a new view or refresh
+            // We'll rely on global state persistence if we want to return to same page, 
+            // but for simplicity let's reset to 0 unless specified.
+            // Actually, let's pass a 'keepPage' flag if needed, but for now reset.
+            paginationState.currentPage = 0;
+
+            renderCurrentPage(targetElementId);
+        }
+
+        function renderCurrentPage(targetElementId) {
+            var content = document.getElementById(targetElementId || 'opds-content');
+            content.innerHTML = '';
+
+            // Back Button
+            if (paginationState.backAction) {
+                var back = document.createElement('div');
+                back.className = 'opds-item';
+                back.innerHTML = '<b>&larr; Back</b>';
+                back.onclick = paginationState.backAction;
+                content.appendChild(back);
+            }
+
+            // Header
+            if (paginationState.title) {
+                var header = document.createElement('div');
+                header.className = 'section-header';
+                header.innerHTML = paginationState.title + ' <small>(' + (paginationState.currentPage + 1) + '/' + Math.max(1, Math.ceil(paginationState.items.length / paginationState.pageSize)) + ')</small>';
+                content.appendChild(header);
+            }
+
+            // Slice items
+            var start = paginationState.currentPage * paginationState.pageSize;
+            var end = Math.min(start + paginationState.pageSize, paginationState.items.length);
+            var pageItems = paginationState.items.slice(start, end);
+
+            if (paginationState.items.length === 0) {
+                content.innerHTML += '<center>No items found</center>';
+                return;
+            }
+
+            // Render Items
+            for (var i = 0; i < pageItems.length; i++) {
+                var itemDiv = paginationState.itemRenderer(pageItems[i]);
+                if (itemDiv) content.appendChild(itemDiv);
+            }
+
+            // Pagination Controls
+            var totalPages = Math.ceil(paginationState.items.length / paginationState.pageSize);
+
+            if (totalPages > 1) {
+                var controls = document.createElement('div');
+                controls.style.cssText = 'display: table; width: 100%; margin-top: 20px; text-align: center;';
+
+                var prevBtn = document.createElement('button');
+                prevBtn.className = 'btn';
+                prevBtn.innerText = 'PREV';
+                prevBtn.style.width = '45%';
+                prevBtn.style.display = 'table-cell';
+                prevBtn.disabled = paginationState.currentPage === 0;
+                prevBtn.style.opacity = prevBtn.disabled ? '0.5' : '1';
+                prevBtn.onclick = function () {
+                    if (paginationState.currentPage > 0) {
+                        paginationState.currentPage--;
+                        renderCurrentPage(targetElementId);
+                        window.scrollTo(0, 0);
+                    }
+                };
+
+                var spacer = document.createElement('div');
+                spacer.style.display = 'table-cell';
+                spacer.style.width = '10%';
+
+                var nextBtn = document.createElement('button');
+                nextBtn.className = 'btn';
+                nextBtn.innerText = 'NEXT';
+                nextBtn.style.width = '45%';
+                nextBtn.style.display = 'table-cell';
+                nextBtn.disabled = paginationState.currentPage >= totalPages - 1;
+                nextBtn.style.opacity = nextBtn.disabled ? '0.5' : '1';
+                nextBtn.onclick = function () {
+                    if (paginationState.currentPage < totalPages - 1) {
+                        paginationState.currentPage++;
+                        renderCurrentPage(targetElementId);
+                        window.scrollTo(0, 0);
+                    }
+                };
+
+                controls.appendChild(prevBtn);
+                controls.appendChild(spacer);
+                controls.appendChild(nextBtn);
+                content.appendChild(controls);
+            }
         }
 
         function ajax(method, path, data, callback) {
@@ -303,6 +427,7 @@
             var bsio = document.getElementById('bsio-search-container');
 
             menu.innerHTML = '';
+            menu.className = ''; // Explicitly show menu
             ephemera.className = 'hidden';
             bsio.className = 'hidden';
 
@@ -313,7 +438,7 @@
             menu.appendChild(intro);
 
             var options = [
-                { title: 'Direct Search', desc: 'Search Ephemera for books', action: showEphemeraSearch },
+                { title: 'Direct Search', desc: 'Search download sources directly', action: showEphemeraSearch },
                 { title: 'Book Series in Order', desc: 'Search for book series by author', action: showBSIOSearchInRequest }
             ];
 
@@ -328,8 +453,21 @@
 
         function showEphemeraSearch() {
             document.getElementById('search-menu').className = 'hidden';
-            document.getElementById('ephemera-search').className = '';
+            var ephemera = document.getElementById('ephemera-search');
+            ephemera.className = '';
             document.getElementById('bsio-search-container').className = 'hidden';
+
+            // Add Back button if not present in the card
+            var card = ephemera.querySelector('.card');
+            if (!card.querySelector('.back-btn')) {
+                var backBtn = document.createElement('div');
+                backBtn.className = 'back-btn opds-item';
+                backBtn.style.marginBottom = '15px';
+                backBtn.innerHTML = '<b>&larr; Back</b>';
+                backBtn.onclick = renderSearchMenu;
+                ephemera.insertBefore(backBtn, card);
+            }
+
             document.getElementById('search-results').innerHTML = '';
         }
 
@@ -432,45 +570,54 @@
 
         function renderRecentBooksList() {
             var content = document.getElementById('opds-content');
-            content.innerHTML = '';
+            // Render with pagination
+            renderPaginatedList('Recent Books', books, createBookItemDiv, function () { renderOPDSMenu(); });
+        }
 
-            var back = document.createElement('div');
-            back.className = 'opds-item';
-            back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function () {
-                renderOPDSMenu();
-            };
-            content.appendChild(back);
+        // Helper to create book item div (moved from renderBookItem to return element)
+        function createBookItemDiv(book) {
+            var acqLink = null;
+            var thumbnail = '';
 
-            var header = document.createElement('div');
-            header.className = 'section-header';
-            header.innerText = 'Recent Books';
-            content.appendChild(header);
-
-            // Filter to only books with acquisition links
-            var books = [];
-            for (var i = 0; i < opdsData.length; i++) {
-                var hasAcq = false;
-                for (var j = 0; j < opdsData[i].links.length; j++) {
-                    if (opdsData[i].links[j].rel && opdsData[i].links[j].rel.indexOf('acquisition') !== -1) {
-                        hasAcq = true;
-                        break;
-                    }
+            for (var j = 0; j < book.links.length; j++) {
+                if (book.links[j].rel && book.links[j].rel.indexOf('acquisition') !== -1) {
+                    acqLink = book.links[j];
                 }
-                if (hasAcq) {
-                    books.push(opdsData[i]);
+                if (book.links[j].rel && book.links[j].rel.indexOf('thumbnail') !== -1) {
+                    thumbnail = book.links[j].href;
                 }
             }
 
-            if (books.length === 0) {
-                content.innerHTML += '<center>No recent books found</center>';
-                return;
+            if (!acqLink) return null;
+
+            var div = document.createElement('div');
+            div.className = 'opds-item';
+            div.style.cursor = 'default';
+
+            var seriesInfo = '';
+            if (book.series_name) {
+                seriesInfo = '<br><small style="color:#666;">' + book.series_name + ' #' + (book.series_index || '?') + '</small>';
             }
 
-            // Books are already sorted by recent date from OPDS feed
-            for (var i = 0; i < books.length; i++) {
-                renderBookItem(books[i]);
+            var description = '';
+            if (book.description) {
+                description = '<div class="book-description">' + book.description + '</div>';
             }
+
+            var coverHtml = '<div class="book-cover">';
+            if (thumbnail) {
+                coverHtml += '<img src="' + thumbnail + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
+            } else {
+                coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
+            }
+            coverHtml += '<button class="btn" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to Kindle</button></div>';
+
+            div.innerHTML = '<div class="book-row">' + coverHtml +
+                '<div class="book-info">' +
+                '<b>' + book.title + '</b>' + seriesInfo + description +
+                '</div></div>';
+
+            return div;
         }
 
         function browseOPDS(path) {
@@ -493,12 +640,7 @@
 
         function renderOPDSList(currentPath) {
             var content = document.getElementById('opds-content');
-            content.innerHTML = '';
-
-            var back = document.createElement('div');
-            back.className = 'opds-item';
-            back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function () {
+            var backAction = function () {
                 if (opdsHistory.length === 0) {
                     renderOPDSMenu();
                 } else {
@@ -506,7 +648,6 @@
                     browseOPDS(prev);
                 }
             };
-            content.appendChild(back);
 
             // Check if this is an author page (has books with acquisition links)
             var hasBooks = false;
@@ -526,8 +667,7 @@
             }
 
             // Regular navigation list
-            for (var i = 0; i < opdsData.length; i++) {
-                var entry = opdsData[i];
+            renderPaginatedList('', opdsData, function (entry) {
                 var navLink = null;
                 var acqLink = null;
 
@@ -553,19 +693,12 @@
                         };
                     })(currentPath, navLink.href);
                 } else if (acqLink) {
-                    var seriesInfo = '';
-                    if (entry.series_name) {
-                        seriesInfo = '<br><small>' + entry.series_name + ' #' + (entry.series_index || '?') + '</small>';
-                    }
-                    div.innerHTML = '<b>' + entry.title + '</b>' +
-                        '<br><small>' + (entry.author || 'Unknown') + '</small>' +
-                        seriesInfo +
-                        '<br><button class="btn" style="margin-top:10px; padding:8px;" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to Kindle</button>';
-                    div.onclick = null;
+                    // Reuse book helper if needed, but this is usually sparse info in browse view
+                    return createBookItemDiv(entry);
                 }
+                return div;
 
-                content.appendChild(div);
-            }
+            }, backAction);
         }
 
         function renderAuthorDrilldown() {
@@ -632,124 +765,45 @@
 
         function renderSeriesBooks(seriesName, books) {
             var content = document.getElementById('opds-content');
-            content.innerHTML = '';
-
-            var back = document.createElement('div');
-            back.className = 'opds-item';
-            back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function () {
+            var backAction = function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
-            content.appendChild(back);
-
-            var header = document.createElement('div');
-            header.className = 'section-header';
-            header.innerText = seriesName;
-            content.appendChild(header);
 
             // Sort by series index
             books.sort(function (a, b) {
                 return (parseFloat(a.series_index) || 0) - (parseFloat(b.series_index) || 0);
             });
 
-            for (var i = 0; i < books.length; i++) {
-                renderBookItem(books[i]);
-            }
+            renderPaginatedList(seriesName, books, createBookItemDiv, backAction);
         }
 
         function renderStandaloneBooks(books) {
             var content = document.getElementById('opds-content');
-            content.innerHTML = '';
-
-            var back = document.createElement('div');
-            back.className = 'opds-item';
-            back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function () {
+            var backAction = function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
-            content.appendChild(back);
 
-            var header = document.createElement('div');
-            header.className = 'section-header';
-            header.innerText = 'Standalone Books';
-            content.appendChild(header);
-
-            for (var i = 0; i < books.length; i++) {
-                renderBookItem(books[i]);
-            }
+            renderPaginatedList('Standalone Books', books, createBookItemDiv, backAction);
         }
 
         function renderAllBooks(books) {
             var content = document.getElementById('opds-content');
-            content.innerHTML = '';
-
-            var back = document.createElement('div');
-            back.className = 'opds-item';
-            back.innerHTML = '<b>&larr; Back</b>';
-            back.onclick = function () {
+            var backAction = function () {
                 renderOPDSList(opdsHistory[opdsHistory.length - 1] || '');
             };
-            content.appendChild(back);
-
-            var header = document.createElement('div');
-            header.className = 'section-header';
-            header.innerText = 'All Books';
-            content.appendChild(header);
 
             // Sort by title
             books.sort(function (a, b) {
                 return a.title.localeCompare(b.title);
             });
 
-            for (var i = 0; i < books.length; i++) {
-                renderBookItem(books[i]);
-            }
+            renderPaginatedList('All Books', books, createBookItemDiv, backAction);
         }
 
+        // Deprecated simple renderBookItem (kept as wrapper just in case, but unused now)
         function renderBookItem(book) {
-            var content = document.getElementById('opds-content');
-            var acqLink = null;
-            var thumbnail = '';
-
-            for (var j = 0; j < book.links.length; j++) {
-                if (book.links[j].rel && book.links[j].rel.indexOf('acquisition') !== -1) {
-                    acqLink = book.links[j];
-                }
-                if (book.links[j].rel && book.links[j].rel.indexOf('thumbnail') !== -1) {
-                    thumbnail = book.links[j].href;
-                }
-            }
-
-            if (!acqLink) return;
-
-            var div = document.createElement('div');
-            div.className = 'opds-item';
-            div.style.cursor = 'default';
-
-            var seriesInfo = '';
-            if (book.series_name) {
-                seriesInfo = '<br><small style="color:#666;">' + book.series_name + ' #' + (book.series_index || '?') + '</small>';
-            }
-
-            var description = '';
-            if (book.description) {
-                description = '<div class="book-description">' + book.description + '</div>';
-            }
-
-            var coverHtml = '<div class="book-cover">';
-            if (thumbnail) {
-                coverHtml += '<img src="' + thumbnail + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
-            } else {
-                coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
-            }
-            coverHtml += '<button class="btn" onclick="sendToKindle(\'' + acqLink.href.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to Kindle</button></div>';
-
-            div.innerHTML = '<div class="book-row">' + coverHtml +
-                '<div class="book-info">' +
-                '<b>' + book.title + '</b>' + seriesInfo + description +
-                '</div></div>';
-
-            content.appendChild(div);
+            var div = createBookItemDiv(book);
+            if (div) document.getElementById('opds-content').appendChild(div);
         }
 
         function sendToKindle(url) {
@@ -772,52 +826,88 @@
 
             ajax('GET', '/api/ephemera/search?q=' + encodeURIComponent(query), null, function (err, data) {
                 results.innerHTML = '';
-
                 if (err || !data) {
                     results.innerHTML = '<center>Error</center>';
                     return;
                 }
-
                 if (data.error) {
                     results.innerHTML = '<center>' + data.error + '</center>';
                     return;
                 }
-
                 if (!data.length) {
                     results.innerHTML = '<center>No results</center>';
                     return;
                 }
 
-                for (var i = 0; i < data.length; i++) {
-                    var book = data[i];
-                    var div = document.createElement('div');
-                    div.className = 'book-card';
-                    div.style.cursor = 'default';
+                // Helper for relevance sorting
+                function levenshtein(a, b) {
+                    var tmp;
+                    if (a.length === 0) { return b.length; }
+                    if (b.length === 0) { return a.length; }
+                    if (a.length > b.length) { tmp = a; a = b; b = tmp; }
 
-                    var authors = book.authors ? book.authors.join(', ') : 'Unknown';
-                    var sizeInMB = book.size ? (book.size / 1024 / 1024).toFixed(1) + ' MB' : 'Unknown size';
+                    var row = [];
+                    for (var i = 0; i <= a.length; i++) { row[i] = i; }
 
-                    var coverHtml = '<div class="book-cover">';
-                    if (book.coverUrl) {
-                        coverHtml += '<img src="' + book.coverUrl + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
-                    } else {
-                        coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
+                    for (var i = 1; i <= b.length; i++) {
+                        var prev = i;
+                        for (var j = 1; j <= a.length; j++) {
+                            var val;
+                            if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                                val = row[j - 1];
+                            } else {
+                                val = Math.min(row[j - 1] + 1, Math.min(prev + 1, row[j] + 1));
+                            }
+                            row[j - 1] = prev;
+                            prev = val;
+                        }
+                        row[a.length] = prev;
                     }
-                    coverHtml += '<button class="btn" onclick="showReleases(\'' + book.md5 + '\')">View Releases</button>';
-                    coverHtml += '</div>';
-
-                    var description = book.description ? book.description : '';
-                    if (description.length > 200) description = description.substring(0, 200) + '...';
-
-                    div.innerHTML = '<div class="book-row">' + coverHtml +
-                        '<div class="book-info">' +
-                        '<b>' + book.title + '</b>' +
-                        '<br><small style="color:#666;">' + authors + '</small>' +
-                        '<br><div style="font-size:0.85em; margin-top:5px; color:#444;">' + description + '</div>' +
-                        '</div></div>';
-
-                    results.appendChild(div);
+                    return row[a.length];
                 }
+
+                // Sort by relevance (Levenshtein distance of title to query)
+                var qLower = query.toLowerCase().trim();
+                data.sort(function (a, b) {
+                    var distA = levenshtein(a.title.toLowerCase().trim(), qLower);
+                    var distB = levenshtein(b.title.toLowerCase().trim(), qLower);
+                    return distA - distB;
+                });
+
+                // Render paginated results
+                renderPaginatedList(
+                    'Search Results',
+                    data,
+                    function (book) {
+                        var div = document.createElement('div');
+                        div.className = 'book-card';
+                        div.style.cursor = 'default';
+
+                        var authors = book.authors ? book.authors.join(', ') : 'Unknown';
+
+                        var coverHtml = '<div class="book-cover">';
+                        if (book.coverUrl) {
+                            coverHtml += '<img src="' + book.coverUrl + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
+                        } else {
+                            coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
+                        }
+                        coverHtml += '<button class="btn" onclick="showReleases(\'' + book.md5 + '\')">View Releases</button>';
+                        coverHtml += '</div>';
+
+                        var description = book.description ? book.description : '';
+                        if (description.length > 200) description = description.substring(0, 200) + '...';
+
+                        div.innerHTML = '<div class="book-row">' + coverHtml +
+                            '<div class="book-info">' +
+                            '<b>' + book.title + '</b>' +
+                            '<br><small style="color:#666;">' + authors + '</small>' +
+                            '<br><div style="font-size:0.85em; margin-top:5px; color:#444;">' + description + '</div>' +
+                            '</div></div>';
+                        return div;
+                    },
+                    null, // No back action here, as it's part of the search view
+                    'search-results' // Target the search-results div
+                );
             });
         }
 
@@ -863,63 +953,61 @@
         }
 
         function renderReleasesTable(container, releases) {
-            container.innerHTML = '';
-
-            var backBtn = document.createElement('button');
-            backBtn.className = 'btn';
-            backBtn.style.marginBottom = '15px';
-            backBtn.style.background = '#666';
-            backBtn.innerText = '← Back to Search';
-            backBtn.onclick = backToSearch;
-            container.appendChild(backBtn);
-
-            var header = document.createElement('div');
-            header.className = 'section-header';
-            header.innerText = 'Select a Release';
-            container.appendChild(header);
-
+            var filtered = [];
             for (var i = 0; i < releases.length; i++) {
-                var release = releases[i];
-                var div = document.createElement('div');
-                div.className = 'book-card';
-
-                var title = release.title || 'Unknown Title';
-                var source = release.source || 'Unknown Source';
-
-                // Fix Size: Use size_bytes if available, else look for size string
-                var sizeStr = '';
-                if (release.size_bytes) {
-                    sizeStr = (release.size_bytes / 1024 / 1024).toFixed(1) + ' MB';
-                } else if (release.size) {
-                    sizeStr = release.size;
+                var fmt = (releases[i].format || '').toLowerCase();
+                if (fmt.indexOf('epub') !== -1 || fmt.indexOf('mobi') !== -1) {
+                    filtered.push(releases[i]);
                 }
-
-                // Fix Seeds: Check for null/undefined
-                var seedsStr = '';
-                if (release.seeders !== null && release.seeders !== undefined) {
-                    seedsStr = release.seeders + ' seeds';
-                }
-
-                // Fix Format & Language: Dont show 'Unknown' if missing
-                var format = release.format || '';
-                var lang = release.language || '';
-
-                // Construct metadata line with filtering
-                var metaParts = [];
-                if (source) metaParts.push(source);
-                if (lang) metaParts.push(lang);
-                if (format) metaParts.push(format);
-                if (sizeStr) metaParts.push(sizeStr);
-                if (seedsStr) metaParts.push(seedsStr);
-
-                var metaHtml = metaParts.join(' • ');
-
-                div.innerHTML = '<b>' + title + '</b><br>' +
-                    '<small>' + metaHtml + '</small><br>' +
-                    '<button class="btn" style="margin-top:10px;" onclick=\'downloadRelease(' + JSON.stringify(release).replace(/'/g, "&#39;") + ')\'>Download</button>';
-
-                container.appendChild(div);
             }
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<center>No EPUB/MOBI releases found</center><br><button class="btn" onclick="backToSearch()">Back</button>';
+                return;
+            }
+
+            renderPaginatedList(
+                'Select a Release',
+                filtered,
+                function (release) {
+                    var div = document.createElement('div');
+                    div.className = 'book-card';
+
+                    var title = release.title || 'Unknown Title';
+                    var source = release.source || 'Unknown Source';
+
+                    var sizeStr = '';
+                    if (release.size_bytes) {
+                        sizeStr = (release.size_bytes / 1024 / 1024).toFixed(1) + ' MB';
+                    } else if (release.size) {
+                        sizeStr = release.size;
+                    }
+
+                    var seedsStr = '';
+                    if (release.seeders !== null && release.seeders !== undefined) {
+                        seedsStr = release.seeders + ' seeds';
+                    }
+
+                    var format = release.format || '';
+                    var lang = release.language || '';
+
+                    var metaParts = [];
+                    if (source) metaParts.push(source);
+                    if (lang) metaParts.push(lang);
+                    if (format) metaParts.push(format);
+                    if (sizeStr) metaParts.push(sizeStr);
+                    if (seedsStr) metaParts.push(seedsStr);
+
+                    var metaHtml = metaParts.join(' • ');
+
+                    div.innerHTML = '<b>' + title + '</b><br>' +
+                        '<small>' + metaHtml + '</small><br>' +
+                        '<button class="btn" style="margin-top:10px;" onclick=\'downloadRelease(' + JSON.stringify(release).replace(/'/g, "&#39;") + ')\'>Download</button>';
+                    return div;
+                },
+                backToSearch,
+                'releases-container'
+            );
         }
 
         function downloadRelease(release) {
@@ -1022,33 +1110,29 @@
         }
 
         function showBSIOAuthorListInRequest(authors) {
-            var results = document.getElementById('bsio-results');
-            results.innerHTML = '';
+            renderPaginatedList(
+                'Authors Found',
+                authors,
+                function (author) {
+                    var div = document.createElement('div');
+                    div.className = 'opds-item';
 
-            var header = document.createElement('div');
-            header.className = 'section-header';
-            header.innerText = 'Authors Found (' + authors.length + ')';
-            results.appendChild(header);
+                    var html = '<b>' + author.name + '</b>';
+                    if (author.description) {
+                        html += '<br><small style="color:#666;">' + author.description + '</small>';
+                    }
 
-            for (var i = 0; i < authors.length; i++) {
-                var author = authors[i];
-                var div = document.createElement('div');
-                div.className = 'opds-item';
-
-                var html = '<b>' + author.name + '</b>';
-                if (author.description) {
-                    html += '<br><small style="color:#666;">' + author.description + '</small>';
-                }
-
-                div.innerHTML = html;
-                div.onclick = (function (url, name) {
-                    return function () {
-                        showBSIOAuthorBooksInRequest(url, name);
-                    };
-                })(author.url, author.name);
-
-                results.appendChild(div);
-            }
+                    div.innerHTML = html;
+                    div.onclick = (function (url, name) {
+                        return function () {
+                            showBSIOAuthorBooksInRequest(url, name);
+                        };
+                    })(author.url, author.name);
+                    return div;
+                },
+                renderSearchMenu, // Back to menu
+                'bsio-results'
+            );
         }
 
         function showBSIOAuthorBooksInRequest(authorUrl, authorName) {
@@ -1106,61 +1190,76 @@
                         libraryStatus = libData.results;
                     }
 
-                    // Render series with library status
+                    // Flatten items for pagination
+                    var flatItems = [];
                     for (var i = 0; i < data.series.length; i++) {
                         var series = data.series[i];
-
-                        var seriesHeader = document.createElement('div');
-                        seriesHeader.style.fontSize = '28px';
-                        seriesHeader.style.fontWeight = 'bold';
-                        seriesHeader.style.marginTop = '20px';
-                        seriesHeader.style.marginBottom = '10px';
-                        seriesHeader.innerHTML = series.name + ' <small style="color:#666;">(' + series.books.length + ' books)</small>';
-                        container.appendChild(seriesHeader);
+                        // Add Series Header as a special item
+                        flatItems.push({ type: 'header', text: series.name, count: series.books.length });
 
                         for (var j = 0; j < series.books.length; j++) {
                             var book = series.books[j];
-                            var bookDiv = document.createElement('div');
-                            bookDiv.className = 'opds-item';
-                            bookDiv.style.cursor = 'default';
-                            bookDiv.style.padding = '10px';
-
-                            var bookHtml = '<b>' + book.title + '</b><br>';
-
-                            // Check library status (it's now an object with in_library property)
-                            var libStatus = libraryStatus[book.title] || { in_library: false };
-                            var inLibrary = libStatus.in_library || false;
-
-                            if (inLibrary) {
-                                bookHtml += '<small style="color:#0a0; font-weight:bold;">IN LIBRARY';
-                                if (libStatus.match_score && libStatus.match_score < 100) {
-                                    bookHtml += ' (' + libStatus.match_score + '% match)';
-                                }
-                                bookHtml += '</small> ';
-
-                                // Show "Send to EReader" button for books in library
-                                if (libStatus.download_url) {
-                                    bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px; background:#0a0;" onclick="sendToKindle(\'' + libStatus.download_url.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to EReader</button>';
-                                }
-                            } else {
-                                bookHtml += '<small style="color:#666;">NOT IN LIBRARY</small> ';
-
-                                // Show "Search Ephemera" button for books not in library
-                                var searchQuery = (data.author || authorName) + ' ' + book.title;
-                                // Remove text in parentheses from search query
-                                searchQuery = searchQuery.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
-                                bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px;" onclick="searchEphemeraFor(\'' + searchQuery.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Search Ephemera</button>';
-                            }
-
-                            if (book.amazon_link) {
-                                bookHtml += '<br><a href="' + book.amazon_link + '" target="_blank" style="color:#666; font-size:18px; margin-top:5px; display:inline-block;">View on Amazon</a>';
-                            }
-
-                            bookDiv.innerHTML = bookHtml;
-                            container.appendChild(bookDiv);
+                            book.type = 'book';
+                            flatItems.push(book);
                         }
                     }
+
+                    renderPaginatedList(
+                        data.author || authorName,
+                        flatItems,
+                        function (item) {
+                            if (item.type === 'header') {
+                                var seriesHeader = document.createElement('div');
+                                seriesHeader.style.fontSize = '28px';
+                                seriesHeader.style.fontWeight = 'bold';
+                                seriesHeader.style.marginTop = '20px';
+                                seriesHeader.style.marginBottom = '10px';
+                                seriesHeader.innerHTML = item.text + ' <small style="color:#666;">(' + item.count + ' books)</small>';
+                                return seriesHeader;
+                            } else {
+                                var bookDiv = document.createElement('div');
+                                bookDiv.className = 'opds-item';
+                                bookDiv.style.cursor = 'default';
+                                bookDiv.style.padding = '10px';
+
+                                var bookHtml = '<b>' + item.title + '</b><br>';
+
+                                var libStatus = libraryStatus[item.title] || { in_library: false };
+                                var inLibrary = libStatus.in_library || false;
+
+                                if (inLibrary) {
+                                    bookHtml += '<small style="color:#0a0; font-weight:bold;">IN LIBRARY';
+                                    if (libStatus.match_score && libStatus.match_score < 100) {
+                                        bookHtml += ' (' + libStatus.match_score + '% match)';
+                                    }
+                                    bookHtml += '</small> ';
+
+                                    if (libStatus.download_url) {
+                                        bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px; background:#0a0;" onclick="sendToKindle(\'' + libStatus.download_url.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Send to EReader</button>';
+                                    }
+                                } else {
+                                    bookHtml += '<small style="color:#666;">NOT IN LIBRARY</small> ';
+
+                                    var searchQuery = (data.author || authorName) + ' ' + item.title;
+                                    // Remove text in parentheses from search query
+                                    searchQuery = searchQuery.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+                                    bookHtml += '<button class="btn" style="display:inline-block; width:auto; padding:8px 15px; margin-left:10px; font-size:18px;" onclick="searchEphemeraFor(\'' + searchQuery.replace(/'/g, "\\'") + '\'); event.stopPropagation();">Search for Download</button>';
+                                }
+
+                                if (item.amazon_link) {
+                                    bookHtml += '<br><a href="' + item.amazon_link + '" target="_blank" style="color:#666; font-size:18px; margin-top:5px; display:inline-block;">View on Amazon</a>';
+                                }
+
+                                bookDiv.innerHTML = bookHtml;
+                                return bookDiv;
+                            }
+                        },
+                        showBSIOSearchInRequest, // Back action
+                        'bsio-search-container'
+                    );
                 });
+            });
+        }
             });
         }
 

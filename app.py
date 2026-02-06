@@ -256,17 +256,33 @@ def search_ephemera():
         print(f"[DEBUG] Shelfmark returned {len(shelfmark_books)} metadata results", flush=True)
         
         bookstack_books = []
+        bookstack_books = []
         for book in shelfmark_books:
             # Create composite ID for release search later
             provider = book.get('provider')
             book_id = book.get('provider_id') or book.get('id')
             composite_id = f"{provider}:{book_id}"
             
+            # Handle cover URL - proxy it if it's from Shelfmark
+            cover_url = book.get('cover_url') or book.get('preview')
+            final_cover_url = ""
+            
+            if cover_url:
+                if cover_url.startswith('/'):
+                    # Relative URL from Shelfmark (internal docker)
+                    # We must resolve it internally, then proxy it for the frontend
+                    absolute_internal = f"{ephemera_url}{cover_url}"
+                    final_cover_url = f"/api/opds/image-proxy?url={quote_plus(absolute_internal)}"
+                else:
+                    # External URL (e.g. Google Books), use as is 
+                    # (Frontend can load it directly, or we could proxy it too if needed, but usually fine)
+                    final_cover_url = cover_url
+
             mapped_book = {
                 'md5': composite_id,  # Use composite ID as the unique identifier
                 'title': book.get('title'),
                 'authors': book.get('authors', []) or ([book.get('author')] if book.get('author') else []),
-                'coverUrl': book.get('cover_url') or book.get('preview'),
+                'coverUrl': final_cover_url,
                 'size': 'Universal',  # Metadata doesn't have file size
                 'language': book.get('language'),
                 'format': 'Universal', # Metadata doesn't have file format
