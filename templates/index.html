@@ -364,7 +364,7 @@
     <div id="confirm-modal" class="modal-overlay" style="display:none;">
         <div style="text-align:center; padding-top:20px;">
             <p id="confirm-text" style="font-size:24px; font-weight:bold; margin-bottom:20px;">Send to Kindle?</p>
-            <button id="confirm-yes-btn" class="btn" onclick="handleConfirmYes()"
+            <button id="confirm-yes-btn" class="btn"
                 style="width:100%; height: 50px; margin-bottom:10px; background:#000; color:#fff;">SEND</button>
             <button class="btn" style="width:100%; height: 50px;" onclick="closeConfirmModal()">CANCEL</button>
         </div>
@@ -899,13 +899,19 @@
         }
 
         // Modal State for Confirm
-        // (confirmUrl is declared globally at the top)
+        // Global confirmUrl is at the top of script
 
         function showConfirmModal(url, title) {
             confirmUrl = url;
             // Use innerHTML for better compatibility than innerText
             document.getElementById('confirm-text').innerHTML = "Send '" + title + "' to your Kindle?";
             document.getElementById('confirm-modal').style.display = 'block';
+
+            // Bind Yes Button via JS (more compatible for Kindle)
+            document.getElementById('confirm-yes-btn').onclick = function () {
+                if (confirmUrl) sendToKindle(confirmUrl);
+                closeConfirmModal();
+            };
         }
 
         function closeConfirmModal() {
@@ -1333,7 +1339,6 @@
                     return distA - distB;
                 });
 
-                // Render paginated results
                 renderPaginatedList(
                     'Search Results',
                     data,
@@ -1344,23 +1349,37 @@
 
                         var authors = book.authors ? book.authors.join(', ') : 'Unknown';
 
-                        var coverHtml = '<div class="book-cover" role="button" onclick="showReleases(\'' + book.md5 + '\')" style="cursor:pointer;">';
-                        if (book.coverUrl) {
-                            coverHtml += '<img src="' + book.coverUrl + '" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==\';">';
-                        } else {
-                            coverHtml += '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==">';
-                        }
-                        coverHtml += '</div>';
+                        // Title Element
+                        var titleEl = document.createElement('b');
+                        titleEl.style.cursor = 'pointer';
+                        titleEl.style.textDecoration = 'underline';
+                        titleEl.innerText = book.title;
+                        titleEl.onclick = function () { showReleases(book.md5); };
 
-                        var description = book.description ? book.description : '';
-                        if (description.length > 200) description = description.substring(0, 200) + '...';
+                        // Container for book-info
+                        var infoDiv = document.createElement('div');
+                        infoDiv.className = 'book-info';
+                        infoDiv.appendChild(titleEl);
+                        infoDiv.innerHTML += '<br><small style="color:#666;">' + authors + '</small>' +
+                            '<br><div style="font-size:0.85em; margin-top:5px; color:#444;">' + (book.description || '').substring(0, 200) + '...</div>';
 
-                        div.innerHTML = '<div class="book-row">' + coverHtml +
-                            '<div class="book-info">' +
-                            '<b role="button" onclick="showReleases(\'' + book.md5 + '\')" style="cursor:pointer; text-decoration:underline;">' + book.title + '</b>' +
-                            '<br><small style="color:#666;">' + authors + '</small>' +
-                            '<br><div style="font-size:0.85em; margin-top:5px; color:#444;">' + description + '</div>' +
-                            '</div></div>';
+                        // Cover Element
+                        var coverDiv = document.createElement('div');
+                        coverDiv.className = 'book-cover';
+                        coverDiv.style.cursor = 'pointer';
+                        coverDiv.onclick = function () { showReleases(book.md5); };
+
+                        var img = document.createElement('img');
+                        img.src = book.coverUrl || 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg==';
+                        img.onerror = function () { this.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMTgwIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZWVlIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGRvbWluYW50LWJhc2VsaW5lPSJtaWRkbGUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5OTkiIGZvbnQtc2l6ZT0iMTQiPk5vIENvdmVyPC90ZXh0Pjwvc3ZnPg=='; };
+                        coverDiv.appendChild(img);
+
+                        var row = document.createElement('div');
+                        row.className = 'book-row';
+                        row.appendChild(coverDiv);
+                        row.appendChild(infoDiv);
+
+                        div.appendChild(row);
                         return div;
                     },
                     restoreSearch, // Back action restores visibility
@@ -1438,71 +1457,60 @@
         }
 
         function renderReleasesTable(container, releases) {
-            var filtered = [];
+            container.innerHTML = '';
+            var table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.style.fontSize = '24px'; // Larger for Kindle
+            table.innerHTML = '<thead><tr style="border-bottom:2px solid #000;"><th align="left">Format</th><th align="left">Size</th><th align="left">Action</th></tr></thead>';
+
+            var tbody = document.createElement('tbody');
             for (var i = 0; i < releases.length; i++) {
-                var fmt = (releases[i].format || '').toLowerCase();
-                if (fmt.indexOf('epub') !== -1 || fmt.indexOf('mobi') !== -1) {
-                    filtered.push(releases[i]);
-                }
+                (function (release) {
+                    var tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid #ccc';
+
+                    var tdFmt = document.createElement('td');
+                    tdFmt.innerText = release.format || '??';
+
+                    var tdSize = document.createElement('td');
+                    if (release.size_bytes) tdSize.innerText = (release.size_bytes / 1024 / 1024).toFixed(1) + 'MB';
+                    else tdSize.innerText = release.size || '--';
+
+                    var tdBtn = document.createElement('td');
+                    var btn = document.createElement('button');
+                    btn.className = 'btn';
+                    btn.style.padding = '10px 15px';
+                    btn.innerText = 'GET';
+                    btn.onclick = function () { downloadRelease(release); };
+                    tdBtn.appendChild(btn);
+
+                    tr.appendChild(tdFmt);
+                    tr.appendChild(tdSize);
+                    tr.appendChild(tdBtn);
+                    tbody.appendChild(tr);
+                })(releases[i]);
             }
+            table.appendChild(tbody);
+            container.appendChild(table);
 
-            if (filtered.length === 0) {
-                container.innerHTML = '<center>No EPUB/MOBI releases found</center><br><button class="btn" onclick="backToSearch()">Back</button>';
-                return;
-            }
-
-            renderPaginatedList(
-                'Select a Release',
-                filtered,
-                function (release) {
-                    var div = document.createElement('div');
-                    div.className = 'book-card';
-
-                    var title = release.title || 'Unknown Title';
-                    var source = release.source || 'Unknown Source';
-
-                    var sizeStr = '';
-                    if (release.size_bytes) {
-                        sizeStr = (release.size_bytes / 1024 / 1024).toFixed(1) + ' MB';
-                    } else if (release.size) {
-                        sizeStr = release.size;
-                    }
-
-                    var seedsStr = '';
-                    if (release.seeders !== null && release.seeders !== undefined) {
-                        seedsStr = release.seeders + ' seeds';
-                    }
-
-                    var format = release.format || '';
-                    var lang = release.language || '';
-
-                    var metaParts = [];
-                    if (source) metaParts.push(source);
-                    if (lang) metaParts.push(lang);
-                    if (format) metaParts.push(format);
-                    if (sizeStr) metaParts.push(sizeStr);
-                    if (seedsStr) metaParts.push(seedsStr);
-
-                    var metaHtml = metaParts.join(' • ');
-
-                    div.innerHTML = '<b>' + title + '</b><br>' +
-                        '<small>' + metaHtml + '</small><br>' +
-                        '<button class="btn" style="margin-top:10px;" onclick=\'downloadRelease(' + JSON.stringify(release).replace(/'/g, "&#39;") + ')\'>Download</button>';
-                    return div;
-                },
-                backToSearch,
-                'releases-container'
-            );
+            var backBtn = document.createElement('button');
+            backBtn.className = 'btn';
+            backBtn.style.width = '100%';
+            backBtn.style.marginTop = '20px';
+            backBtn.innerText = 'Back to Results';
+            backBtn.onclick = function () { backToSearch(); };
+            container.appendChild(backBtn);
         }
 
         function downloadRelease(release) {
-            showToast('Queueing...');
+            showToast('Queuing download...');
             ajax('POST', '/api/ephemera/download', release, function (err, res) {
                 if (!err) {
                     showToast('Queued!');
-                    backToSearch();
+                    backToSearch(); // Go back to results after successful click
                 } else {
-                    showToast('Error: ' + err);
+                    alert("Error: " + err);
                 }
             });
         }
