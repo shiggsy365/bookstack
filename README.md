@@ -4,12 +4,14 @@
 
 ## **✨ Key Features**
 
+* **OPDS Integration:** Suitable for older browsers (Kindle, Kobo)
 * **E-Reader Optimized:** A lightweight web interface specifically designed for the lower refresh rates and constraints of e-ink browsers.  
 * **Universal Search:** Leveraging **Shelfmark's Universal Search**, queries are resolved against multiple metadata providers (like Google Books, OpenLibrary) to ensure high-quality results.
 * **Release Selection:** View and select specific releases from your configured Prowlarr indexers. Choose the exact file, format, and size you want.
 * **One-Click "Send to Kindle":** Configure your Kindle delivery address once and trigger wireless transfers directly from your library.  
 * **Request Monitoring:** Track the real-time status of your Shelfmark requests, complete with detailed error messages if downloads fail.
 * **Booklore Library Browser:** A clean, searchable view of your existing Booklore collection.
+* **Request > Download > Add to Booklore > Send to Kindle** All from your device browser, no need for other solutions or jailbreaking devices
 
 ## **🚀 How It Works**
 
