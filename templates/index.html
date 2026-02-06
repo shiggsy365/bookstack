@@ -217,12 +217,11 @@
             margin: 0;
             padding: 0;
             font-size: 18px;
-            line-height: 1.1;
+            line-height: 20px;
             color: #333;
             overflow: hidden;
-            height: 90px;
+            height: 60px;
             display: block;
-            /* Ensure it respects height */
         }
 
         .book-description a {
@@ -773,7 +772,8 @@
             var safeTitle = book.title.replace(/"/g, '&quot;');
 
             // Wrappers for old browser compatibility
-            var anchorStart = '<a href="javascript:void(0)" onclick="handleCoverClick(this); return false;" data-url="' + safeUrl + '" data-title="' + safeTitle + '" style="cursor:pointer; display:block;">';
+            // Added event.stopPropagation()
+            var anchorStart = '<a href="javascript:void(0)" onclick="handleCoverClick(this); event.stopPropagation(); return false;" data-url="' + safeUrl + '" data-title="' + safeTitle + '" style="cursor:pointer; display:block;">';
             var anchorEnd = '</a>';
 
             var imgTag = '';
@@ -791,7 +791,8 @@
             if (descText) {
                 var safeDesc = escapeHtml(descText).replace(/"/g, '&quot;');
                 // Make description a block-link
-                descriptionHtml = '<a href="javascript:void(0)" onclick="handleDescriptionClick(this); return false;" data-desc="' + safeDesc + '" style="text-decoration:none; color:#333; display:block; height:100%; overflow:hidden;" class="book-description">' + descText + '</a>';
+                // REMOVED height:100% from inline style to allow CSS to control it
+                descriptionHtml = '<a href="javascript:void(0)" onclick="handleDescriptionClick(this); event.stopPropagation(); return false;" data-desc="' + safeDesc + '" style="text-decoration:none; color:#333; display:block; overflow:hidden;" class="book-description">' + descText + '</a>';
             }
 
             // Title Link
@@ -811,7 +812,8 @@
 
         function showConfirmModal(url, title) {
             confirmUrl = url;
-            document.getElementById('confirm-text').innerText = "Send '" + title + "' to your Kindle?";
+            // Use innerHTML for better compatibility than innerText
+            document.getElementById('confirm-text').innerHTML = "Send '" + title + "' to your Kindle?";
             document.getElementById('confirm-modal').style.display = 'block';
 
             // Bind Yes Button
@@ -829,7 +831,11 @@
             try {
                 var url = el.getAttribute('data-url');
                 var title = el.getAttribute('data-title');
-                if (url && title) showConfirmModal(url, title);
+                if (url && title) {
+                    showConfirmModal(url, title);
+                } else {
+                    alert("Error: Missing URL or Title");
+                }
             } catch (e) { alert(e.message); }
         }
 
