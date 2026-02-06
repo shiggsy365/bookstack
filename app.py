@@ -801,6 +801,9 @@ def get_author_books():
                     continue
 
                 if series_name and len(series_name) > 0:
+                    # Clean up series name
+                    series_name = re.sub(r'^Publication Order of\s+', '', series_name, flags=re.IGNORECASE)
+                    
                     current_series = {
                         'name': series_name,
                         'books': []

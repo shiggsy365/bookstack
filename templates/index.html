@@ -792,21 +792,36 @@
 
             var jsSafeTitle = displayTitle.replace(/'/g, "\\'");
 
-            // Inline Handler Calculation
-            var inlineHandler = "showConfirmModal('" + jsSafeUrl + "', '" + jsSafeTitle + "'); return false;";
+            // Special Scraped View: Button instead of cover
+            if (book._isScraped) {
+                var btnText = book._inLibrary ? "SEND TO KINDLE" : "REQUEST BOOK";
+                var btnStyle = "width:60px; height:90px; border:1px solid #000; background:#fff; font-size:12px; font-weight:bold; cursor:pointer; padding:2px; word-wrap:break-word; text-align:center; display:flex; align-items:center; justify-content:center; line-height:1.2;";
 
-            // Wrappers for old browser compatibility
-            var anchorStart = '<a href="javascript:void(0)" onclick="' + inlineHandler + '" style="cursor:pointer; display:block;">';
-            var anchorEnd = '</a>';
-
-            var imgTag = '';
-            if (thumbnail) {
-                imgTag = '<img src="' + thumbnail + '" border="0" style="border:1px solid #000; display:block; margin:0; width:60px; height:90px;" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+\';">';
+                if (book._inLibrary) {
+                    var downloadUrl = book._libraryUrl || acqLink.href;
+                    var jsSafeLibraryUrl = downloadUrl.replace(/'/g, "\\'");
+                    coverHtml += '<button style="' + btnStyle + '" onclick="showConfirmModal(\'' + jsSafeLibraryUrl + '\', \'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
+                } else {
+                    coverHtml += '<button style="' + btnStyle + '" onclick="performSearch(\'' + jsSafeTitle + '\'); event.stopPropagation(); return false;">' + btnText + '</button>';
+                }
             } else {
-                imgTag = '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+" border="0" style="border:1px solid #000; display:block; margin:0; width:60px; height:90px;">';
-            }
+                // Regular View: Covers
+                // Inline Handler Calculation
+                var inlineHandler = "showConfirmModal('" + jsSafeUrl + "', '" + jsSafeTitle + "'); return false;";
 
-            coverHtml += anchorStart + imgTag + anchorEnd;
+                // Wrappers for old browser compatibility
+                var anchorStart = '<a href="javascript:void(0)" onclick="' + inlineHandler + '" style="cursor:pointer; display:block;">';
+                var anchorEnd = '</a>';
+
+                var imgTag = '';
+                if (thumbnail) {
+                    imgTag = '<img src="' + thumbnail + '" border="0" style="border:1px solid #000; display:block; margin:0; width:60px; height:90px;" onerror="this.src=\'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+\';">';
+                } else {
+                    imgTag = '<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI3MCIgaGVpZ2h0PSIxMDUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiNlZWUiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSIgZm9udC1zaXplPSIxMCI+Tm8gQ292ZXI8L3RleHQ+PC9zdmc+" border="0" style="border:1px solid #000; display:block; margin:0; width:60px; height:90px;">';
+                }
+
+                coverHtml += anchorStart + imgTag + anchorEnd;
+            }
             coverHtml += '</div>';
 
             var descText = book.description || '';
@@ -984,7 +999,8 @@
                         var b = bookItems[i];
                         if (!authorName && b.author) authorName = b.author;
 
-                        if (b.series_name) {
+                        // Strict Standalone: Only if series_name is truly missing/empty
+                        if (b.series_name && b.series_name.trim().length > 0) {
                             if (!seriesGroups[b.series_name]) seriesGroups[b.series_name] = [];
                             seriesGroups[b.series_name].push(b);
                         } else {
@@ -1582,23 +1598,38 @@
                     div.innerHTML = '<b>' + series.name + '</b> (' + bookCount + ' books)';
 
                     div.onclick = function () {
-                        // Render Books in this Series
-                        // We convert these books to compatible format for renderBookList
-                        var mappedBooks = (series.books || []).map(function (b, idx) {
-                            return {
-                                title: b.title,
-                                author: data.author,
-                                series_index: idx + 1,
-                                // Use Google Search link for acquisition
-                                links: [{ rel: 'acquisition', href: 'https://google.com/search?q=' + encodeURIComponent(data.author + ' ' + b.title) }]
-                            };
-                        });
+                        // Show loading within the series click
+                        div.innerHTML = '<b>' + series.name + '</b> (Checking library...)';
 
-                        // Determine Series Name for Header
-                        var headerTitle = series.name;
+                        var titles = (series.books || []).map(function (b) { return b.title; });
+                        var checkData = {
+                            author: data.author,
+                            titles: titles
+                        };
 
-                        renderBookList(mappedBooks, headerTitle, function () {
-                            renderScrapedSeriesView(data); // Back to Series List
+                        ajax('POST', '/api/opds/check-library', checkData, function (err, libData) {
+                            var libResults = (libData && libData.results) ? libData.results : {};
+
+                            // Render Books in this Series
+                            var mappedBooks = (series.books || []).map(function (b, idx) {
+                                var libInfo = libResults[b.title] || { in_library: false };
+                                return {
+                                    title: b.title,
+                                    author: data.author,
+                                    series_index: idx + 1,
+                                    _isScraped: true,
+                                    _inLibrary: libInfo.in_library,
+                                    _libraryUrl: libInfo.download_url,
+                                    links: [{ rel: 'acquisition', href: 'https://google.com/search?q=' + encodeURIComponent(data.author + ' ' + b.title) }]
+                                };
+                            });
+
+                            // Restore label
+                            div.innerHTML = '<b>' + series.name + '</b> (' + bookCount + ' books)';
+
+                            renderBookList(mappedBooks, series.name, function () {
+                                renderScrapedSeriesView(data); // Back to Series List
+                            });
                         });
                     };
                     return div;
