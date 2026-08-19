@@ -468,3 +468,8 @@ docker compose \
 ## License and support
 
 No standalone licence file is currently included in this application directory. Add an explicit licence before distributing the project. Issues and feature requests can be submitted through the project repository.
+
+## Contribute
+
+[<img src="https://github.com/shiggsy365/AIOStreamsKODI/blob/main/.github/support_me_on_kofi_red.png?raw=true">](https://ko-fi.com/shiggsy365)
+
