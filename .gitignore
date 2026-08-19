@@ -24,6 +24,16 @@ wheels/
 venv/
 ENV/
 env/
+.env
+
+# Local service data
+booklore/
+ephemera/
+mariadb/
+prowlarr/
+shelfmark/
+sabnzbd/
+bookstack/cache/
 
 # IDEs
 .vscode/

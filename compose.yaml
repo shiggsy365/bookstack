@@ -11,12 +11,23 @@ services:
       - SMTP_PORT=${SMTP_PORT}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
-    ports:
-      - "${BOOKSTACK_PORT}:5000"
+      - OPENLIBRARY_CONTACT=${OPENLIBRARY_CONTACT}
+      - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY}
+      - NYT_BOOKS_API_KEY=${NYT_BOOKS_API_KEY}
+      - HARDCOVER_API_KEY=${HARDCOVER_API_KEY}
+      - MAX_KINDLE_ATTACHMENT_MB=${MAX_KINDLE_ATTACHMENT_MB}
     depends_on:
       - shelfmark
       - booklore
+    volumes:
+      - ${BOOKSTACK_INSTALL}/bookstack/cache:/data
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=3)" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.bookstack.rule=Host(`${BOOKSTACK_HOSTNAME}`)"
@@ -30,27 +41,23 @@ services:
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
+    ports:
+      - "127.0.0.1:9696:9696"
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
     volumes:
       - ${BOOKSTACK_INSTALL}/prowlarr/config:/config
-    ports:
-      - 9696:9696
     restart: unless-stopped
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.prowlarr.rule=Host(`${PROWLARR_HOSTNAME}`)"
-      - "traefik.http.routers.prowlarr.tls=true"
-      - "traefik.http.services.prowlarr.loadbalancer.server.port=${PROWLARR_PORT}"
-      - "traefik.http.routers.prowlarr.tls.certresolver=letsencrypt"
+      - "traefik.enable=false"
     profiles:
       - required
       - all
 
   booklore:
-    image: booklore/booklore:latest
+    image: grimmory/grimmory:latest
     container_name: booklore
     environment:
       - USER_ID=${PUID}
@@ -63,8 +70,6 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
-    ports:
-      - "${BOOKLORE_PORT}:${BOOKLORE_PORT}"
     volumes:
       - ${BOOKSTACK_INSTALL}/booklore/data:/app/data
       - ${BOOK_LIBRARY}:/books
@@ -79,6 +84,7 @@ services:
     profiles:
       - required
       - all
+
 
   mariadb:
     image: lscr.io/linuxserver/mariadb:11.4.5
@@ -103,25 +109,48 @@ services:
   shelfmark:
     image: ghcr.io/calibrain/shelfmark:latest
     container_name: shelfmark
+    ports:
+      - "127.0.0.1:8084:8084"
     environment:
       - FLASK_PORT=${SHELFMARK_PORT}
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
-    ports:
-      - "${SHELFMARK_PORT}:${SHELFMARK_PORT}"
+      - AA_BASE_URL=${AA_BASE_URL}
+      - AA_MIRROR_URLS=${AA_MIRROR_URLS}
+      - LIBGEN_MIRROR_URLS=${LIBGEN_MIRROR_URLS}
+      - ZLIB_MIRROR_URLS=${ZLIB_MIRROR_URLS}
+      - USING_TOR=${USING_TOR}
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
     restart: unless-stopped
     volumes:
-      - ${INGEST_FOLDER}:/books
+      - ${BOOK_LIBRARY}:/books
       - ${DOWNLOAD_FOLDER}:/downloads
       - ${BOOKSTACK_INSTALL}/shelfmark/config:/config
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.shelfmark.rule=Host(`${SHELFMARK_HOSTNAME}`)"
-      - "traefik.http.routers.shelfmark.tls=true"
-      - "traefik.http.services.shelfmark.loadbalancer.server.port=${SHELFMARK_PORT}"
-      - "traefik.http.routers.shelfmark.tls.certresolver=letsencrypt"
+      - "traefik.enable=false"
     profiles:
       - required
       - all
 
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    container_name: sabnzbd
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - TZ=${TZ}
+      - PUID=${PUID}
+      - PGID=${PGID}
+    volumes:
+      - ${BOOKSTACK_INSTALL}/sabnzbd:/config
+      - ${BOOKSTACK_INSTALL}/sabnzbd/Downloads/incomplete:/incomplete-downloads
+      - ${BOOKSTACK_INSTALL}/sabnzbd/Downloads/complete:/downloads
+    labels:
+      - "traefik.enable=false"
+    restart: unless-stopped
+    profiles:
+      - required
+      - all
