@@ -15,7 +15,7 @@ def fetch_soup(url):
     resp = get_with_allowed_redirects(
         url, allowed_hosts=BSIO_HOSTS,
         headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
-        timeout=15
+        timeout=120
     )
     resp.raise_for_status()
     return BeautifulSoup(resp.content, 'html.parser')

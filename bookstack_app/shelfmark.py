@@ -43,7 +43,7 @@ def search():
             queries.append(title)
         raw_books = []
         for search_query in queries:
-            resp = requests.get(f'{base}/api/metadata/search', params={'query': search_query}, timeout=30)
+            resp = requests.get(f'{base}/api/metadata/search', params={'query': search_query}, timeout=120)
             resp.raise_for_status()
             data = resp.json()
             raw_books = (data.get('books') or data.get('results') or []) if isinstance(data, dict) else data
@@ -93,9 +93,15 @@ def releases():
         return jsonify({'error': 'Invalid MD5 format for release search'}), 400
     provider, book_id = md5.split(':', 1)
     try:
-        resp = requests.get(f'{SHELFMARK_URL.rstrip("/")}/api/releases', params={'provider': provider, 'book_id': book_id}, timeout=45)
+        resp = requests.get(f'{SHELFMARK_URL.rstrip("/")}/api/releases', params={'provider': provider, 'book_id': book_id}, timeout=120)
         resp.raise_for_status()
-        releases_data = resp.json().get('releases', [])
+        payload = resp.json()
+        if isinstance(payload, list):
+            releases_data = payload
+        elif isinstance(payload, dict):
+            releases_data = payload.get('releases') or payload.get('results') or []
+        else:
+            releases_data = []
         def sort_key(item):
             try:
                 seeders = int(item.get('seeders') or 0)
@@ -118,9 +124,9 @@ def download():
     try:
         base = SHELFMARK_URL.rstrip('/')
         if 'source' in data and ('source_id' in data or 'id' in data):
-            resp = requests.post(f'{base}/api/releases/download', json=data, timeout=15)
+            resp = requests.post(f'{base}/api/releases/download', json=data, timeout=120)
         elif data.get('md5') and ':' not in data['md5']:
-            resp = requests.get(f'{base}/api/download', params={'id': data['md5']}, timeout=15)
+            resp = requests.get(f'{base}/api/download', params={'id': data['md5']}, timeout=120)
         else:
             return jsonify({'error': 'Please use release selection for this item'}), 400
         resp.raise_for_status()
@@ -132,7 +138,7 @@ def download():
 @bp.route('/queue')
 def queue():
     try:
-        resp = requests.get(f'{SHELFMARK_URL.rstrip("/")}/api/status', timeout=10)
+        resp = requests.get(f'{SHELFMARK_URL.rstrip("/")}/api/status', timeout=120)
         resp.raise_for_status()
         data = resp.json()
         if 'complete' in data:

@@ -28,7 +28,7 @@ NYT_WEEK_HISTORY_LIMIT = 26
 RECENT_DISCOVERY_YEARS = 4
 NEW_RELEASE_YEARS = 2
 DISCOVERY_CACHE = {}
-OPENLIBRARY_SEARCH_FIELDS = 'key,title,author_name,cover_i,first_publish_year'
+OPENLIBRARY_SEARCH_FIELDS = 'key,title,author_name,author_key,isbn,cover_i,first_publish_year,subject'
 DISCOVERY_CATEGORIES = {
     'science_fiction': 'Science Fiction',
     'fantasy': 'Fantasy',
@@ -117,6 +117,28 @@ query BookstackHardcoverGenres {
   }
 }
 '''
+HARDCOVER_TRENDING_QUERY = '''
+query BookstackTrending($from: date!, $to: date!, $limit: Int!, $offset: Int!) {
+  books_trending(from: $from, to: $to, limit: $limit, offset: $offset) {
+    ids
+    error
+  }
+}
+'''
+HARDCOVER_AUTHORS_QUERY = '''
+query BookstackAuthorSearch($where: authors_bool_exp!, $limit: Int!) {
+  authors(where: $where, order_by: [{users_count: desc}], limit: $limit) {
+    id
+    name
+    bio
+    books_count
+    cached_image
+    image { url }
+  }
+}
+'''
+
+
 
 
 def recent_year(years):
@@ -155,7 +177,7 @@ def get_cached_json(cache_key, url, allowed_origins, headers=None, params=None, 
         return cached['data']
 
     resp = get_with_allowed_redirects(
-        url, allowed_origins=allowed_origins, headers=headers, params=params, timeout=15
+        url, allowed_origins=allowed_origins, headers=headers, params=params, timeout=120
     )
     resp.raise_for_status()
     data = resp.json()
@@ -173,7 +195,7 @@ def get_cached_hardcover_graphql(cache_key, query, variables=None, cache_seconds
         urljoin(HARDCOVER_BASE_URL, '/v1/graphql'),
         headers=hardcover_headers(),
         json={'query': query, 'variables': variables or {}},
-        timeout=20
+        timeout=120
     )
     resp.raise_for_status()
     payload = resp.json()
@@ -361,10 +383,10 @@ def get_nyt_bestseller_weeks(list_info):
 
 
 def openlibrary_search(cache_key, query, sort='trending'):
-    data = get_cached_openlibrary_json(
-        cache_key, '/search.json',
-        {'q': query, 'sort': sort, 'fields': OPENLIBRARY_SEARCH_FIELDS, 'limit': 40}
-    )
+    params = {'q': query, 'fields': OPENLIBRARY_SEARCH_FIELDS, 'limit': 40}
+    if sort and sort != 'relevance':
+        params['sort'] = sort
+    data = get_cached_openlibrary_json(cache_key, '/search.json', params)
     return normalize_openlibrary_books(data.get('docs', []))
 
 
@@ -538,6 +560,168 @@ def search():
         return jsonify(books)
     except Exception as e:
         print(f'[ERROR] Open Library search failed: {e}', flush=True)
+        return jsonify({'error': 'Unable to search books'}), 502
+
+
+STORE_PUBLICATION_PERIODS = {'any': None, '1y': 1, '3y': 3, '10y': 10}
+
+
+def store_year_query(period):
+    years = STORE_PUBLICATION_PERIODS.get(period)
+    since_year = date.today().year - years + 1 if years else None
+    return f' first_publish_year:[{since_year} TO *]' if since_year else ''
+
+
+def hardcover_store_where(period, extra=None):
+    where = dict(extra or {})
+    today = date.today()
+    release_date = {'_lte': today.isoformat()}
+    years = STORE_PUBLICATION_PERIODS.get(period)
+    if years:
+        release_date['_gte'] = date(today.year - years + 1, 1, 1).isoformat()
+    where['release_date'] = release_date
+    return where
+
+
+def subject_slug(genre):
+    return re.sub(r'[^a-z0-9]+', '_', (genre or '').strip().lower()).strip('_')
+
+
+@bp.route('/store-trending')
+def store_trending():
+    period, genre = request.args.get('period', 'all'), request.args.get('genre', '').strip()
+    if period not in ('all', '1y', '3y', '10y'):
+        return jsonify({'error': 'Invalid publication period'}), 400
+    if not HARDCOVER_API_KEY:
+        return jsonify({'error': 'Hardcover API key is not configured'}), 503
+    try:
+        today = date.today()
+        variables = {
+            'from': (today - timedelta(days=30)).isoformat(),
+            'to': today.isoformat(),
+            'limit': 100,
+            'offset': 0
+        }
+        data = get_cached_hardcover_graphql(
+            'store:hardcover-trending:30d', HARDCOVER_TRENDING_QUERY,
+            variables, cache_seconds=HARDCOVER_CACHE_SECONDS
+        )
+        trending = data.get('books_trending') or {}
+        ids = trending.get('ids') or []
+        if not ids:
+            raise RuntimeError(trending.get('error') or 'No trending books returned')
+        books = hardcover_books(
+            f'store:hardcover-trending-books:{period}:{genre.casefold()}',
+            hardcover_store_where(period, {'id': {'_in': ids}}),
+            [{'users_count': 'desc'}], genre=genre
+        )
+        order = {str(book_id): index for index, book_id in enumerate(ids)}
+        books.sort(key=lambda book: order.get(str(book.get('source_id')), len(ids)))
+        labels = {'all': 'All Time', '1y': 'Published This Year', '3y': 'Past 3 Years', '10y': 'Past 10 Years'}
+        return jsonify({'title': f"Trending - {labels[period]}", 'books': books})
+    except Exception as e:
+        print(f'[ERROR] Hardcover Store trending failed: {e}', flush=True)
+        return jsonify({'error': 'Unable to load Hardcover trending books'}), 502
+
+
+@bp.route('/store-popular')
+def store_popular():
+    period, genre = request.args.get('period', 'all'), request.args.get('genre', '').strip()
+    if period not in ('all', '1y', '3y', '10y'):
+        return jsonify({'error': 'Invalid publication period'}), 400
+    if not HARDCOVER_API_KEY:
+        return jsonify({'error': 'Hardcover API key is not configured'}), 503
+    try:
+        books = hardcover_books(
+            f'store:popular:{period}:{genre.casefold()}',
+            hardcover_store_where(period),
+            [{'users_count': 'desc'}, {'ratings_count': 'desc'}], genre=genre
+        )
+        return jsonify({'title': 'Popular Books', 'books': books})
+    except Exception as e:
+        print(f'[ERROR] Store popular failed: {e}', flush=True)
+        return jsonify({'error': 'Unable to load popular books'}), 502
+
+
+@bp.route('/store-author-search')
+def store_author_search():
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({'error': 'No author query provided'}), 400
+    if not HARDCOVER_API_KEY:
+        return jsonify({'error': 'Hardcover API key is not configured'}), 503
+    try:
+        data = get_cached_hardcover_graphql(
+            f'store:hardcover-authors:{query.casefold()}', HARDCOVER_AUTHORS_QUERY,
+            {'where': {'name': {'_ilike': f'%{query}%'}}, 'limit': 24}
+        )
+        authors = []
+        for author in data.get('authors') or []:
+            authors.append({
+                'name': author.get('name') or 'Unknown author',
+                'key': f"hc:{author.get('id')}",
+                'work_count': author.get('books_count') or 0,
+                'bio': author.get('bio') or '',
+                'image_url': hardcover_image_url(author.get('image') or author.get('cached_image'))
+            })
+        return jsonify({'authors': authors})
+    except Exception as e:
+        print(f'[ERROR] Store author search failed: {e}', flush=True)
+        return jsonify({'error': 'Unable to search authors'}), 502
+
+
+@bp.route('/store-author-books')
+def store_author_books():
+    key = request.args.get('key', '').strip().replace('/authors/', '')
+    genre, period = request.args.get('genre', '').strip(), request.args.get('period', 'any')
+    if not key or not re.fullmatch(r'(?:OL\d+A|hc:\d+)', key):
+        return jsonify({'error': 'Invalid author key'}), 400
+    if period not in STORE_PUBLICATION_PERIODS:
+        return jsonify({'error': 'Invalid publication period'}), 400
+    if key.startswith('hc:'):
+        if not HARDCOVER_API_KEY:
+            return jsonify({'error': 'Hardcover API key is not configured'}), 503
+        try:
+            author_id = int(key.split(':', 1)[1])
+            books = hardcover_books(
+                f'store:hardcover-author-books:{author_id}:{period}:{genre.casefold()}',
+                hardcover_store_where(period, {'contributions': {'author_id': {'_eq': author_id}}}),
+                [{'users_count': 'desc'}, {'ratings_count': 'desc'}], genre=genre
+            )
+            return jsonify({'books': books})
+        except Exception as e:
+            print(f'[ERROR] Hardcover author books failed: {e}', flush=True)
+            return jsonify({'error': 'Unable to load author books'}), 502
+    query = f'author_key:{key}'
+    if genre:
+        query += f' subject_key:"{subject_slug(genre)}"'
+    query += store_year_query(period)
+    try:
+        return jsonify({'books': openlibrary_search(f'store:author-books:{query}', query, sort='readinglog')})
+    except Exception as e:
+        print(f'[ERROR] Store author books failed: {e}', flush=True)
+        return jsonify({'error': 'Unable to load author books'}), 502
+
+
+@bp.route('/store-book-search')
+def store_book_search():
+    query = request.args.get('q', '').strip()
+    genre, period = request.args.get('genre', '').strip(), request.args.get('period', 'any')
+    if not query:
+        return jsonify({'error': 'No book query provided'}), 400
+    if period not in STORE_PUBLICATION_PERIODS:
+        return jsonify({'error': 'Invalid publication period'}), 400
+    if not HARDCOVER_API_KEY:
+        return jsonify({'error': 'Hardcover API key is not configured'}), 503
+    try:
+        books = hardcover_books(
+            f'store:hardcover-book-search:{query.casefold()}:{period}:{genre.casefold()}',
+            hardcover_store_where(period, {'title': {'_ilike': f'%{query}%'}}),
+            [{'users_count': 'desc'}, {'ratings_count': 'desc'}], genre=genre
+        )
+        return jsonify({'books': books})
+    except Exception as e:
+        print(f'[ERROR] Store book search failed: {e}', flush=True)
         return jsonify({'error': 'Unable to search books'}), 502
 
 

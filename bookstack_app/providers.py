@@ -33,6 +33,7 @@ def normalize_openlibrary_book(book):
         'cover_url': f'https://covers.openlibrary.org/b/id/{cover_id}-M.jpg' if cover_id else '',
         'description': clean_html(description),
         'published_year': book.get('first_publish_year') or book.get('first_publish_date') or '',
+        'genres': book.get('subject') or book.get('subjects') or [],
         'in_library': None, 'library_download_url': None
     }
 

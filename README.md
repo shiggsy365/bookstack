@@ -1,13 +1,13 @@
 # Bookstack
 
-Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-delivery stack. It presents the whole workflow through one lightweight web application designed to work on modern browsers and older Kindle browsers.
+Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-delivery stack. It presents the whole workflow through a marketplace-style web application designed for modern browsers and older Kindle and Kobo browsers.
 
 It solves two related but distinct tasks:
 
 - **Use a book you already own:** browse Booklore and send a library file to Kindle immediately.
 - **Acquire a missing book:** discover or search for it, select a Shelfmark release, monitor the download, and use it from Booklore after ingestion.
 
-Bookstack checks search and discovery results against Booklore. A book with a confirmed Booklore download URL is labelled **Available now** and defaults to **Send to Kindle**. A missing book is labelled **Request needed** and defaults to the Shelfmark request flow.
+Bookstack checks search and discovery results against Booklore. A book with a confirmed Booklore download URL is labelled **Available** and defaults to **Send to Kindle**. A missing book is labelled **Request needed** and defaults to the Shelfmark request flow.
 
 ## Stack components
 
@@ -24,17 +24,19 @@ Only Bookstack and Booklore are published through Traefik. Administrative servic
 
 ## Features
 
-- Task-oriented navigation: **Find Books**, **My Library**, **Downloads**, and **Settings**.
-- Search across the Booklore library and Shelfmark metadata providers.
-- Relevance-ranked title and author results with availability-aware actions.
-- Hardcover trending, genre, and new-release discovery when configured.
-- Open Library discovery, covers, descriptions, and fallback metadata.
-- Optional New York Times bestseller lists.
-- Author bibliographies and series publication order.
-- Shelfmark release selection and queue monitoring.
+- Marketplace-style **Library** and **Store** modes with persistent bottom navigation.
+- Library views for **Recent**, tiled **Authors**, stacked-cover **Series**, **All Books**, and **Search**.
+- Store views for **Trending**, **Popular**, **Bestsellers**, **Author Search**, and **Book Search**, with genre and publication-period filters.
+- Hardcover-backed recommendations, author tiles, author bibliographies, covers, and title search.
+- Optional New York Times bestseller lists and Open Library fallback metadata.
+- Availability-aware book details: **Available**, **Request needed**, and **Downloading**.
+- Direct Shelfmark release selection from **Request Book**, with queue monitoring.
 - Booklore OPDS browsing and one-click Send to Kindle delivery.
+- Four-line listing descriptions and ten-line detail descriptions.
+- Hierarchical back navigation plus first/previous/next/last page controls.
 - Persistent metadata caching across container rebuilds and restarts.
-- Responsive layouts and deliberately conservative HTML/JavaScript for older Kindle browsers.
+- A 120-second browser/provider search timeout for slower external services.
+- A 150% initial viewport scale and conservative HTML/JavaScript/CSS for older Kindle and Kobo browsers.
 
 ## How it works
 
@@ -302,31 +304,42 @@ Container-to-container addresses use service names, not `127.0.0.1`. For example
 3. Add `SMTP_USER` to the approved personal document sender list.
 4. Rebuild/restart Bookstack after changing SMTP values.
 5. Open Bookstack, select **Settings**, enter the destination Kindle email, and save it.
-6. Send a small book from **My Library** as an end-to-end test.
+6. Send a small book from **Library** as an end-to-end test.
 
 Bookstack downloads the selected file from Booklore into temporary storage, enforces `MAX_KINDLE_ATTACHMENT_MB`, sends it over STARTTLS SMTP, and removes the temporary data when the request ends.
 
 ## Using Bookstack
 
-### Find Books
+### Library
 
-Choose **Find Books** to search by title or author, browse discovery lists, explore an author's published books, view a series in publication order, or find similar books.
+Library is the opening mode. Its navigation bar contains **Recent**, **Authors**, **Series**, **All Books**, and **Search**.
 
-Results are relevance-ranked and checked against Booklore:
+- Recent and All Books use compact marketplace listings with covers, metadata, availability, and four description lines.
+- Authors are displayed as image tiles; selecting one opens that author's books.
+- Series are displayed as tiles with the series name, three stacked covers, and author name; selecting one opens its books.
+- Selecting a book opens a detail view with up to ten description lines and **Send to Kindle** when the file is available.
 
-- **Available now** opens a detail page with **Send to Kindle**.
-- **Request needed** opens a request action or release selection.
+### Store
+
+Store provides **Trending**, **Popular**, **Bestsellers**, **Author Search**, and **Book Search**. Recommendation and search views support genre and publication-period filters where applicable.
+
+Hardcover supplies trending, popular, author, and book-search data. The New York Times API supplies bestseller charts when configured. Search results are checked against Booklore before actions are displayed.
+
+- **Available** opens a detail page with **Send to Kindle**.
+- **Request needed** starts a Shelfmark match and opens release selection directly.
 - **Downloading** links to the download queue.
 
-When requesting a book, choose the desired release based on format, size, and source information. The selected release is handed to Shelfmark.
+Shelfmark release lookups accept EPUB, MOBI, and AZW3 results. Browser and upstream search requests allow up to 120 seconds for e-reader connections and slower providers.
 
-### My Library
+### Navigation
 
-Choose **My Library** to browse Booklore's OPDS catalogue. Everything shown here is already available and can be sent immediately. Select a book, review its details, choose **Send to Kindle**, and confirm the destination.
+The bottom bar provides the main menu, first/previous/next/last page controls, and page numbering. The menu links to **Library**, **Store**, **Downloads**, and **Settings**. Hierarchical views expose a back action through the context bar. The burger icon is drawn with CSS rather than a font glyph for Kobo compatibility.
+
+The page requests an initial viewport scale of 150%. Browser zoom controls remain available where supported.
 
 ### Downloads
 
-Choose **Downloads** to view Shelfmark's active, completed, or failed requests. A completed download may take additional time to appear in **My Library** while Booklore ingests and scans it.
+Choose **Downloads** to view Shelfmark's active, completed, or failed requests. A completed download may take additional time to appear in **Library** while Booklore ingests and scans it.
 
 ### Settings
 
@@ -439,7 +452,7 @@ Inspect Bookstack logs for the returned SMTP or delivery error.
 
 ### Metadata remains blank or slow
 
-The first lookup requires external provider requests; later requests use the persistent cache. Check Bookstack logs for Google Books or Open Library errors and verify outbound network access.
+The first lookup requires external provider requests; later requests use the persistent cache. Check Bookstack logs for Hardcover, Google Books, or Open Library errors and verify outbound network access. Searches can remain in the loading state for up to 120 seconds before timing out.
 
 ## Security notes
 
@@ -452,7 +465,7 @@ The first lookup requires external provider requests; later requests use the per
 
 ## Development
 
-The web application uses Flask and Gunicorn. The interface intentionally avoids modern browser-only features for older e-ink devices. Preserve this compatibility when changing `templates/index.html`: prefer traditional JavaScript and broadly supported HTML/CSS, then test on a current browser and the target Kindle.
+The web application uses Flask and Gunicorn. The interface intentionally avoids modern browser-only features for older e-ink devices. The default viewport scale is 150%. Preserve this compatibility when changing `templates/index.html`: prefer traditional JavaScript and broadly supported HTML/CSS, then test on a current browser and the target Kindle.
 
 Basic validation:
 

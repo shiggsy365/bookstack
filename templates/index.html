@@ -4,7 +4,7 @@
 <head>
     <!-- bookstack-ui-build: request-auto-releases -->
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.5">
     <title>BookStack</title>
     <style>
         /* RESET & VIEWPORT */
@@ -411,17 +411,124 @@
                 height: 72%;
             }
         }
+
+        /* Marketplace theme. Conservative CSS keeps older e-reader browsers usable. */
+        body, #app-layout, #content-area-cell { background: #f3f0e8; }
+        #context-bar-cell { height: 50px; background: #17212b; border-bottom: 0; }
+        .ctx-table { height: 50px; }
+        .ctx-left, .ctx-right { width: 28%; padding: 0 8px; }
+        .ctx-center { width: 44%; font-family: Georgia, serif; font-size: 22px; letter-spacing: .3px; }
+        #context-bar-cell .btn { min-height: 32px; padding: 3px 8px; color: #fff; background: transparent; border: 1px solid #aeb7bf; font-size: 14px; }
+        #market-nav-cell { height: 48px; padding: 0; background: #fff; border-bottom: 1px solid #8e8e8e; vertical-align: middle; }
+        .market-nav { width: 100%; height: 48px; border-collapse: collapse; table-layout: fixed; }
+        .market-nav td { padding: 0; border-right: 1px solid #b9b9b9; text-align: center; }
+        .market-nav td:last-child { border-right: 0; }
+        .market-nav button { width: 100%; height: 47px; padding: 3px 2px; border: 0; border-bottom: 4px solid transparent; background: #fff; color: #17212b; font: bold 14px sans-serif; text-transform: uppercase; cursor: pointer; }
+        .market-nav button.active { color: #8b3e20; border-bottom-color: #c65d32; background: #faf7f1; }
+        #content-area-cell { padding: 10px; }
+        .section-note { padding: 10px 12px; margin-bottom: 10px; color: #353535; background: #fff; border-left: 5px solid #c65d32; font-family: Georgia, serif; }
+        .opds-item, .card, .detail-card { border: 1px solid #aaa69d; background: #fff; box-shadow: 0 1px 0 #d4d0c8; }
+        .opds-item { min-height: 58px; margin-bottom: 7px; padding: 9px 12px; border-left: 5px solid #17212b; cursor: pointer; }
+        .opds-item b { font-family: Georgia, serif; font-size: 19px; }
+        .menu-desc { color: #66635d; font-size: 15px; }
+        .book-row { position: relative; height: 148px; margin-bottom: 8px; border: 1px solid #aaa69d; border-left: 5px solid #17212b; background: #fff; box-shadow: 0 1px 0 #d4d0c8; }
+        .book-cover { width: 100px; padding: 7px 7px 7px 6px; background: #e8e4dc; }
+        .book-cover img, .book-cover .btn { width: 88px !important; height: 132px !important; }
+        .book-info { height: 146px; padding: 7px 10px 5px 4px; }
+        .book-title, .book-title a { height: 24px; padding-right: 105px; font-family: Georgia, serif; font-size: 21px; line-height: 24px; }
+        .book-meta { height: 19px; color: #5f5b55; font-size: 15px; line-height: 19px; }
+        .book-status { position: absolute; top: 7px; right: 9px; display: inline-block; width: auto; height: 21px; margin: 0; padding: 1px 7px; color: #fff; background: #586a36; font-size: 12px; line-height: 19px; letter-spacing: .4px; }
+        .book-description { height: 68px; color: #4e4b46; font-size: 15px; line-height: 17px; }
+        .detail-card { position: relative; max-width: 920px; margin: 0 auto; padding: 14px; border-top: 6px solid #17212b; }
+        .detail-card h2 { margin: 0 0 4px 0; padding-right: 115px; font-family: Georgia, serif; font-size: 32px; line-height: 35px; }
+        .detail-cover { width: 130px; height: 195px; float: left; margin: 0 16px 10px 0; border: 1px solid #777; }
+        .book-detail-summary { min-height: 207px; }
+        .detail-author { margin: 0 0 8px 0; color: #5c3a2b; font-family: Georgia, serif; font-size: 21px; font-style: italic; }
+        .detail-facts { margin: 0 0 8px 0; color: #57534d; font-size: 16px; line-height: 21px; }
+        .detail-status-wrap { position: absolute; top: 12px; right: 14px; margin: 0; }
+        .detail-availability { display: inline-block; margin: 0; padding: 4px 9px; color: #fff; background: #586a36; font-size: 14px; letter-spacing: .4px; }
+        #book-detail-description { height: 200px; max-height: 200px; line-height: 20px; overflow: hidden; }
+        #book-detail-description { padding-top: 8px; border-top: 1px solid #c8c3ba; font-family: Georgia, serif; }
+        .btn { border: 1px solid #17212b; background: #fff; color: #17212b; font-size: 16px; }
+        #book-detail-action .btn { background: #c65d32; border-color: #8b3e20; color: #fff; }
+        input[type="text"], select { border-color: #77736c; background: #fffefb; }
+        @media screen and (max-width: 600px) {
+            .ctx-left, .ctx-right { width: 25%; padding: 0 3px; }
+            .ctx-center { width: 50%; font-size: 16px; }
+            .market-nav button { font-size: 11px; }
+            #content-area-cell { padding: 5px; }
+            .book-row { height: 140px; }
+            .book-info { height: 138px; padding-right: 5px; }
+            .book-title, .book-title a { padding-right: 82px; font-size: 18px; }
+            .book-description { height: 64px; font-size: 14px; line-height: 16px; }
+            .book-cover { width: 92px; }
+            .book-cover img, .book-cover .btn { width: 80px !important; height: 120px !important; }
+            .book-status { right: 5px; padding-left: 5px; padding-right: 5px; font-size: 10px; }
+            .detail-cover { width: 100px; height: 150px; margin-right: 10px; }
+            .book-detail-summary { min-height: 162px; }
+            .detail-card h2 { padding-right: 90px; font-size: 25px; line-height: 28px; }
+            .detail-status-wrap { top: 10px; right: 10px; }
+            .detail-availability { padding: 3px 6px; font-size: 11px; }
+        }
+        #context-bar-row { display: none; }
+        #context-bar-cell { height: 38px; padding: 0; background: #fff; color: #17212b; border-bottom: 1px solid #aaa69d; vertical-align: middle; }
+        #context-bar-cell .ctx-table { height: 38px; }
+        #context-bar-cell .ctx-left { width: 28%; padding-left: 6px; }
+        #context-bar-cell .ctx-center { width: 72%; padding-right: 10px; color: #17212b; font-family: Georgia, serif; font-size: 17px; text-align: right; }
+        #context-bar-cell .ctx-right { display: none; }
+        #context-bar-cell .btn { min-height: 30px; padding: 2px 8px; border: 0; background: #fff; color: #17212b; font-size: 14px; text-align: left; }
+        #bottom-bar-cell { height: 54px; padding: 0; background: #fff; border-top: 1px solid #777; vertical-align: middle; }
+        .bottom-bar { width: 100%; height: 54px; border-collapse: collapse; table-layout: fixed; }
+        .bottom-bar td { padding: 0; text-align: center; vertical-align: middle; }
+        .bottom-bar button { width: 100%; height: 52px; border: 0; background: #fff; color: #111; font-size: 28px; cursor: pointer; }
+        .bottom-bar button:disabled { color: #aaa; }
+        .burger-mark { display: block; width: 30px; margin: 0 auto; }
+        .burger-mark i { display: block; height: 3px; margin: 5px 0; background: #111; border: 0; }
+        .bottom-page { width: 28%; font-size: 14px; font-weight: bold; white-space: nowrap; }
+        .bottom-icon-cell { width: 12%; }
+        #main-menu { position: fixed; left: 8px; bottom: 58px; z-index: 9000; width: 230px; padding: 5px; background: #fff; border: 2px solid #17212b; box-shadow: 3px 3px 0 #777; }
+        #main-menu .btn { width: 100%; margin-bottom: 4px; text-align: left; }
+        .market-nav button { font-size: 13px; }
+        .author-card, .series-card { display: inline-block; width: 24%; min-height: 220px; margin: 0 .5% 8px .5%; padding: 9px; border-left-width: 1px; vertical-align: top; text-align: center; }
+        .author-photo { display: block; position: static; width: 105px; height: 135px; margin: 0 auto 8px auto; border: 1px solid #777; object-fit: cover; background: #e8e4dc; }
+        .tile-title { display: block; height: 42px; overflow: hidden; font-family: Georgia, serif; font-size: 17px; line-height: 21px; }
+        .series-card { min-height: 240px; }
+        .series-stack { position: relative; display: block; left: auto; top: auto; width: 112px; height: 142px; margin: 7px auto 5px auto; }
+        .series-stack img { position: absolute; width: 82px; height: 125px; border: 1px solid #555; background: #ddd; }
+        .series-stack .stack-1 { left: 0; top: 12px; }
+        .series-stack .stack-2 { left: 14px; top: 6px; }
+        .series-stack .stack-3 { left: 28px; top: 0; }
+        .series-author { display: block; height: 34px; overflow: hidden; color: #666; font-size: 14px; font-style: italic; line-height: 17px; }
+
+        #library-search-card { max-width: 720px; margin: 10px auto; }
+        @media screen and (max-width: 700px) { .author-card, .series-card { width: 32.33%; } }
+        @media screen and (max-width: 480px) {
+            .market-nav button { font-size: 10px; } .bottom-bar button { font-size: 23px; } .bottom-page { font-size: 12px; }
+            .author-card, .series-card { width: 49%; margin-left: .5%; margin-right: .5%; }
+        }
+
+        @media screen and (max-height: 500px) {
+            #market-nav-cell, .market-nav { height: 40px; }
+            .market-nav button { height: 39px; }
+        }
     </style>
 </head>
 
 <body>
     <table id="app-layout">
         <tr class="layout-row">
+            <td id="market-nav-cell">
+                <table class="market-nav" aria-label="Section navigation">
+                    <tr id="primary-nav-row"></tr>
+                </table>
+            </td>
+        </tr>
+        <tr id="context-bar-row" class="layout-row">
             <td id="context-bar-cell">
                 <table class="ctx-table">
                     <tr>
                         <td id="ctx-left" class="ctx-left"></td>
-                        <td id="ctx-center" class="ctx-center">Bookstack - Home</td>
+                        <td id="ctx-center" class="ctx-center"></td>
                         <td id="ctx-right" class="ctx-right"></td>
                     </tr>
                 </table>
@@ -465,9 +572,30 @@
                 </div>
             </td>
         </tr>
+        <tr class="layout-row">
+            <td id="bottom-bar-cell">
+                <table class="bottom-bar" aria-label="Page navigation"><tr>
+                    <td class="bottom-icon-cell"><button type="button" onclick="toggleMainMenu()" aria-label="Menu"><span class="burger-mark"><i></i><i></i><i></i></span></button></td>
+                    <td><button type="button" id="page-first" onclick="goToPage('first')" aria-label="First page">&laquo;</button></td>
+                    <td><button type="button" id="page-prev" onclick="goToPage('prev')" aria-label="Previous page">&lsaquo;</button></td>
+                    <td class="bottom-page"><span id="bottom-page-label">Page 1 of 1</span></td>
+                    <td><button type="button" id="page-next" onclick="goToPage('next')" aria-label="Next page">&rsaquo;</button></td>
+                    <td><button type="button" id="page-last" onclick="goToPage('last')" aria-label="Last page">&raquo;</button></td>
+                    <td class="bottom-icon-cell"><button type="button" onclick="openLibrarySection('all')" aria-label="All books">&#9638;</button></td>
+                </tr></table>
+            </td>
+        </tr>
     </table>
 
+    <div id="main-menu" class="hidden">
+        <button type="button" class="btn" onclick="closeMainMenu(); openLibrarySection('recent')">LIBRARY</button>
+        <button type="button" class="btn" onclick="closeMainMenu(); switchTab('discover')">STORE</button>
+        <button type="button" class="btn" onclick="closeMainMenu(); switchTab('queue')">DOWNLOADS</button>
+        <button type="button" class="btn" onclick="closeMainMenu(); switchTab('settings')">SETTINGS</button>
+    </div>
+
     <div id="desc-modal" class="modal-overlay">
+
         <div class="modal-content" id="modal-text"></div>
         <button type="button" class="btn" style="width:100%; height: 50px;" onclick="closeModal()">CLOSE</button>
     </div>
@@ -487,7 +615,11 @@
     <script>
         // Global State
         window.confirmUrl = null;
-        var currentTab = 'discover';
+        var currentTab = 'cloud';
+        var librarySection = 'recent';
+        var storeSection = 'trending';
+        var storeGenres = ['', 'Fantasy', 'Science Fiction', 'Romance', 'Mystery', 'Thriller', 'Horror', 'Historical Fiction', 'Young Adult', 'Biography', 'History', 'Nonfiction'];
+        var storeSelection = { trending: { genre: '', period: 'all' }, popular: { genre: '', period: 'all' }, author: { genre: '', period: 'any', query: '' }, book: { genre: '', period: 'any', query: '' } };
         var opdsHistory = [];
         var opdsData = [];
         var paginationState = {
@@ -512,6 +644,7 @@
         var contextTitle = 'Home';
         var contextBackAction = null;
         var noCoverImage = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iOTAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgZmlsbD0iI2VlZSIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOTk5IiBmb250LXNpemU9IjEwIj5ObyBDb3ZlcjwvdGV4dD48L3N2Zz4=';
+        var authorPlaceholderImage = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22105%22 height=%22135%22%3E%3Crect width=%22105%22 height=%22135%22 fill=%22%23e4e1da%22/%3E%3Ccircle cx=%2252%22 cy=%2243%22 r=%2224%22 fill=%22%23918d86%22/%3E%3Cpath d=%22M15 126c3-32 18-49 37-49s35 17 38 49%22 fill=%22%23918d86%22/%3E%3C/svg%3E';
 
         // --- Core Functions ---
 
@@ -521,12 +654,16 @@
             var viewportHeight = window.innerHeight || root.clientHeight || document.body.clientHeight;
             var layout = document.getElementById('app-layout');
             var contextBar = document.getElementById('context-bar-cell');
+            var marketNav = document.getElementById('market-nav-cell');
+            var bottomBar = document.getElementById('bottom-bar-cell');
             var content = document.getElementById('content-area');
             if (layout && viewportWidth > 0) layout.style.width = viewportWidth + 'px';
             if (layout && viewportHeight > 0) layout.style.height = viewportHeight + 'px';
             if (content && viewportHeight > 0) {
-                var contextHeight = contextBar ? contextBar.offsetHeight : 45;
-                content.style.height = Math.max(80, viewportHeight - contextHeight - 12) + 'px';
+                var contextHeight = contextBar ? contextBar.offsetHeight : 50;
+                var navHeight = marketNav ? marketNav.offsetHeight : 48;
+                var bottomHeight = bottomBar ? bottomBar.offsetHeight : 54;
+                content.style.height = Math.max(80, viewportHeight - contextHeight - navHeight - bottomHeight - 12) + 'px';
             }
         }
 
@@ -558,7 +695,7 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function ajax(method, path, data, callback) {
+        function ajax(method, path, data, callback, timeoutMs) {
             var xhr = new XMLHttpRequest();
             var completed = false;
             function finish(err, payload) {
@@ -567,7 +704,7 @@
                 callback(err, payload);
             }
             xhr.open(method, path, true);
-            xhr.timeout = 20000;
+            xhr.timeout = timeoutMs || 120000;
             xhr.setRequestHeader('Content-Type', 'application/json');
             xhr.onreadystatechange = function () {
                 if (xhr.readyState === 4) {
@@ -608,13 +745,15 @@
             }
             document.getElementById('releases-container').className = 'hidden';
             document.getElementById('bsio-search-container').className = 'hidden';
+            renderPrimaryNav(tab);
+            updateBottomBar();
         }
 
         function switchTab(tab, preserveSearchReturn) {
             showTabView(tab);
 
-            if (tab === 'discover') renderDiscoveryMenu();
-            if (tab === 'cloud') renderOPDSMenu();
+            if (tab === 'discover') renderStoreSection();
+            if (tab === 'cloud') renderLibrarySection();
             if (tab === 'search') {
                 if (!preserveSearchReturn) searchReturnAction = null;
                 // Reset search view on tab click
@@ -626,6 +765,54 @@
             }
             if (tab === 'queue') refreshQueue();
             if (tab === 'settings') loadSettings();
+        }
+
+        function renderPrimaryNav(tab) {
+            var row = document.getElementById('primary-nav-row');
+            if (!row) return;
+            var items = tab === 'cloud' ? [
+                ['Recent', "openLibrarySection('recent')", 'recent'], ['Authors', "openLibrarySection('authors')", 'authors'],
+                ['Series', "openLibrarySection('series')", 'series'], ['All Books', "openLibrarySection('all')", 'all'],
+                ['Search', "openLibrarySection('search')", 'search']
+            ] : tab === 'discover' ? [
+                ['Trending', "openStoreSection('trending')", 'trending'], ['Popular', "openStoreSection('popular')", 'popular'],
+                ['Bestsellers', "openStoreSection('bestsellers')", 'bestsellers'], ['Author Search', "openStoreSection('author')", 'author'],
+                ['Book Search', "openStoreSection('book')", 'book']
+            ] : [[tab === 'queue' ? 'Downloads' : 'Settings', "void(0)", tab]];
+            var html = '';
+            for (var i = 0; i < items.length; i++) {
+                var active = (tab === 'cloud' && librarySection === items[i][2]) || (tab === 'discover' && storeSection === items[i][2]) ? ' class="active"' : '';
+                html += '<td><button type="button"' + active + ' onclick="' + items[i][1] + '">' + items[i][0] + '</button></td>';
+            }
+            row.innerHTML = html;
+        }
+
+        function toggleMainMenu() {
+            var menu = document.getElementById('main-menu');
+            menu.className = menu.className === 'hidden' ? '' : 'hidden';
+        }
+        function closeMainMenu() { document.getElementById('main-menu').className = 'hidden'; }
+
+        function goToPage(direction) {
+            var total = Math.max(1, Math.ceil(paginationState.items.length / paginationState.pageSize));
+            if (!paginationState.itemRenderer || total <= 1) return;
+            if (direction === 'first') paginationState.currentPage = 0;
+            if (direction === 'prev' && paginationState.currentPage > 0) paginationState.currentPage--;
+            if (direction === 'next' && paginationState.currentPage < total - 1) paginationState.currentPage++;
+            if (direction === 'last') paginationState.currentPage = total - 1;
+            renderCurrentPage();
+        }
+
+        function updateBottomBar() {
+            var total = paginationState.itemRenderer ? Math.max(1, Math.ceil(paginationState.items.length / paginationState.pageSize)) : 1;
+            var current = paginationState.itemRenderer ? paginationState.currentPage + 1 : 1;
+            var label = document.getElementById('bottom-page-label');
+            if (label) label.innerText = 'Page ' + current + ' of ' + total;
+            var ids = ['page-first', 'page-prev', 'page-next', 'page-last'];
+            for (var i = 0; i < ids.length; i++) {
+                var button = document.getElementById(ids[i]);
+                if (button) button.disabled = i < 2 ? current <= 1 : current >= total;
+            }
         }
 
         function sendToKindle(url) {
@@ -649,7 +836,8 @@
         }
 
         function estimatedItemHeight(itemRenderer) {
-            if (itemRenderer === createBookItemDiv || itemRenderer === createDiscoveryBookDiv || itemRenderer === createSearchResultDiv) return 96;
+            if (itemRenderer === createBookItemDiv || itemRenderer === createDiscoveryBookDiv || itemRenderer === createSearchResultDiv) return 156;
+            if (itemRenderer === createAuthorCard || itemRenderer === createSeriesCard) return 116;
             if (itemRenderer === createReleaseItemDiv) return 58;
             return 48;
         }
@@ -659,48 +847,43 @@
             var target = document.getElementById(targetId || paginationState.targetId);
             if (!content || !target) return fallbackPageSize || 4;
             var availableHeight = content.clientHeight - elementTopWithin(target, content) - 4;
+            if ((targetId === 'opds-content' && itemRenderer !== createBookItemDiv && (librarySection === 'authors' || librarySection === 'series')) || itemRenderer === createStoreAuthorTile) {
+                var tileHeight = librarySection === 'series' ? 248 : 228;
+                var columns = content.clientWidth > 700 ? 4 : (content.clientWidth > 480 ? 3 : 2);
+                return Math.max(columns, Math.floor(availableHeight / tileHeight) * columns);
+            }
             var itemHeight = estimatedItemHeight(itemRenderer || paginationState.itemRenderer);
+
             if (availableHeight <= 0 || itemHeight <= 0) return fallbackPageSize || 4;
             return Math.max(1, Math.floor(availableHeight / itemHeight));
         }
 
         function updateContextBar() {
+            var row = document.getElementById('context-bar-row');
             var left = document.getElementById('ctx-left');
             var center = document.getElementById('ctx-center');
             var right = document.getElementById('ctx-right');
-
-            left.innerHTML = ''; center.innerHTML = ''; right.innerHTML = '';
-            center.innerText = 'Bookstack - ' + (paginationState.title || contextTitle || 'Home');
-
             var backAction = paginationState.backAction || contextBackAction;
-            if (backAction) {
-                var btn = document.createElement('button');
-                btn.className = 'btn'; btn.innerHTML = '&lt; BACK';
-                btn.onclick = backAction;
-                left.appendChild(btn);
+
+            left.innerHTML = '';
+            center.innerHTML = '';
+            right.innerHTML = '';
+
+            if (!backAction) {
+                if (row) row.style.display = 'none';
+                fitViewport();
+                return;
             }
 
-            var home = document.createElement('button');
-            home.className = 'btn';
-            home.innerHTML = 'HOME';
-            home.style.marginRight = '5px';
-            home.onclick = function () { switchTab('discover'); };
-            right.appendChild(home);
-
-            var totalPages = Math.ceil(paginationState.items.length / paginationState.pageSize);
-            if (totalPages > 1) {
-                center.innerText += ' (' + (paginationState.currentPage + 1) + '/' + totalPages + ')';
-                var prev = document.createElement('button');
-                prev.className = 'btn'; prev.innerHTML = '&lt;'; prev.style.marginRight = '5px';
-                prev.disabled = (paginationState.currentPage === 0);
-                prev.onclick = function () { paginationState.currentPage--; renderCurrentPage(); };
-
-                var next = document.createElement('button');
-                next.className = 'btn'; next.innerHTML = '&gt;';
-                next.disabled = (paginationState.currentPage >= totalPages - 1);
-                next.onclick = function () { paginationState.currentPage++; renderCurrentPage(); };
-                right.appendChild(prev); right.appendChild(next);
-            }
+            if (row) row.style.display = 'table-row';
+            var back = document.createElement('button');
+            back.type = 'button';
+            back.className = 'btn';
+            back.innerHTML = '&lsaquo; BACK';
+            back.onclick = backAction;
+            left.appendChild(back);
+            center.innerText = paginationState.title || contextTitle || '';
+            fitViewport();
         }
 
         function renderPaginatedList(title, items, itemRenderer, backAction, targetId, pageSize, footerRenderer) {
@@ -727,6 +910,7 @@
             paginationState.footerRenderer = null;
             paginationState.currentPage = 0;
             updateContextBar();
+            updateBottomBar();
         }
 
         function captureListState() {
@@ -783,6 +967,7 @@
             var maxPage = Math.max(0, Math.ceil(paginationState.items.length / paginationState.pageSize) - 1);
             if (paginationState.currentPage > maxPage) paginationState.currentPage = maxPage;
             updateContextBar();
+            updateBottomBar();
 
             var start = paginationState.currentPage * paginationState.pageSize;
             var end = Math.min(start + paginationState.pageSize, paginationState.items.length);
@@ -797,12 +982,165 @@
             if (paginationState.footerRenderer) {
                 paginationState.footerRenderer(container);
             }
-            if (paginationState.itemRenderer === createDiscoveryBookDiv) checkVisibleDiscoveryBooks();
+            if (paginationState.itemRenderer === createDiscoveryBookDiv) {
+                checkVisibleDiscoveryBooks();
+                enrichVisibleDiscoveryBooks();
+            }
         }
 
         // --- Discover ---
 
         window.discoveryBookRegistry = [];
+
+        function openStoreSection(section) {
+            storeSection = section || 'trending';
+            showTabView('discover');
+            renderStoreSection();
+        }
+
+        function storeGenreOptions(selected) {
+            var html = '';
+            for (var i = 0; i < storeGenres.length; i++) {
+                var label = storeGenres[i] || 'All Genres';
+                html += '<option value="' + escapeHtml(storeGenres[i]) + '"' + (selected === storeGenres[i] ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+            }
+            return html;
+        }
+
+        function storePeriodOptions(section, selected) {
+            var options = [['any', 'Any Publication Date'], ['1y', 'Published This Year'], ['3y', 'Past 3 Years'], ['10y', 'Past 10 Years']];
+            if (section === 'trending' || section === 'popular') options[0] = ['all', 'All Time'];
+            var html = '';
+            for (var i = 0; i < options.length; i++) {
+                html += '<option value="' + options[i][0] + '"' + (selected === options[i][0] ? ' selected' : '') + '>' + options[i][1] + '</option>';
+            }
+            return html;
+        }
+
+        function renderStoreSection() {
+            renderPrimaryNav('discover');
+            if (storeSection === 'bestsellers') {
+                renderStoreBestsellers();
+                return;
+            }
+            var state = storeSelection[storeSection];
+            var content = document.getElementById('discovery-content');
+            var isSearch = storeSection === 'author' || storeSection === 'book';
+            var title = storeSection === 'trending' ? 'Trending' : storeSection === 'popular' ? 'Popular' : storeSection === 'author' ? 'Author Search' : 'Book Search';
+            var html = '<div class="card" style="padding:6px; margin-bottom:8px;">';
+            if (isSearch) {
+                html += '<input type="text" id="store-query" value="' + escapeHtml(state.query || '') + '" placeholder="' + (storeSection === 'author' ? 'Author name...' : 'Title, author or ISBN...') + '" onkeypress="if(event.keyCode==13) applyStoreFilters()">';
+            }
+            html += '<table class="filter-table"><tr><td><select id="store-genre">' + storeGenreOptions(state.genre) + '</select></td>';
+            html += '<td><select id="store-period">' + storePeriodOptions(storeSection, state.period) + '</select></td>';
+            html += '<td style="width:82px"><button type="button" class="btn" style="width:100%" onclick="applyStoreFilters()">' + (isSearch ? 'SEARCH' : 'LOAD') + '</button></td></tr></table></div>';
+            html += '<div id="store-list"></div>';
+            content.innerHTML = html;
+            setContext(title);
+            if (!isSearch || state.query) applyStoreFilters();
+        }
+
+        function applyStoreFilters() {
+            var state = storeSelection[storeSection];
+            var genre = document.getElementById('store-genre');
+            var period = document.getElementById('store-period');
+            var query = document.getElementById('store-query');
+            state.genre = genre ? genre.value : '';
+            state.period = period ? period.value : state.period;
+            if (query) state.query = query.value.replace(/^\s+|\s+$/g, '');
+            var target = document.getElementById('store-list');
+            if (!target) return;
+            if ((storeSection === 'author' || storeSection === 'book') && !state.query) {
+                target.innerHTML = '<center>Enter a search above.</center>';
+                return;
+            }
+            target.innerHTML = '<center>Loading recommendations...</center>';
+            var path = '';
+            if (storeSection === 'trending') path = '/api/discovery/store-trending?period=' + encodeURIComponent(state.period) + '&genre=' + encodeURIComponent(state.genre);
+            if (storeSection === 'popular') path = '/api/discovery/store-popular?period=' + encodeURIComponent(state.period) + '&genre=' + encodeURIComponent(state.genre);
+            if (storeSection === 'author') path = '/api/discovery/store-author-search?q=' + encodeURIComponent(state.query) + '&genre=' + encodeURIComponent(state.genre);
+            if (storeSection === 'book') path = '/api/discovery/store-book-search?q=' + encodeURIComponent(state.query) + '&genre=' + encodeURIComponent(state.genre) + '&period=' + encodeURIComponent(state.period);
+            ajax('GET', path, null, function (err, data) {
+                if (err || !data) { target.innerHTML = '<center>Unable to load recommendations.</center>'; return; }
+                if (storeSection === 'author') {
+                    renderStoreAuthors(data.authors || []);
+                } else {
+                    renderStoreBooks(data.title || (storeSection === 'popular' ? 'Popular Books' : 'Search Results'), data.books || [], null);
+                }
+            });
+        }
+
+        function renderStoreBooks(title, books, backAction, footerRenderer) {
+            window.discoveryBookRegistry = [];
+            discoveryListState = { title: title, books: books, backAction: backAction, footerRenderer: footerRenderer || null, currentPage: 0, targetId: 'store-list' };
+            renderPaginatedList(title, books, createDiscoveryBookDiv, backAction, 'store-list', 4, footerRenderer || null);
+        }
+
+        function createStoreAuthorTile(author) {
+            var div = document.createElement('div');
+            div.className = 'opds-item author-card';
+            div.innerHTML = '<img class="author-photo" src="' + escapeHtml(author.image_url || authorPlaceholderImage) + '" onerror="this.onerror=null;this.src=authorPlaceholderImage" alt="">' +
+                '<b class="tile-title">' + escapeHtml(author.name || 'Unknown author') + '</b>';
+            div.onclick = function () { loadStoreAuthorBooks(author); };
+            return div;
+        }
+
+        function renderStoreAuthors(authors) {
+            window.storeAuthorResults = authors;
+            renderPaginatedList('Authors', authors, createStoreAuthorTile, null, 'store-list', 12);
+        }
+
+        function loadStoreAuthorBooks(author) {
+            var state = storeSelection.author;
+            var target = document.getElementById('store-list');
+            target.innerHTML = '<center>Loading books...</center>';
+            var path = '/api/discovery/store-author-books?key=' + encodeURIComponent(author.key || '') + '&genre=' + encodeURIComponent(state.genre) + '&period=' + encodeURIComponent(state.period);
+            ajax('GET', path, null, function (err, data) {
+                if (err || !data) { target.innerHTML = '<center>Unable to load author books.</center>'; return; }
+                renderStoreBooks(author.name || 'Author', data.books || [], function () { renderStoreAuthors(window.storeAuthorResults || []); });
+            });
+        }
+
+        function renderStoreBestsellers() {
+            var content = document.getElementById('discovery-content');
+            content.innerHTML = '<center>Loading bestseller filters...</center>';
+            setContext('Bestsellers');
+            ajax('GET', '/api/discovery/bestseller-lists', null, function (err, data) {
+                if (err || !data || !data.enabled) { content.innerHTML = '<center>Bestsellers requires an NYT Books API key.</center>'; return; }
+                var lists = data.lists || [];
+                var html = '<div class="card" style="padding:6px; margin-bottom:8px;"><table class="filter-table"><tr><td><select id="store-bestseller-list">';
+                for (var i = 0; i < lists.length; i++) html += '<option value="' + escapeHtml(lists[i].slug) + '">' + escapeHtml(lists[i].title) + '</option>';
+                html += '</select></td><td><select id="store-bestseller-week"><option value="current">Latest Chart</option></select></td>';
+                html += '<td style="width:82px"><button type="button" class="btn" style="width:100%" onclick="loadStoreBestsellerBooks()">LOAD</button></td></tr></table></div><div id="store-list"></div>';
+                content.innerHTML = html;
+                document.getElementById('store-bestseller-list').onchange = loadStoreBestsellerWeeks;
+                loadStoreBestsellerWeeks();
+            });
+        }
+
+        function loadStoreBestsellerWeeks() {
+            var list = document.getElementById('store-bestseller-list');
+            var week = document.getElementById('store-bestseller-week');
+            if (!list || !week) return;
+            week.innerHTML = '<option value="current">Loading weeks...</option>';
+            ajax('GET', '/api/discovery/bestseller-weeks?slug=' + encodeURIComponent(list.value), null, function (err, data) {
+                week.innerHTML = '<option value="current">Latest Chart</option>';
+                if (!err && data) for (var i = 0; i < (data.weeks || []).length; i++) week.innerHTML += '<option value="' + escapeHtml(data.weeks[i].date) + '">' + escapeHtml(data.weeks[i].title) + '</option>';
+                loadStoreBestsellerBooks();
+            });
+        }
+
+        function loadStoreBestsellerBooks() {
+            var list = document.getElementById('store-bestseller-list');
+            var week = document.getElementById('store-bestseller-week');
+            var target = document.getElementById('store-list');
+            if (!list || !week || !target) return;
+            target.innerHTML = '<center>Loading chart...</center>';
+            ajax('GET', '/api/discovery/bestsellers?slug=' + encodeURIComponent(list.value) + '&date=' + encodeURIComponent(week.value), null, function (err, data) {
+                if (err || !data) { target.innerHTML = '<center>Unable to load bestseller chart.</center>'; return; }
+                renderStoreBooks(data.title || 'Bestsellers', data.books || [], null, renderNytAttribution);
+            });
+        }
 
         function renderDiscoveryMenu() {
             var content = document.getElementById('discovery-content');
@@ -1078,8 +1416,9 @@
 
         function bookAvailabilityLabel(book, defaultAvailability) {
             if (book._queued) return 'DOWNLOADING';
-            if (book.library_download_url || book._libraryUrl) return 'AVAILABLE NOW';
-            return book._availability || defaultAvailability || 'REQUEST NEEDED';
+            if (book.library_download_url || book._libraryUrl) return 'AVAILABLE';
+            var label = book._availability || defaultAvailability || 'REQUEST NEEDED';
+            return label === 'AVAILABLE NOW' ? 'AVAILABLE' : label;
         }
 
         function standardBookMetaLine(book) {
@@ -1116,6 +1455,7 @@
         }
 
         function createDiscoveryBookDiv(book) {
+            book._listTargetId = paginationState.targetId || 'discovery-content';
             var idx = window.discoveryBookRegistry.push(book) - 1;
             return createStandardBookDiv(book, function () { window.showDiscoveryDetail(idx); }, 'discovery-' + idx, 'CHECKING AVAILABILITY');
         }
@@ -1123,6 +1463,58 @@
         function firstGenre(book) {
             if (!book || !book.genres || !book.genres.length) return '';
             return book.genres[0] || '';
+        }
+
+        function applyVisibleBookMetadata(book, idx, metadata) {
+            if (!metadata) return false;
+            var changed = false;
+            var isVisible = window.discoveryBookRegistry[idx] === book;
+            if (metadata.description) {
+                book.description = metadata.description;
+                var description = isVisible ? document.getElementById('discovery-' + idx + '-desc') : null;
+                if (description) {
+                    description.innerText = metadata.description;
+                    description.className = 'book-description';
+                }
+                changed = true;
+            }
+            if (!book.cover_url && metadata.cover_url) {
+                book.cover_url = metadata.cover_url;
+                var cover = isVisible ? document.getElementById('discovery-' + idx + '-cover') : null;
+                var images = cover ? cover.getElementsByTagName('img') : [];
+                if (images.length) images[0].src = metadata.cover_url;
+            }
+            if (!book.isbn && metadata.isbn) book.isbn = metadata.isbn;
+            if (!book.published_year && metadata.published_year) book.published_year = metadata.published_year;
+            var meta = isVisible ? document.getElementById('discovery-' + idx + '-meta') : null;
+            if (meta) meta.innerText = standardBookMetaLine(book);
+            return changed;
+        }
+
+        function requestVisibleBookMetadata(book, idx) {
+            ajax('POST', '/api/opds/metadata', {
+                title: book.title || '', author: primaryAuthor(book), isbn: book.isbn || ''
+            }, function (err, metadata) {
+                if (!err) applyVisibleBookMetadata(book, idx, metadata);
+            });
+        }
+
+        function enrichVisibleDiscoveryBooks() {
+            for (var i = 0; i < window.discoveryBookRegistry.length; i++) {
+                (function (book, idx) {
+                    if (!book || book.description || book._descriptionRequested) return;
+                    book._descriptionRequested = true;
+                    if (book.source === 'openlibrary' && book.source_id) {
+                        ajax('GET', '/api/discovery/details?source=openlibrary&source_id=' + encodeURIComponent(book.source_id), null, function (err, metadata) {
+                            if (err || !applyVisibleBookMetadata(book, idx, metadata)) {
+                                requestVisibleBookMetadata(book, idx);
+                            }
+                        });
+                    } else {
+                        requestVisibleBookMetadata(book, idx);
+                    }
+                })(window.discoveryBookRegistry[i], i);
+            }
         }
 
         function checkVisibleDiscoveryBooks() {
@@ -1187,16 +1579,18 @@
 
             var authors = bookAuthorsText(book);
             var detailAvailability = bookAvailabilityLabel(book, mode === 'library' ? 'AVAILABLE NOW' : 'REQUEST NEEDED');
+            if (detailAvailability === 'AVAILABLE NOW') detailAvailability = 'AVAILABLE';
             var html = '<div class="detail-card"><h2>' + escapeHtml(book.title || 'Unknown Title') + '</h2>';
+            html += '<p class="detail-author">' + escapeHtml(authors) + '</p>';
             html += '<div class="book-detail-summary">';
-            html += '<img src="' + escapeHtml(book.cover_url || noCoverImage) + '" onerror="coverError(this)" style="width:100px; height:150px; float:left; margin:0 10px 10px 0; border:1px solid #000;">';
-            html += '<p><b>' + escapeHtml(authors) + '</b>';
-            if (firstGenre(book)) html += '<br>' + escapeHtml(firstGenre(book));
-            if (book.published_year || book.year) html += '<br>' + escapeHtml(book.published_year || book.year);
+            html += '<img class="detail-cover" src="' + escapeHtml(book.cover_url || noCoverImage) + '" onerror="coverError(this)">';
+            html += '<p class="detail-facts">';
+            if (firstGenre(book)) html += '<b>' + escapeHtml(firstGenre(book)) + '</b>';
+            if (book.published_year || book.year) html += '<br>Published ' + escapeHtml(book.published_year || book.year);
             if (seriesLabel(book)) html += '<br>' + escapeHtml(seriesLabel(book));
-            if (book.isbn) html += '<br>ISBN: ' + escapeHtml(book.isbn);
+            if (book.isbn) html += '<br>ISBN ' + escapeHtml(book.isbn);
             html += '</p>';
-            html += '<p><b id="book-detail-status">' + escapeHtml(detailAvailability) + '</b></p>';
+            html += '<p class="detail-status-wrap"><b id="book-detail-status" class="detail-availability">' + escapeHtml(detailAvailability) + '</b></p>';
             html += '</div>';
             html += '<div id="book-detail-action"></div>';
             html += '<div id="book-detail-extra"></div>';
@@ -1278,7 +1672,7 @@
             } else if (info && info.in_library && info.download_url) {
                 book.library_download_url = info.download_url;
                 book._availability = 'AVAILABLE NOW';
-                if (status) status.innerText = 'AVAILABLE NOW';
+                if (status) status.innerText = 'AVAILABLE';
                 action.innerHTML = '<button type="button" class="btn" style="width:100%" onclick="sendSelectedDiscoveryBook()">SEND TO KINDLE</button>';
             } else if (book._queued) {
                 if (status) status.innerText = 'DOWNLOADING';
@@ -1323,7 +1717,8 @@
 
         window.showDiscoveryDetail = function (idx) {
             var book = window.discoveryBookRegistry[idx];
-            showBookDetail(book, restoreDiscoveryList);
+            if (!book) return;
+            showBookDetail(book, restoreDiscoveryList, 'discovery', book._listTargetId || 'discovery-content');
         };
 
         function sendSelectedDiscoveryBook() {
@@ -1357,6 +1752,78 @@
         }
 
         // --- Library (OPDS) ---
+
+        function openLibrarySection(section) {
+            librarySection = section || 'recent'; showTabView('cloud'); renderLibrarySection();
+        }
+        function renderLibrarySection() {
+            renderPrimaryNav('cloud'); opdsHistory = [];
+            if (librarySection === 'recent') browseRecentBooks();
+            else if (librarySection === 'authors') browseAuthorTiles();
+            else if (librarySection === 'series') browseOPDS('/series');
+            else if (librarySection === 'all') browseOPDS('/catalog?page=1&size=100');
+            else renderLibrarySearch();
+        }
+        function browseAuthorTiles() {
+            var content = document.getElementById('opds-content');
+            content.innerHTML = '<center>Loading authors...</center>';
+            setContext('Authors');
+            ajax('GET', '/api/opds/authors', null, function (err, data) {
+                if (err || !data || !data.entries) { content.innerHTML = '<center>Unable to load authors.</center>'; return; }
+                renderPaginatedList('Authors', data.entries, createAuthorCard, null, 'opds-content', 12);
+            });
+        }
+
+        function renderLibrarySearch() {
+            var content = document.getElementById('opds-content'); setContext('Library Search');
+            content.innerHTML = '<div id="library-search-card" class="card"><h3>Search My Library</h3><input type="text" id="library-search-input" placeholder="Title or author..." onkeypress="if(event.keyCode==13) searchLibrary()"><button type="button" class="btn" style="width:100%" onclick="searchLibrary()">SEARCH</button></div>';
+        }
+        function searchLibrary() {
+            var input = document.getElementById('library-search-input');
+            var query = input ? input.value.replace(/^\s+|\s+$/g, '') : '';
+            if (query) browseOPDS('/catalog?q=' + encodeURIComponent(query));
+        }
+        function navigationLink(entry) {
+            for (var i = 0; i < (entry.links || []).length; i++) if ((entry.links[i].rel || '').indexOf('subsection') !== -1) return entry.links[i].href;
+            return '';
+        }
+        function createAuthorCard(entry, currentPath) {
+            var div = document.createElement('div'); div.className = 'opds-item author-card';
+            div.innerHTML = '<img class="author-photo" src="' + authorPlaceholderImage + '" alt=""><b class="tile-title">' + escapeHtml(entry.title || 'Unknown author') + '</b>';
+            var link = navigationLink(entry);
+            div.onclick = function () { if (link) browseOPDS(link); };
+            ajax('GET', '/api/opds/author-profile?name=' + encodeURIComponent(entry.title || ''), null, function (err, profile) {
+                if (err || !profile || !profile.image_url) return;
+                var image = div.getElementsByTagName('img')[0];
+                if (image) { image.src = profile.image_url; image.onerror = function () { this.src = authorPlaceholderImage; this.onerror = null; }; }
+            });
+            return div;
+        }
+
+        function createSeriesCard(entry, currentPath) {
+            var div = document.createElement('div'); div.className = 'opds-item series-card';
+            div.innerHTML = '<b class="tile-title">' + escapeHtml(entry.title || 'Unknown series') + '</b><span class="series-stack"><img class="stack-1" src="' + noCoverImage + '"><img class="stack-2" src="' + noCoverImage + '"><img class="stack-3" src="' + noCoverImage + '"></span><span class="series-author">Loading author...</span>';
+            var link = navigationLink(entry);
+            div.onclick = function () { if (link) { opdsHistory.push(currentPath); browseOPDS(link); } };
+            if (link) ajax('GET', '/api/opds/browse?url=' + encodeURIComponent(link), null, function (err, data) {
+                if (err || !data) return; var books = [];
+                for (var i = 0; i < (data.entries || []).length; i++) {
+                    var candidate = data.entries[i], acquisition = false;
+                    for (var j = 0; j < (candidate.links || []).length; j++) if ((candidate.links[j].rel || '').indexOf('acquisition') !== -1) acquisition = true;
+                    if (acquisition) books.push(candidate);
+                }
+                var authorLabel = div.getElementsByTagName('span')[1];
+                if (authorLabel) authorLabel.innerText = books.length ? bookAuthorsText(books[0]) : 'Unknown author';
+                var images = div.getElementsByTagName('img');
+                for (var k = 0; k < images.length && k < books.length; k++) {
+                    var cover = books[k].cover_url || '';
+                    for (var m = 0; m < (books[k].links || []).length; m++) if ((books[k].links[m].rel || '').indexOf('thumbnail') !== -1) cover = books[k].links[m].href;
+                    if (cover) images[k].src = cover;
+                }
+                div.onclick = function () { renderPaginatedList(entry.title || 'Series', books, createBookItemDiv, function () { browseOPDS(currentPath); }, 'opds-content', 4); };
+            });
+            return div;
+        }
 
         function renderOPDSMenu() {
             var content = document.getElementById('opds-content');
@@ -1398,7 +1865,7 @@
             ajax('GET', '/api/opds/browse?url=' + encodeURIComponent('/recent?page=1&size=100'), null, function (err, data) {
                 if (err || !data) { content.innerHTML = '<center>Error</center>'; return; }
                 opdsData = data.entries || [];
-                renderPaginatedList('Recent Books', opdsData, createBookItemDiv, renderOPDSMenu, 'opds-content', 4);
+                renderPaginatedList('Recent Books', opdsData, createBookItemDiv, librarySection === 'recent' ? null : renderOPDSMenu, 'opds-content', 4);
             });
         }
 
@@ -1428,9 +1895,10 @@
                 else if (isBook) bookItems.push(entry);
             }
 
-            var backAction = function () {
+            var isLibraryRootPath = currentPath === '/authors' || currentPath === '/series' || currentPath.indexOf('/catalog?') === 0;
+            var backAction = isLibraryRootPath && opdsHistory.length === 0 ? null : function () {
                 if (opdsHistory.length > 0) browseOPDS(opdsHistory.pop());
-                else renderOPDSMenu();
+                else renderLibrarySection();
             };
 
             var pathLower = currentPath.toLowerCase();
@@ -1465,17 +1933,23 @@
                 list = list.concat(seriesItems);
 
                 renderPaginatedList(authorName || 'Authors', list, function (entry) {
-                    var div = document.createElement('div'); div.className = 'opds-item';
-                    div.innerHTML = '<b>' + escapeHtml(entry.title || entry.name || 'Unknown') + '</b>';
                     if (entry.isSynthetic) {
+                        var div = document.createElement('div'); div.className = 'opds-item';
+                        div.innerHTML = '<b>' + escapeHtml(entry.title || 'Books') + '</b>';
                         div.onclick = function () { renderPaginatedList(entry.title, entry.books, createBookItemDiv, function () { renderOPDSList(currentPath); }, 'opds-content', 4); };
-                    } else {
-                        var navLink = "";
-                        for (var k = 0; k < entry.links.length; k++) if (entry.links[k].rel.indexOf('subsection') !== -1) navLink = entry.links[k].href;
-                        div.onclick = function () { opdsHistory.push(currentPath); browseOPDS(navLink); };
+                        return div;
                     }
-                    return div;
-                }, backAction, 'opds-content', 10, isAuthorLevel ? function (container) {
+                    if (isAuthorPath && pathDepth === 2) return createAuthorCard(entry, currentPath);
+                    if (isAuthorPath) {
+                        var directory = document.createElement('div'); directory.className = 'opds-item';
+                        directory.innerHTML = '<b>' + escapeHtml(entry.title || 'Authors') + '</b>';
+                        var directoryLink = navigationLink(entry);
+                        directory.onclick = function () { if (directoryLink) { opdsHistory.push(currentPath); browseOPDS(directoryLink); } };
+                        return directory;
+                    }
+                    return createSeriesCard(entry, currentPath);
+
+                }, backAction, 'opds-content', 6, isAuthorLevel ? function (container) {
                     var btnDiv = document.createElement('center'); btnDiv.style.marginTop = '10px';
                     var btn = document.createElement('button'); btn.className = 'btn';
                     btn.type = 'button';
@@ -1708,6 +2182,11 @@
                         if (best && (best.md5 || best.library_download_url || best._libraryUrl)) {
                             searchStateBackup = { _returnAction: options.returnAction || searchReturnAction || null };
                             var detail = shelfmarkResultToBook(best, searchStateBackup);
+                            if (best.md5 && !(best._inLibrary && best._libraryUrl)) {
+                                discoverySelectedBook = detail;
+                                showReleases(best.md5, searchStateBackup);
+                                return;
+                            }
                             var detailMode = best._inLibrary && best._libraryUrl ? 'library' : 'discovery';
                             showBookDetail(detail, searchStateBackup._returnAction || backFromSearchResults, detailMode, 'search-results');
                             return;
@@ -1856,7 +2335,11 @@
             setContext('Choose Download', backToSearch);
 
             ajax('GET', '/api/shelfmark/releases?md5=' + encodeURIComponent(md5), null, function (err, data) {
-                if (err || !data || !data.length) { container.innerHTML = '<center>No download options found.</center>'; return; }
+                if (err) {
+                    container.innerHTML = '<center>Unable to load download options.<br><small>' + escapeHtml(err) + '</small></center>';
+                    return;
+                }
+                if (!data || !data.length) { container.innerHTML = '<center>No download options found.</center>'; return; }
 
                 // Filter for Kindle-compatible formats (epub, mobi, azw3). Usenet/Prowlarr
                 // releases often bundle multiple formats in one file (e.g. format: "epub, mobi",
@@ -1875,7 +2358,7 @@
                 }
 
                 renderPaginatedList('Choose Download', filtered, createReleaseItemDiv, backToSearch, 'releases-container', 5);
-            });
+            }, 120000);
         }
 
         function backToSearch() {
@@ -2108,7 +2591,7 @@
         fitViewport();
         window.onresize = refreshViewport;
         window.onorientationchange = refreshViewport;
-        switchTab('discover');
+        switchTab('cloud');
     </script>
 </body>
 

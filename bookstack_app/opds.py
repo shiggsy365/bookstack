@@ -1,5 +1,6 @@
 import base64
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus, urljoin
@@ -8,6 +9,7 @@ import requests
 from flask import Blueprint, jsonify, request
 
 from .config import BOOKLORE_PASS, BOOKLORE_URL, BOOKLORE_USER, SHELFMARK_URL
+from .discovery import OPENLIBRARY_BASE_URL, OPENLIBRARY_ORIGINS, get_cached_json, openlibrary_headers
 from .matching import normalize_title, title_words
 from .metadata import resolve_metadata
 from .providers import clean_html
@@ -87,7 +89,7 @@ def get_cached_booklore_entries(query):
     if cached and cached['expires_at'] > now:
         return cached['entries']
     search_url = f'{BOOKLORE_URL}/catalog?q={quote_plus(query)}'
-    resp = get_with_allowed_redirects(search_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=10)
+    resp = get_with_allowed_redirects(search_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120)
     if resp.status_code != 200:
         return []
     entries = parse_opds_feed(resp.content, search_url)['entries']
@@ -148,7 +150,7 @@ def image_proxy():
         headers = {'User-Agent': 'Mozilla/5.0'}
         if get_origin(url) in BOOKLORE_ORIGINS:
             headers.update(booklore_headers())
-        resp = get_with_allowed_redirects(url, allowed_origins={get_origin(url)}, headers=headers, timeout=10)
+        resp = get_with_allowed_redirects(url, allowed_origins={get_origin(url)}, headers=headers, timeout=120)
         resp.raise_for_status()
         return resp.content, resp.status_code, {'Content-Type': resp.headers.get('Content-Type', 'image/jpeg')}
     except Exception as e:
@@ -162,7 +164,7 @@ def browse():
     if not target_url.startswith('http'):
         target_url = BOOKLORE_URL.rstrip('/') + target_url
     try:
-        resp = get_with_allowed_redirects(target_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=15)
+        resp = get_with_allowed_redirects(target_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120)
         resp.raise_for_status()
         parsed = parse_opds_feed(resp.content, target_url)
         entries = parsed['entries']
@@ -184,6 +186,100 @@ def check_library():
     except Exception as e:
         print(f'[ERROR] Library check failed: {e}', flush=True)
         return jsonify({'results': {}})
+
+
+@bp.route('/authors')
+def authors():
+    try:
+        root_url = BOOKLORE_URL.rstrip('/') + '/authors'
+        root_response = get_with_allowed_redirects(
+            root_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120
+        )
+        root_response.raise_for_status()
+        root_entries = parse_opds_feed(root_response.content, root_url)['entries']
+        section_urls = []
+        direct_authors = []
+        for entry in root_entries:
+            subsection = next(
+                (link.get('href') for link in entry.get('links', []) if 'subsection' in (link.get('rel') or '')), ''
+            )
+            title = (entry.get('title') or '').strip()
+            is_letter_bucket = bool(
+                subsection and (
+                    re.fullmatch(r'[A-Za-z]', title)
+                    or title.casefold() in {'#', '0-9', 'other'}
+                    or re.fullmatch(r'[A-Za-z]\s*(authors?)?', title, flags=re.I)
+                )
+            )
+            if is_letter_bucket:
+                section_urls.append(subsection)
+            elif subsection:
+                direct_authors.append(entry)
+
+        def fetch_section(url):
+            response = get_with_allowed_redirects(
+                url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120
+            )
+            response.raise_for_status()
+            return parse_opds_feed(response.content, url)['entries']
+
+        author_entries = list(direct_authors)
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(fetch_section, url) for url in section_urls]
+            for future in as_completed(futures):
+                try:
+                    author_entries.extend(
+                        entry for entry in future.result()
+                        if any('subsection' in (link.get('rel') or '') for link in entry.get('links', []))
+                    )
+                except Exception as e:
+                    print(f'[Authors] Catalogue section failed: {e}', flush=True)
+
+        unique = {}
+        for entry in author_entries:
+            name = (entry.get('title') or '').strip()
+            if name:
+                unique[name.casefold()] = entry
+        return jsonify({'entries': sorted(unique.values(), key=lambda entry: (entry.get('title') or '').casefold())})
+    except Exception as e:
+        print(f'[Authors] Catalogue lookup failed: {e}', flush=True)
+        return jsonify({'entries': []})
+
+
+@bp.route('/author-profile')
+def author_profile():
+    name = request.args.get('name', '').strip()
+    if not name:
+        return jsonify({}), 400
+    try:
+        search = get_cached_json(
+            f'openlibrary:author:{name}', urljoin(OPENLIBRARY_BASE_URL, '/search/authors.json'),
+            OPENLIBRARY_ORIGINS, headers=openlibrary_headers(), params={'q': name, 'limit': 5},
+            cache_seconds=30 * 24 * 60 * 60
+        )
+        candidates = search.get('docs') or []
+        exact = next((item for item in candidates if (item.get('name') or '').casefold() == name.casefold()), None)
+        author = exact or (candidates[0] if candidates else {})
+        key = (author.get('key') or '').replace('/authors/', '')
+        profile = {}
+        if key:
+            profile = get_cached_json(
+                f'openlibrary:author-profile:{key}', urljoin(OPENLIBRARY_BASE_URL, f'/authors/{key}.json'),
+                OPENLIBRARY_ORIGINS, headers=openlibrary_headers(), cache_seconds=30 * 24 * 60 * 60
+            )
+        bio = profile.get('bio') or author.get('bio') or ''
+        if isinstance(bio, dict):
+            bio = bio.get('value', '')
+        photos = profile.get('photos') or []
+        photo_id = (photos[0] if photos else None) or author.get('cover_i')
+        return jsonify({
+            'name': profile.get('name') or author.get('name') or name,
+            'bio': clean_html(bio),
+            'image_url': f'https://covers.openlibrary.org/a/id/{photo_id}-M.jpg' if photo_id else ''
+        })
+    except Exception as e:
+        print(f'[Author] Profile lookup failed: {e}', flush=True)
+        return jsonify({})
 
 
 @bp.route('/metadata', methods=['POST'])
