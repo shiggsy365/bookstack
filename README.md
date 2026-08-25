@@ -333,7 +333,7 @@ Shelfmark release lookups accept EPUB, MOBI, and AZW3 results. Browser and upstr
 
 ### Navigation
 
-The bottom bar provides the main menu, first/previous/next/last page controls, and page numbering. The menu links to **Library**, **Store**, **Downloads**, and **Settings**. Hierarchical views expose a back action through the context bar. The burger icon is drawn with CSS rather than a font glyph for Kobo compatibility.
+The bottom bar provides the main menu, first/previous/next/last page controls, and page numbering. The menu links to **Library**, **Store**, **Downloads**, and **Settings**. Hierarchical views expose a back action through the context bar. The bottom-left button displays the current main section and opens the menu for Library, Store, Downloads, and Settings. The redundant bottom-right tile shortcut has been removed.
 
 The page requests an initial viewport scale of 150%. Browser zoom controls remain available where supported.
 
