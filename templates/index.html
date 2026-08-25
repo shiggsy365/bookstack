@@ -695,7 +695,14 @@
                 .replace(/'/g, '&#39;');
         }
 
+        var ajaxResponseCache = {};
         function ajax(method, path, data, callback, timeoutMs) {
+            var cacheable = method === 'GET' && path.indexOf('/api/settings') !== 0 && path.indexOf('/api/shelfmark/queue') !== 0;
+            var cached = cacheable ? ajaxResponseCache[path] : null;
+            if (cached && cached.expires > new Date().getTime()) {
+                setTimeout(function () { callback(null, cached.data); }, 0);
+                return null;
+            }
             var xhr = new XMLHttpRequest();
             var completed = false;
             function finish(err, payload) {
@@ -709,7 +716,11 @@
             xhr.onreadystatechange = function () {
                 if (xhr.readyState === 4) {
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        try { finish(null, JSON.parse(xhr.responseText)); } catch (e) { finish(null, null); }
+                        try {
+                            var payload = JSON.parse(xhr.responseText);
+                            if (cacheable) ajaxResponseCache[path] = { data: payload, expires: new Date().getTime() + 60000 };
+                            finish(null, payload);
+                        } catch (e) { finish(null, null); }
                     } else {
                         try { var err = JSON.parse(xhr.responseText); finish(err.error || 'Error', null); }
                         catch (e) { finish('Error', null); }
@@ -720,6 +731,7 @@
             xhr.ontimeout = function () { finish('Request timed out', null); };
             xhr.onabort = function () { finish('Request aborted', null); };
             xhr.send(data ? JSON.stringify(data) : null);
+            return xhr;
         }
 
         function showToast(msg) {
@@ -986,6 +998,7 @@
                 checkVisibleDiscoveryBooks();
                 enrichVisibleDiscoveryBooks();
             }
+            if (paginationState.itemRenderer === createBookItemDiv) enrichVisibleOpdsBooks();
         }
 
         // --- Discover ---
@@ -1040,7 +1053,9 @@
             if (!isSearch || state.query) applyStoreFilters();
         }
 
-        function applyStoreFilters() {
+        var activeStoreRequest = null;
+        var storeRequestVersion = 0;
+        function applyStoreFilters(provider) {
             var state = storeSelection[storeSection];
             var genre = document.getElementById('store-genre');
             var period = document.getElementById('store-period');
@@ -1054,20 +1069,48 @@
                 target.innerHTML = '<center>Enter a search above.</center>';
                 return;
             }
-            target.innerHTML = '<center>Loading recommendations...</center>';
+            var searchProvider = provider || 'hardcover';
+            target.innerHTML = '<center>' + (searchProvider === 'google' ? 'Searching Google Books...' : 'Loading recommendations...') + '</center>';
             var path = '';
             if (storeSection === 'trending') path = '/api/discovery/store-trending?period=' + encodeURIComponent(state.period) + '&genre=' + encodeURIComponent(state.genre);
             if (storeSection === 'popular') path = '/api/discovery/store-popular?period=' + encodeURIComponent(state.period) + '&genre=' + encodeURIComponent(state.genre);
             if (storeSection === 'author') path = '/api/discovery/store-author-search?q=' + encodeURIComponent(state.query) + '&genre=' + encodeURIComponent(state.genre);
-            if (storeSection === 'book') path = '/api/discovery/store-book-search?q=' + encodeURIComponent(state.query) + '&genre=' + encodeURIComponent(state.genre) + '&period=' + encodeURIComponent(state.period);
-            ajax('GET', path, null, function (err, data) {
-                if (err || !data) { target.innerHTML = '<center>Unable to load recommendations.</center>'; return; }
+            if (storeSection === 'book') path = '/api/discovery/store-book-search?q=' + encodeURIComponent(state.query) + '&genre=' + encodeURIComponent(state.genre) + '&period=' + encodeURIComponent(state.period) + '&provider=' + encodeURIComponent(searchProvider);
+            storeRequestVersion++;
+            var requestVersion = storeRequestVersion;
+            if (activeStoreRequest) { try { activeStoreRequest.abort(); } catch (ignore) {} }
+            activeStoreRequest = ajax('GET', path, null, function (err, data) {
+                if (requestVersion !== storeRequestVersion) return;
+                activeStoreRequest = null;
+                if (err || !data) {
+                    target.innerHTML = '<center>Unable to load recommendations.</center>';
+                    if (storeSection === 'book' && searchProvider === 'hardcover') renderGoogleBooksPrompt(target);
+                    return;
+                }
                 if (storeSection === 'author') {
                     renderStoreAuthors(data.authors || []);
                 } else {
-                    renderStoreBooks(data.title || (storeSection === 'popular' ? 'Popular Books' : 'Search Results'), data.books || [], null);
+                    var footer = storeSection === 'book' && searchProvider === 'hardcover' ? renderGoogleBooksPrompt : null;
+                    renderStoreBooks(data.title || (storeSection === 'popular' ? 'Popular Books' : 'Search Results'), data.books || [], null, footer);
                 }
             });
+        }
+
+        function renderGoogleBooksPrompt(container) {
+            var prompt = document.createElement('div');
+            prompt.className = 'card';
+            prompt.style.padding = '8px';
+            prompt.style.textAlign = 'center';
+            prompt.innerHTML = '<b>BOOK NOT FOUND?</b><br><span class="menu-desc">Search the newer Google Books catalogue.</span>';
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn';
+            button.style.width = '100%';
+            button.style.marginTop = '6px';
+            button.innerText = 'SEARCH GOOGLE BOOKS';
+            button.onclick = function () { applyStoreFilters('google'); };
+            prompt.appendChild(button);
+            container.appendChild(prompt);
         }
 
         function renderStoreBooks(title, books, backAction, footerRenderer) {
@@ -1491,30 +1534,27 @@
             return changed;
         }
 
-        function requestVisibleBookMetadata(book, idx) {
-            ajax('POST', '/api/opds/metadata', {
-                title: book.title || '', author: primaryAuthor(book), isbn: book.isbn || ''
-            }, function (err, metadata) {
-                if (!err) applyVisibleBookMetadata(book, idx, metadata);
-            });
-        }
-
         function enrichVisibleDiscoveryBooks() {
+            var pending = [];
             for (var i = 0; i < window.discoveryBookRegistry.length; i++) {
-                (function (book, idx) {
-                    if (!book || book.description || book._descriptionRequested) return;
-                    book._descriptionRequested = true;
-                    if (book.source === 'openlibrary' && book.source_id) {
-                        ajax('GET', '/api/discovery/details?source=openlibrary&source_id=' + encodeURIComponent(book.source_id), null, function (err, metadata) {
-                            if (err || !applyVisibleBookMetadata(book, idx, metadata)) {
-                                requestVisibleBookMetadata(book, idx);
-                            }
-                        });
-                    } else {
-                        requestVisibleBookMetadata(book, idx);
-                    }
-                })(window.discoveryBookRegistry[i], i);
+                var book = window.discoveryBookRegistry[i];
+                if (!book || book.description || book._descriptionRequested || book.source === 'googlebooks') continue;
+                book._descriptionRequested = true;
+                pending.push({
+                    index: i, title: book.title || '', author: primaryAuthor(book),
+                    isbn: book.isbn || '', source: book.source || '',
+                    source_id: book.source_id || '', cover_url: book.cover_url || ''
+                });
             }
+            if (!pending.length) return;
+            ajax('POST', '/api/opds/metadata-batch', { books: pending }, function (err, data) {
+                if (err || !data || !data.results) return;
+                for (var j = 0; j < data.results.length; j++) {
+                    var result = data.results[j];
+                    var target = window.discoveryBookRegistry[result.index];
+                    if (target) applyVisibleBookMetadata(target, result.index, result.metadata || {});
+                }
+            });
         }
 
         function checkVisibleDiscoveryBooks() {
@@ -1738,11 +1778,58 @@
             if (!book) return;
             var author = book.author || (book.authors && book.authors.length ? book.authors[0] : '');
             var returnAction = function () { showBookDetail(book, book._detailBackAction || restoreDiscoveryList, book._detailMode, book._detailTargetId); };
+            var stages = [];
+            var isbn = String(book.isbn || '').replace(/[^0-9Xx]/g, '');
+            if (isbn) stages.push({ type: 'isbn', query: isbn, nextLabel: author ? 'SEARCH BY AUTHOR AND TITLE' : 'SEARCH BY TITLE' });
+            if (author) stages.push({ type: 'author_title', query: author + ' ' + book.title, nextLabel: 'SEARCH BY TITLE' });
+            stages.push({ type: 'title', query: book.title, nextLabel: '' });
             searchReturnAction = returnAction;
             switchTab('search', true);
-            var query = (author ? author + ' ' : '') + book.title;
-            document.getElementById('search-input').value = query;
-            performSearch(query, book.title, { autoOpenBest: true, author: author, returnAction: returnAction });
+            runShelfmarkRequestStage(book, author, stages, 0, returnAction);
+        }
+
+        function runShelfmarkRequestStage(book, author, stages, index, returnAction) {
+            var stage = stages[index];
+            if (!stage) return;
+            document.getElementById('search-input').value = stage.query;
+            var fallback = null;
+            if (index + 1 < stages.length) {
+                fallback = {
+                    label: stage.nextLabel,
+                    action: function () { runShelfmarkRequestStage(book, author, stages, index + 1, returnAction); }
+                };
+            }
+            showShelfmarkRequestReleases(book, author, stage, returnAction, fallback);
+        }
+
+        function showShelfmarkRequestReleases(book, author, stage, returnAction, fallback) {
+            searchStateBackup = { _returnAction: returnAction };
+            document.getElementById('view-search').className = 'hidden';
+            var container = document.getElementById('releases-container');
+            container.className = '';
+            container.innerHTML = '<center>Searching Shelfmark releases...</center>';
+            setContext('Choose Download', backToSearch);
+
+            var path = '/api/shelfmark/request-releases?stage=' + encodeURIComponent(stage.type)
+                + '&title=' + encodeURIComponent(book.title || '')
+                + '&author=' + encodeURIComponent(author || '')
+                + '&isbn=' + encodeURIComponent(book.isbn || '');
+            ajax('GET', path, null, function (err, data) {
+                if (err || !data || !data.length) {
+                    container.innerHTML = '';
+                    if (fallback) renderShelfmarkFallbackPrompt(container, fallback);
+                    else container.innerHTML = '<center>No download options found.</center>';
+                    return;
+                }
+                var filtered = kindleCompatibleReleases(data);
+                if (!filtered.length) {
+                    container.innerHTML = '';
+                    if (fallback) renderShelfmarkFallbackPrompt(container, fallback);
+                    else container.innerHTML = '<center>No compatible formats (EPUB/MOBI/AZW3) found.</center>';
+                    return;
+                }
+                renderPaginatedList('Choose Download', filtered, createReleaseItemDiv, backToSearch, 'releases-container', 5);
+            }, 120000);
         }
 
         function showSimilarBooks(book) {
@@ -1862,7 +1949,7 @@
         function browseRecentBooks() {
             var content = document.getElementById('opds-content');
             content.innerHTML = '<center>Loading...</center>';
-            ajax('GET', '/api/opds/browse?url=' + encodeURIComponent('/recent?page=1&size=100'), null, function (err, data) {
+            ajax('GET', '/api/opds/browse?url=' + encodeURIComponent('/recent?page=1&size=50'), null, function (err, data) {
                 if (err || !data) { content.innerHTML = '<center>Error</center>'; return; }
                 opdsData = data.entries || [];
                 renderPaginatedList('Recent Books', opdsData, createBookItemDiv, librarySection === 'recent' ? null : renderOPDSMenu, 'opds-content', 4);
@@ -1982,9 +2069,6 @@
                 'opds-' + idx,
                 book._isScraped ? 'REQUEST NEEDED' : 'AVAILABLE NOW'
             );
-            if ((!thumb || !book.description || !book.isbn) && !book._metadataRequested) {
-                setTimeout(function () { fetchOpdsMetadata(book, idx); }, 0);
-            }
             return div;
         }
 
@@ -1995,28 +2079,34 @@
             return label;
         }
 
-        function fetchOpdsMetadata(book, idx) {
-            if (!book || book._metadataRequested) return;
-            book._metadataRequested = true;
-            ajax('POST', '/api/opds/metadata', { title: book.title, author: cleanString(book.author), isbn: book.isbn || '' }, function (err, metadata) {
-                if (err || !metadata) return;
-                if (!book.author && metadata.authors && metadata.authors.length) book.author = metadata.authors[0];
-                if (!book.isbn && metadata.isbn) book.isbn = metadata.isbn;
-                if (!book.description && metadata.description) book.description = metadata.description;
-                if (!book.published_year && metadata.published_year) book.published_year = metadata.published_year;
-                if ((!book.genres || !book.genres.length) && metadata.genres) book.genres = metadata.genres;
-                if (!book.cover_url && metadata.cover_url) book.cover_url = metadata.cover_url;
-
-                var meta = document.getElementById('opds-' + idx + '-meta');
-                if (meta) meta.innerText = standardBookMetaLine(book);
-                var desc = document.getElementById('opds-' + idx + '-desc');
-                if (desc && book.description) {
-                    desc.innerText = book.description;
-                    desc.className = 'book-description';
-                }
-                var cover = document.getElementById('opds-' + idx + '-cover');
-                if (cover && book.cover_url) {
-                    cover.innerHTML = '<img src="' + escapeHtml(book.cover_url) + '" onerror="coverError(this)">';
+        function enrichVisibleOpdsBooks() {
+            var pending = [];
+            for (var i = 0; i < window.opdsBookRegistry.length; i++) {
+                var book = window.opdsBookRegistry[i];
+                if (!book || book._metadataRequested || (book.cover_url && book.description && book.isbn)) continue;
+                if (!document.getElementById('opds-' + i + '-meta')) continue;
+                book._metadataRequested = true;
+                pending.push({ index: i, title: book.title || '', author: cleanString(book.author), isbn: book.isbn || '', cover_url: book.cover_url || '' });
+            }
+            if (!pending.length) return;
+            ajax('POST', '/api/opds/metadata-batch', { books: pending }, function (err, data) {
+                if (err || !data || !data.results) return;
+                for (var j = 0; j < data.results.length; j++) {
+                    var result = data.results[j];
+                    var book = window.opdsBookRegistry[result.index];
+                    var metadata = result.metadata || {};
+                    if (!book) continue;
+                    if (!book.author && metadata.authors && metadata.authors.length) book.author = metadata.authors[0];
+                    if (!book.isbn && metadata.isbn) book.isbn = metadata.isbn;
+                    if (!book.description && metadata.description) book.description = metadata.description;
+                    if (!book.published_year && metadata.published_year) book.published_year = metadata.published_year;
+                    if (!book.cover_url && metadata.cover_url) book.cover_url = metadata.cover_url;
+                    var meta = document.getElementById('opds-' + result.index + '-meta');
+                    if (meta) meta.innerText = standardBookMetaLine(book);
+                    var desc = document.getElementById('opds-' + result.index + '-desc');
+                    if (desc && book.description) { desc.innerText = book.description; desc.className = 'book-description'; }
+                    var cover = document.getElementById('opds-' + result.index + '-cover');
+                    if (cover && book.cover_url) cover.innerHTML = '<img src="' + escapeHtml(book.cover_url) + '" onerror="coverError(this)">';
                 }
             });
         }
@@ -2170,7 +2260,9 @@
             if (fallbackTitle) path += '&title=' + encodeURIComponent(fallbackTitle);
             ajax('GET', path, null, function (err, data) {
                 if (err || !data || !data.length) {
-                    results.innerHTML = '<center>No results</center>';
+                    results.innerHTML = '';
+                    if (options.fallback) renderShelfmarkFallbackPrompt(results, options.fallback);
+                    else results.innerHTML = '<center>No results found.</center>';
                     return;
                 }
                 inputDiv.className = 'hidden';
@@ -2192,9 +2284,28 @@
                             return;
                         }
                     }
-                    renderPaginatedList('Results', books, createSearchResultDiv, backFromSearchResults, 'search-results', 4);
+                    var fallbackFooter = options.fallback ? function (container) { renderShelfmarkFallbackPrompt(container, options.fallback); } : null;
+                    renderPaginatedList('Results', books, createSearchResultDiv, backFromSearchResults, 'search-results', 4, fallbackFooter);
                 });
             });
+        }
+
+        function renderShelfmarkFallbackPrompt(container, fallback) {
+            if (!container || !fallback) return;
+            var prompt = document.createElement('div');
+            prompt.className = 'card';
+            prompt.style.padding = '8px';
+            prompt.style.textAlign = 'center';
+            prompt.innerHTML = '<b>NO RESULTS FOUND?</b><br><span class="menu-desc">Try a broader Shelfmark search.</span>';
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn';
+            button.style.width = '100%';
+            button.style.marginTop = '6px';
+            button.innerText = fallback.label;
+            button.onclick = fallback.action;
+            prompt.appendChild(button);
+            container.appendChild(prompt);
         }
 
         function checkShelfmarkResultsLibrary(books, callback) {
@@ -2321,6 +2432,15 @@
             showBookDetail(book, function () { restoreListState(state); }, mode, 'search-results');
         };
 
+        function kindleCompatibleReleases(data) {
+            return (data || []).filter(function (r) {
+                var fmt = (r.format || '').toLowerCase();
+                if (fmt.indexOf('epub') !== -1 || fmt.indexOf('mobi') !== -1 || fmt.indexOf('azw3') !== -1) return true;
+                var text = ((r.title || '') + ' ' + (r.filename || '') + ' ' + (r.name || '')).toLowerCase();
+                return text.indexOf('epub') !== -1 || text.indexOf('mobi') !== -1 || text.indexOf('azw3') !== -1;
+            });
+        }
+
         function showReleases(md5, listState) {
             searchStateBackup = listState || {
                 items: paginationState.items, currentPage: paginationState.currentPage,
@@ -2345,12 +2465,7 @@
                 // releases often bundle multiple formats in one file (e.g. format: "epub, mobi",
                 // or no format field at all with the extensions only in the title), so fall back
                 // to scanning the title/filename when the format field itself doesn't match cleanly.
-                var filtered = data.filter(function (r) {
-                    var fmt = (r.format || '').toLowerCase();
-                    if (fmt.indexOf('epub') !== -1 || fmt.indexOf('mobi') !== -1 || fmt.indexOf('azw3') !== -1) return true;
-                    var text = ((r.title || '') + ' ' + (r.filename || '') + ' ' + (r.name || '')).toLowerCase();
-                    return text.indexOf('epub') !== -1 || text.indexOf('mobi') !== -1 || text.indexOf('azw3') !== -1;
-                });
+                var filtered = kindleCompatibleReleases(data);
 
                 if (filtered.length === 0) {
                     container.innerHTML = '<center>No compatible formats (EPUB/MOBI/AZW3) found</center>';

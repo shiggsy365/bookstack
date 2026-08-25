@@ -1,10 +1,8 @@
 import json
-import os
 import re
-import sqlite3
-import time
 from urllib.parse import urljoin
 
+from .cache import cached_load
 from .config import GOOGLE_BOOKS_API_KEY
 from .discovery import (
     GOOGLE_BOOKS_BASE_URL, GOOGLE_BOOKS_ORIGINS, OPENLIBRARY_BASE_URL,
@@ -15,51 +13,6 @@ from .providers import metadata_fields, normalize_google_book, normalize_openlib
 
 METADATA_CACHE_SECONDS = 30 * 24 * 60 * 60
 EMPTY_METADATA_CACHE_SECONDS = 6 * 60 * 60
-METADATA_CACHE_PATH = os.environ.get('METADATA_CACHE_PATH', '/data/metadata-cache.sqlite3')
-METADATA_CACHE = {}
-
-
-def initialize_metadata_cache():
-    directory = os.path.dirname(METADATA_CACHE_PATH)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
-    with sqlite3.connect(METADATA_CACHE_PATH, timeout=10) as connection:
-        connection.execute('PRAGMA journal_mode=WAL')
-        connection.execute(
-            'CREATE TABLE IF NOT EXISTS metadata_cache '
-            '(cache_key TEXT PRIMARY KEY, data TEXT NOT NULL, expires_at REAL NOT NULL)'
-        )
-
-
-def persistent_cache_get(cache_key, now):
-    try:
-        initialize_metadata_cache()
-        with sqlite3.connect(METADATA_CACHE_PATH, timeout=10) as connection:
-            row = connection.execute(
-                'SELECT data, expires_at FROM metadata_cache WHERE cache_key = ?', (cache_key,)
-            ).fetchone()
-            if not row:
-                return None
-            if row[1] <= now:
-                connection.execute('DELETE FROM metadata_cache WHERE cache_key = ?', (cache_key,))
-                return None
-            return {'data': json.loads(row[0]), 'expires_at': row[1]}
-    except (OSError, sqlite3.Error, ValueError) as e:
-        print(f'[Metadata] Persistent cache read failed: {e}', flush=True)
-        return None
-
-
-def persistent_cache_set(cache_key, data, expires_at):
-    try:
-        initialize_metadata_cache()
-        with sqlite3.connect(METADATA_CACHE_PATH, timeout=10) as connection:
-            connection.execute(
-                'INSERT OR REPLACE INTO metadata_cache (cache_key, data, expires_at) VALUES (?, ?, ?)',
-                (cache_key, json.dumps(data), expires_at)
-            )
-            connection.execute('DELETE FROM metadata_cache WHERE expires_at <= ?', (time.time(),))
-    except (OSError, sqlite3.Error, TypeError, ValueError) as e:
-        print(f'[Metadata] Persistent cache write failed: {e}', flush=True)
 
 
 def metadata_match_score(query_title, result_title):
@@ -120,36 +73,33 @@ def openlibrary_metadata(title, author='', isbn=''):
     return best if best_score >= 70 else {}
 
 
-def resolve_metadata(title, author='', isbn=''):
-    cache_parts = (normalize_title(title), normalize_title(author), clean_isbn(isbn))
+def resolve_metadata(title, author='', isbn='', allow_google=False):
+    cache_parts = (normalize_title(title), normalize_title(author), clean_isbn(isbn), bool(allow_google))
     cache_key = json.dumps(cache_parts, separators=(',', ':'))
-    now = time.time()
-    cached = METADATA_CACHE.get(cache_key)
-    if cached and cached['expires_at'] > now:
-        return cached['data']
-    persistent_cached = persistent_cache_get(cache_key, now)
-    if persistent_cached is not None:
-        METADATA_CACHE[cache_key] = persistent_cached
-        return persistent_cached['data']
-    metadata = {}
-    try:
-        metadata = google_books_metadata(title, author, isbn)
-        if not metadata and author:
-            metadata = google_books_metadata(title, '', isbn)
-    except Exception as e:
-        print(f'[Metadata] Google Books lookup failed: {e}', flush=True)
-    if not metadata.get('cover_url'):
+
+    def load():
+        metadata = {}
         try:
-            fallback = openlibrary_metadata(title, author, isbn)
-            if not fallback and author:
-                fallback = openlibrary_metadata(title, '', isbn)
-            if fallback:
-                fallback.update({key: value for key, value in metadata.items() if value})
-                metadata = fallback
-        except Exception as e:
-            print(f'[Metadata] Open Library lookup failed: {e}', flush=True)
-    cache_seconds = METADATA_CACHE_SECONDS if metadata else EMPTY_METADATA_CACHE_SECONDS
-    expires_at = now + cache_seconds
-    METADATA_CACHE[cache_key] = {'data': metadata, 'expires_at': expires_at}
-    persistent_cache_set(cache_key, metadata, expires_at)
-    return metadata
+            metadata = openlibrary_metadata(title, author, isbn)
+            if not metadata and author:
+                metadata = openlibrary_metadata(title, '', isbn)
+        except Exception:
+            print('[Metadata] Open Library lookup failed', flush=True)
+        if allow_google and (not metadata or not metadata.get('description')):
+            try:
+                fallback = google_books_metadata(title, author, isbn)
+                if not fallback and author:
+                    fallback = google_books_metadata(title, '', isbn)
+                if fallback:
+                    fallback.update({key: value for key, value in metadata.items() if value})
+                    metadata = fallback
+            except Exception:
+                print('[Metadata] Google Books lookup failed', flush=True)
+        return metadata
+
+    return cached_load(
+        f'metadata:{cache_key}', 'metadata',
+        lambda data: METADATA_CACHE_SECONDS if data else EMPTY_METADATA_CACHE_SECONDS, load,
+        stale_ttl=lambda data: METADATA_CACHE_SECONDS if data else EMPTY_METADATA_CACHE_SECONDS,
+        lock_seconds=35
+    )

@@ -1,4 +1,3 @@
-from urllib.parse import quote_plus
 
 import requests
 from flask import Blueprint, jsonify, request
@@ -9,13 +8,35 @@ from .opds import get_cached_booklore_entries
 bp = Blueprint('shelfmark', __name__, url_prefix='/api/shelfmark')
 
 
+def release_items(payload):
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get('releases') or payload.get('results') or []
+    else:
+        items = []
+
+    def sort_key(item):
+        try:
+            seeders = int(item.get('seeders') or 0)
+        except (TypeError, ValueError):
+            seeders = 0
+        try:
+            size = int(item.get('size_bytes') or item.get('size') or 0)
+        except (TypeError, ValueError):
+            size = 0
+        return seeders, size
+
+    items.sort(key=sort_key, reverse=True)
+    return items
+
+
 @bp.route('/search')
 def search():
     query = request.args.get('q', '').strip()
     title = request.args.get('title', '').strip()
     if not query:
         return jsonify({'error': 'No query provided'}), 400
-    base = SHELFMARK_URL.rstrip('/')
     books, seen_titles = [], set()
 
     try:
@@ -35,55 +56,17 @@ def search():
                 'library_download_url': acquisition
             })
     except Exception as e:
-        print(f'[Search] Library search failed: {e}', flush=True)
+        print(f'[Search] Library search failed: {type(e).__name__}', flush=True)
 
-    try:
-        queries = [query]
-        if title and title.casefold() != query.casefold():
-            queries.append(title)
-        raw_books = []
-        for search_query in queries:
-            resp = requests.get(f'{base}/api/metadata/search', params={'query': search_query}, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
-            raw_books = (data.get('books') or data.get('results') or []) if isinstance(data, dict) else data
-            if raw_books:
-                break
-        for book in raw_books or []:
-            provider = book.get('provider') or book.get('source')
-            book_id = book.get('provider_id') or book.get('source_id') or book.get('id')
-            if not book_id:
-                continue
-            # Handle composite ids like "hardcover_319563" when provider is not a separate field
-            if not provider and isinstance(book_id, str) and '_' in book_id:
-                parts = book_id.rsplit('_', 1)
-                if len(parts) == 2 and parts[1].isdigit():
-                    provider, book_id = parts[0], parts[1]
-            if not provider:
-                continue
-            book_title = book.get('title') or 'Unknown Title'
-            title_key = ' '.join(book_title.casefold().split())
-            if title_key in seen_titles:
-                continue
-            seen_titles.add(title_key)
-            cover_url = book.get('cover_url') or book.get('coverUrl') or book.get('preview') or ''
-            if cover_url.startswith('/'):
-                cover_url = f'/api/opds/image-proxy?url={quote_plus(base + cover_url)}'
-            books.append({
-                'md5': f'{provider}:{book_id}', 'title': book_title,
-                'authors': book.get('authors', []) or ([book.get('author')] if book.get('author') else []),
-                'isbn': book.get('isbn') or book.get('isbn_13') or book.get('isbn_10') or '',
-                'coverUrl': cover_url, 'size': 'Universal', 'language': book.get('language'),
-                'format': 'Universal', 'description': book.get('description'),
-                'published_year': book.get('published_year') or book.get('year') or '',
-                'genres': book.get('genres') or []
-            })
-        return jsonify(books)
-    except Exception as e:
-        print(f'[ERROR] Shelfmark search failed: {e}', flush=True)
-        if books:
-            return jsonify(books)
-        return jsonify({'error': str(e)}), 502
+    manual_title = title or query
+    if ' '.join(manual_title.casefold().split()) not in seen_titles:
+        books.append({
+            'md5': f'manual:{manual_title}', 'title': manual_title, 'authors': [],
+            'isbn': '', 'coverUrl': '', 'size': 'Universal',
+            'format': 'Universal', 'description': 'Search all enabled Shelfmark release sources.',
+            'published_year': '', 'genres': []
+        })
+    return jsonify(books)
 
 
 @bp.route('/releases')
@@ -93,29 +76,44 @@ def releases():
         return jsonify({'error': 'Invalid MD5 format for release search'}), 400
     provider, book_id = md5.split(':', 1)
     try:
-        resp = requests.get(f'{SHELFMARK_URL.rstrip("/")}/api/releases', params={'provider': provider, 'book_id': book_id}, timeout=120)
+        params = {'provider': provider, 'book_id': book_id}
+        if provider == 'manual':
+            params = {'provider': 'manual', 'book_id': 'manual-search', 'title': book_id, 'content_type': 'ebook'}
+        resp = requests.get(f'{SHELFMARK_URL.rstrip("/")}/api/releases', params=params, timeout=120)
         resp.raise_for_status()
-        payload = resp.json()
-        if isinstance(payload, list):
-            releases_data = payload
-        elif isinstance(payload, dict):
-            releases_data = payload.get('releases') or payload.get('results') or []
-        else:
-            releases_data = []
-        def sort_key(item):
-            try:
-                seeders = int(item.get('seeders') or 0)
-            except (TypeError, ValueError):
-                seeders = 0
-            try:
-                size = int(item.get('size') or 0)
-            except (TypeError, ValueError):
-                size = 0
-            return seeders, size
-        releases_data.sort(key=sort_key, reverse=True)
-        return jsonify(releases_data)
+        return jsonify(release_items(resp.json()))
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/request-releases')
+def request_releases():
+    """Search Shelfmark release sources without a metadata-provider round trip."""
+    stage = request.args.get('stage', '').strip()
+    isbn = ''.join(ch for ch in request.args.get('isbn', '') if ch.isdigit() or ch in 'Xx')
+    title = request.args.get('title', '').strip()
+    author = request.args.get('author', '').strip()
+
+    if stage == 'isbn':
+        if not isbn:
+            return jsonify({'error': 'No ISBN provided'}), 400
+        params = [('source', 'direct_download'), ('query', isbn), ('isbn', isbn), ('content_type', 'ebook')]
+    elif stage in ('author_title', 'title'):
+        if not title:
+            return jsonify({'error': 'No title provided'}), 400
+        params = {'provider': 'manual', 'book_id': f'manual-{stage}', 'title': title, 'content_type': 'ebook'}
+        if stage == 'author_title' and author:
+            params['author'] = author
+    else:
+        return jsonify({'error': 'Invalid request search stage'}), 400
+
+    try:
+        resp = requests.get(f'{SHELFMARK_URL.rstrip("/")}/api/releases', params=params, timeout=120)
+        resp.raise_for_status()
+        return jsonify(release_items(resp.json()))
+    except Exception as e:
+        print(f'[ERROR] Shelfmark request release search failed ({stage}): {type(e).__name__}', flush=True)
+        return jsonify({'error': 'Unable to search Shelfmark releases'}), 502
 
 
 @bp.route('/download', methods=['POST'])

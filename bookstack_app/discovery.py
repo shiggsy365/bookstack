@@ -7,9 +7,10 @@ from urllib.parse import urljoin
 import requests
 from flask import Blueprint, jsonify, request
 
+from .cache import cached_load
 from .config import GOOGLE_BOOKS_API_KEY, HARDCOVER_API_KEY, NYT_BOOKS_API_KEY, OPENLIBRARY_CONTACT
 from .providers import clean_html, first_value, normalize_google_books, normalize_openlibrary_books
-from .security import get_origin, get_with_allowed_redirects
+from .security import get_origin, get_with_allowed_redirects, request_with_retries
 
 bp = Blueprint('discovery', __name__, url_prefix='/api/discovery')
 
@@ -24,10 +25,10 @@ DISCOVERY_CACHE_SECONDS = 60 * 60
 NEW_RELEASES_CACHE_SECONDS = 6 * 60 * 60
 BESTSELLERS_CACHE_SECONDS = 24 * 60 * 60
 HARDCOVER_CACHE_SECONDS = 6 * 60 * 60
+GOOGLE_BOOK_SEARCH_CACHE_SECONDS = 24 * 60 * 60
 NYT_WEEK_HISTORY_LIMIT = 26
 RECENT_DISCOVERY_YEARS = 4
 NEW_RELEASE_YEARS = 2
-DISCOVERY_CACHE = {}
 OPENLIBRARY_SEARCH_FIELDS = 'key,title,author_name,author_key,isbn,cover_i,first_publish_year,subject'
 DISCOVERY_CATEGORIES = {
     'science_fiction': 'Science Fiction',
@@ -170,41 +171,40 @@ def hardcover_headers():
     }
 
 
-def get_cached_json(cache_key, url, allowed_origins, headers=None, params=None, cache_seconds=DISCOVERY_CACHE_SECONDS):
-    now = time.time()
-    cached = DISCOVERY_CACHE.get(cache_key)
-    if cached and cached['expires_at'] > now:
-        return cached['data']
+def get_cached_json(cache_key, url, allowed_origins, headers=None, params=None,
+                    cache_seconds=DISCOVERY_CACHE_SECONDS, timeout=30):
+    provider = cache_key.split(":", 1)[0]
 
-    resp = get_with_allowed_redirects(
-        url, allowed_origins=allowed_origins, headers=headers, params=params, timeout=120
+    def load():
+        resp = get_with_allowed_redirects(
+            url, allowed_origins=allowed_origins, headers=headers, params=params, timeout=timeout
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    return cached_load(
+        f"json:{cache_key}", provider, cache_seconds, load,
+        stale_ttl=max(cache_seconds, 24 * 60 * 60), lock_seconds=timeout + 5
     )
-    resp.raise_for_status()
-    data = resp.json()
-    DISCOVERY_CACHE[cache_key] = {'data': data, 'expires_at': now + cache_seconds}
-    return data
 
 
 def get_cached_hardcover_graphql(cache_key, query, variables=None, cache_seconds=HARDCOVER_CACHE_SECONDS):
-    now = time.time()
-    cached = DISCOVERY_CACHE.get(cache_key)
-    if cached and cached['expires_at'] > now:
-        return cached['data']
+    def load():
+        resp = request_with_retries(
+            "POST", urljoin(HARDCOVER_BASE_URL, "/v1/graphql"),
+            headers=hardcover_headers(), json={"query": query, "variables": variables or {}}, timeout=30
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if payload.get("errors"):
+            message = payload["errors"][0].get("message", "Hardcover GraphQL error")
+            raise RuntimeError(message)
+        return payload.get("data") or {}
 
-    resp = requests.post(
-        urljoin(HARDCOVER_BASE_URL, '/v1/graphql'),
-        headers=hardcover_headers(),
-        json={'query': query, 'variables': variables or {}},
-        timeout=120
+    return cached_load(
+        f"graphql:{cache_key}", "hardcover", cache_seconds, load,
+        stale_ttl=max(cache_seconds, 24 * 60 * 60), lock_seconds=35
     )
-    resp.raise_for_status()
-    payload = resp.json()
-    if payload.get('errors'):
-        message = payload['errors'][0].get('message', 'Hardcover GraphQL error')
-        raise RuntimeError(message)
-    data = payload.get('data') or {}
-    DISCOVERY_CACHE[cache_key] = {'data': data, 'expires_at': now + cache_seconds}
-    return data
 
 
 def get_cached_openlibrary_json(cache_key, path, params=None):
@@ -355,7 +355,7 @@ def get_nyt_bestseller_lists():
         if weekly_lists:
             return weekly_lists
     except Exception as e:
-        print(f'[ERROR] NYT bestseller list catalog failed: {e}', flush=True)
+        print(f'[ERROR] NYT bestseller list catalog failed: {type(e).__name__}', flush=True)
     return [
         {'slug': slug, 'title': title}
         for slug, title in NYT_FALLBACK_BESTSELLER_LISTS.items()
@@ -402,7 +402,7 @@ def get_hardcover_genres():
         if counts:
             return [genre for genre, _count in sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))[:50]]
     except Exception as e:
-        print(f'[ERROR] Hardcover genres failed: {e}', flush=True)
+        print(f'[ERROR] Hardcover genres failed: {type(e).__name__}', flush=True)
     return HARDCOVER_FALLBACK_GENRES
 
 
@@ -453,7 +453,7 @@ def hardcover_trending():
             title += f' - {genre}'
         return jsonify({'title': title, 'books': books})
     except Exception as e:
-        print(f'[ERROR] Hardcover trending failed: {e}', flush=True)
+        print(f'[ERROR] Hardcover trending failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load Hardcover trending books'}), 502
 
 
@@ -475,7 +475,7 @@ def hardcover_new_releases():
             title += f' - {genre}'
         return jsonify({'title': title, 'books': books})
     except Exception as e:
-        print(f'[ERROR] Hardcover new releases failed: {e}', flush=True)
+        print(f'[ERROR] Hardcover new releases failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load Hardcover new releases'}), 502
 
 
@@ -499,7 +499,7 @@ def trending():
         data = get_cached_openlibrary_json(f'trending:{period}:recent', f'/trending/{period}.json', {'limit': 200})
         return jsonify(published_since(normalize_openlibrary_books(data.get('works', [])), since_year))
     except Exception as e:
-        print(f'[ERROR] Open Library trending failed: {e}', flush=True)
+        print(f'[ERROR] Open Library trending failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load trending books'}), 502
 
 
@@ -513,7 +513,7 @@ def category():
         query = f'subject_key:"{slug}" first_publish_year:[{since_year} TO *]'
         return jsonify({'title': DISCOVERY_CATEGORIES[slug], 'books': openlibrary_search(f'category:{slug}:recent', query, sort='readinglog')})
     except Exception as e:
-        print(f'[ERROR] Open Library category failed: {e}', flush=True)
+        print(f'[ERROR] Open Library category failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load category'}), 502
 
 
@@ -528,7 +528,7 @@ def collection():
             query += f' first_publish_year:[{recent_year(RECENT_DISCOVERY_YEARS)} TO *]'
         return jsonify({'title': DISCOVERY_COLLECTIONS[slug], 'books': openlibrary_search(f'collection:{slug}:recent', query, sort='readinglog')})
     except Exception as e:
-        print(f'[ERROR] Open Library collection failed: {e}', flush=True)
+        print(f'[ERROR] Open Library collection failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load collection'}), 502
 
 
@@ -559,7 +559,7 @@ def search():
         books = openlibrary_search(f'search:{search_query}', search_query, sort='relevance')
         return jsonify(books)
     except Exception as e:
-        print(f'[ERROR] Open Library search failed: {e}', flush=True)
+        print(f'[ERROR] Open Library search failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to search books'}), 502
 
 
@@ -620,7 +620,7 @@ def store_trending():
         labels = {'all': 'All Time', '1y': 'Published This Year', '3y': 'Past 3 Years', '10y': 'Past 10 Years'}
         return jsonify({'title': f"Trending - {labels[period]}", 'books': books})
     except Exception as e:
-        print(f'[ERROR] Hardcover Store trending failed: {e}', flush=True)
+        print(f'[ERROR] Hardcover Store trending failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load Hardcover trending books'}), 502
 
 
@@ -639,7 +639,7 @@ def store_popular():
         )
         return jsonify({'title': 'Popular Books', 'books': books})
     except Exception as e:
-        print(f'[ERROR] Store popular failed: {e}', flush=True)
+        print(f'[ERROR] Store popular failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load popular books'}), 502
 
 
@@ -666,7 +666,7 @@ def store_author_search():
             })
         return jsonify({'authors': authors})
     except Exception as e:
-        print(f'[ERROR] Store author search failed: {e}', flush=True)
+        print(f'[ERROR] Store author search failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to search authors'}), 502
 
 
@@ -690,7 +690,7 @@ def store_author_books():
             )
             return jsonify({'books': books})
         except Exception as e:
-            print(f'[ERROR] Hardcover author books failed: {e}', flush=True)
+            print(f'[ERROR] Hardcover author books failed: {type(e).__name__}', flush=True)
             return jsonify({'error': 'Unable to load author books'}), 502
     query = f'author_key:{key}'
     if genre:
@@ -699,7 +699,7 @@ def store_author_books():
     try:
         return jsonify({'books': openlibrary_search(f'store:author-books:{query}', query, sort='readinglog')})
     except Exception as e:
-        print(f'[ERROR] Store author books failed: {e}', flush=True)
+        print(f'[ERROR] Store author books failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load author books'}), 502
 
 
@@ -707,10 +707,42 @@ def store_author_books():
 def store_book_search():
     query = request.args.get('q', '').strip()
     genre, period = request.args.get('genre', '').strip(), request.args.get('period', 'any')
+    provider = request.args.get('provider', 'hardcover').strip().lower()
     if not query:
         return jsonify({'error': 'No book query provided'}), 400
     if period not in STORE_PUBLICATION_PERIODS:
         return jsonify({'error': 'Invalid publication period'}), 400
+    if provider not in ('hardcover', 'google'):
+        return jsonify({'error': 'Invalid search provider'}), 400
+
+    if provider == 'google':
+        if not GOOGLE_BOOKS_API_KEY:
+            return jsonify({'error': 'Google Books API key is not configured'}), 503
+        try:
+            google_query = query
+            if genre:
+                google_query += f' subject:"{genre}"'
+            params = {
+                'q': google_query, 'orderBy': 'relevance', 'maxResults': 40,
+                'printType': 'books', 'key': GOOGLE_BOOKS_API_KEY
+            }
+            data = get_cached_json(
+                f'googlebooks:store-search:{google_query.casefold()}',
+                urljoin(GOOGLE_BOOKS_BASE_URL, '/books/v1/volumes'),
+                GOOGLE_BOOKS_ORIGINS,
+                headers={'User-Agent': 'Bookstack Kindle Browser'}, params=params,
+                cache_seconds=GOOGLE_BOOK_SEARCH_CACHE_SECONDS
+            )
+            books = normalize_google_books(data.get('items') or [])
+            years = STORE_PUBLICATION_PERIODS.get(period)
+            if years:
+                since_year = date.today().year - years + 1
+                books = [book for book in books if str(book.get('published_year') or '').isdigit() and int(book['published_year']) >= since_year]
+            return jsonify({'title': 'Google Books Results', 'books': books, 'provider': 'google'})
+        except Exception as e:
+            print('[ERROR] Google Books Store search failed', flush=True)
+            return jsonify({'error': 'Unable to search Google Books'}), 502
+
     if not HARDCOVER_API_KEY:
         return jsonify({'error': 'Hardcover API key is not configured'}), 503
     try:
@@ -719,9 +751,9 @@ def store_book_search():
             hardcover_store_where(period, {'title': {'_ilike': f'%{query}%'}}),
             [{'users_count': 'desc'}, {'ratings_count': 'desc'}], genre=genre
         )
-        return jsonify({'books': books})
+        return jsonify({'title': 'Hardcover Results', 'books': books, 'provider': 'hardcover'})
     except Exception as e:
-        print(f'[ERROR] Store book search failed: {e}', flush=True)
+        print(f'[ERROR] Store book search failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to search books'}), 502
 
 
@@ -734,7 +766,7 @@ def surprise():
         books = published_since(normalize_openlibrary_books(data.get('works', [])), since_year)
         return jsonify(random.choice(books)) if books else (jsonify({'error': 'No surprise books available'}), 502)
     except Exception as e:
-        print(f'[ERROR] Open Library surprise failed: {e}', flush=True)
+        print(f'[ERROR] Open Library surprise failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to find a surprise book'}), 502
 
 
@@ -746,7 +778,7 @@ def new_releases():
             query = f'subject_key:"fiction" first_publish_year:[{since_year} TO *]'
             return jsonify(openlibrary_search('openlibrary:new-releases:recent', query, sort='new'))
         except Exception as e:
-            print(f'[ERROR] Open Library new releases failed: {e}', flush=True)
+            print(f'[ERROR] Open Library new releases failed: {type(e).__name__}', flush=True)
             return jsonify({'error': 'Unable to load new releases'}), 502
     try:
         data = get_cached_json(
@@ -757,8 +789,18 @@ def new_releases():
         )
         return jsonify(published_since(normalize_google_books(data.get('items', [])), since_year))
     except Exception as e:
-        print(f'[ERROR] Google Books new releases failed: {e}', flush=True)
+        print(f'[ERROR] Google Books new releases failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load new releases'}), 502
+
+
+def openlibrary_work_description(source_id):
+    if not re.fullmatch(r'/works/OL[0-9]+W', source_id or ''):
+        return ''
+    data = get_cached_openlibrary_json(f'work:{source_id}', f'{source_id}.json')
+    description = data.get('description', '')
+    if isinstance(description, dict):
+        description = description.get('value', '')
+    return clean_html(description)
 
 
 @bp.route('/details')
@@ -773,7 +815,7 @@ def details():
             description = description.get('value', '')
         return jsonify({'description': clean_html(description)})
     except Exception as e:
-        print(f'[ERROR] Open Library details failed: {e}', flush=True)
+        print(f'[ERROR] Open Library details failed: {type(e).__name__}', flush=True)
         return jsonify({'description': ''})
 
 
@@ -801,7 +843,7 @@ def bestsellers():
         )
         return jsonify({'title': list_info['title'], 'date': published_date, 'books': normalize_nyt_books(extract_nyt_books(data))})
     except Exception as e:
-        print(f'[ERROR] NYT bestsellers failed: {e}', flush=True)
+        print(f'[ERROR] NYT bestsellers failed: {type(e).__name__}', flush=True)
         return jsonify({'error': 'Unable to load bestsellers'}), 502
 
 

@@ -15,7 +15,7 @@ Bookstack checks search and discovery results against Booklore. A book with a co
 | --- | --- | --- |
 | Bookstack | Unified, Kindle-friendly web interface and SMTP delivery service | HTTPS through Traefik |
 | Booklore | Library, OPDS catalogue, metadata, and book ingestion | HTTPS through Traefik |
-| Shelfmark | Book metadata search, release selection, and download orchestration | `http://127.0.0.1:8084` on the VPS |
+| Shelfmark | Release-source search, release selection, and download orchestration | `http://127.0.0.1:8084` on the VPS |
 | Prowlarr | Indexer management used by the acquisition workflow | `http://127.0.0.1:9696` on the VPS |
 | SABnzbd | Usenet download client | `http://127.0.0.1:8080` on the VPS |
 | MariaDB | Booklore database | Internal Docker network only |
@@ -30,7 +30,7 @@ Only Bookstack and Booklore are published through Traefik. Administrative servic
 - Hardcover-backed recommendations, author tiles, author bibliographies, covers, and title search.
 - Optional New York Times bestseller lists and Open Library fallback metadata.
 - Availability-aware book details: **Available**, **Request needed**, and **Downloading**.
-- Direct Shelfmark release selection from **Request Book**, with queue monitoring.
+- Staged Shelfmark requests which search by ISBN first, then author and title, then title only through explicit **No results found?** prompts, followed by release selection and queue monitoring.
 - Booklore OPDS browsing and one-click Send to Kindle delivery.
 - Four-line listing descriptions and ten-line detail descriptions.
 - Hierarchical back navigation plus first/previous/next/last page controls.
@@ -125,7 +125,7 @@ sudo chown -R 1001:1001 /opt/docker/apps/bookstack /mnt/booklore
 
 Replace `1001:1001` with the configured `PUID:PGID`. Do not change ownership blindly if these paths already contain data used by another deployment.
 
-Bookstack creates its metadata database at `${BOOKSTACK_INSTALL}/bookstack/cache/metadata-cache.sqlite3`.
+Bookstack stores shared provider responses, availability data, failure backoff, and provider metrics in a shared SQLite database under `/bookstack/cache`.
 
 ### 3. Configure DNS and Traefik
 
@@ -250,7 +250,7 @@ The recipient Kindle address is not stored in `.env`. Each browser saves its cho
 | Variable | Required | Description |
 | --- | --- | --- |
 | `OPENLIBRARY_CONTACT` | Recommended | Contact email included in the Open Library user agent. |
-| `GOOGLE_BOOKS_API_KEY` | No | Google Books key used for metadata enrichment. |
+| `GOOGLE_BOOKS_API_KEY` | No | Google Books key used only for the explicit on-demand Book Search fallback. |
 | `NYT_BOOKS_API_KEY` | No | New York Times Books API key used for bestseller pages. |
 | `HARDCOVER_API_KEY` | No | Hardcover token used for trending, genres, and new releases. |
 
@@ -323,10 +323,10 @@ Library is the opening mode. Its navigation bar contains **Recent**, **Authors**
 
 Store provides **Trending**, **Popular**, **Bestsellers**, **Author Search**, and **Book Search**. Recommendation and search views support genre and publication-period filters where applicable.
 
-Hardcover supplies trending, popular, author, and book-search data. The New York Times API supplies bestseller charts when configured. Search results are checked against Booklore before actions are displayed.
+Hardcover supplies trending, popular, author, and primary book-search data. Book Search displays a **Book not found?** action which queries Google Books only when selected; identical Google searches are cached for 24 hours. The New York Times API supplies bestseller charts when configured. Search results are checked against Booklore before actions are displayed.
 
 - **Available** opens a detail page with **Send to Kindle**.
-- **Request needed** starts a Shelfmark match and opens release selection directly.
+- **Request needed** searches Shelfmark's direct-download channel by ISBN first. If no compatible release is found, **No results found?** prompts search all enabled Shelfmark release sources by author plus title and finally title only. These request searches bypass metadata providers such as Google Books.
 - **Downloading** links to the download queue.
 
 Shelfmark release lookups accept EPUB, MOBI, and AZW3 results. Browser and upstream search requests allow up to 120 seconds for e-reader connections and slower providers.
@@ -347,12 +347,18 @@ Choose **Settings** to save the Kindle delivery address for the current browser.
 
 ## Metadata and caching
 
-Bookstack lazily enriches incomplete entries with Google Books metadata and Open Library fallback data.
+Bookstack batches visible-page enrichment through Open Library. Google Books is used only when explicitly selected from Store Book Search.
 
 - Successful resolved metadata is cached for 30 days.
 - Empty results are cached for 6 hours before retrying.
-- The persistent SQLite cache is shared by both Gunicorn workers.
+- The persistent SQLite cache is shared by all Gunicorn workers and coalesces identical in-flight provider requests.
 - The cache survives restarts and image rebuilds through the `/data` volume.
+
+Discovery responses use stale-cache fallback during transient provider failures, and failures are briefly cached to prevent repeated taps from hammering an unavailable service. Booklore availability checks use a five-minute local catalogue snapshot instead of one OPDS search per book. The Authors catalogue is cached for 24 hours.
+
+Text responses are compressed when the browser advertises gzip support. The main HTML uses ETag revalidation, discovery responses have short HTTP cache lifetimes, and proxied covers are cached for seven days. Gunicorn uses two threaded workers with four threads each so slow Shelfmark searches do not block ordinary navigation.
+
+Provider cache and call metrics are available without credentials at `/health/providers`.
 
 To force metadata to be fetched again, stop Bookstack and remove only the metadata cache database from `${BOOKSTACK_INSTALL}/bookstack/cache`. This is normally unnecessary.
 
@@ -452,7 +458,7 @@ Inspect Bookstack logs for the returned SMTP or delivery error.
 
 ### Metadata remains blank or slow
 
-The first lookup requires external provider requests; later requests use the persistent cache. Check Bookstack logs for Hardcover, Google Books, or Open Library errors and verify outbound network access. Searches can remain in the loading state for up to 120 seconds before timing out.
+The first lookup requires external provider requests; later requests use the persistent cache. Check Bookstack logs for Hardcover, Google Books, or Open Library errors and verify outbound network access. Shelfmark searches can remain active for up to 120 seconds; ordinary metadata and catalogue providers use shorter timeouts and bounded transient retries.
 
 ## Security notes
 

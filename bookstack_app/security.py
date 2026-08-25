@@ -1,6 +1,9 @@
 from urllib.parse import urljoin, urlparse
 
 import requests
+import time
+
+RETRYABLE_STATUS_CODES = {502, 503, 504}
 
 
 def get_origin(url):
@@ -24,10 +27,25 @@ def validate_url(url, allowed_origins=None, allowed_hosts=None):
     return url
 
 
-def get_with_allowed_redirects(url, allowed_origins=None, allowed_hosts=None, **kwargs):
+def request_with_retries(method, url, attempts=3, **kwargs):
+    response = None
+    for attempt in range(attempts):
+        try:
+            response = requests.request(method, url, **kwargs)
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt + 1 >= attempts:
+                raise
+        else:
+            if response.status_code not in RETRYABLE_STATUS_CODES or attempt + 1 >= attempts:
+                return response
+        time.sleep(0.35 * (attempt + 1))
+    return response
+
+
+def get_with_allowed_redirects(url, allowed_origins=None, allowed_hosts=None, attempts=3, **kwargs):
     current_url = validate_url(url, allowed_origins, allowed_hosts)
     for _ in range(6):
-        resp = requests.get(current_url, allow_redirects=False, **kwargs)
+        resp = request_with_retries('GET', current_url, attempts=attempts, allow_redirects=False, **kwargs)
         if not resp.is_redirect:
             return resp
         location = resp.headers.get('Location')

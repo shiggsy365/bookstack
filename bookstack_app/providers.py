@@ -64,6 +64,7 @@ def normalize_google_book(book):
         'author': first_value(authors, ''), 'isbn': isbn, 'cover_url': cover_url,
         'description': clean_html(volume.get('description', '')),
         'published_year': (volume.get('publishedDate') or '')[:4],
+        'genres': volume.get('categories') or [],
         'in_library': None, 'library_download_url': None
     }
 

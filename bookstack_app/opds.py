@@ -8,8 +8,9 @@ from urllib.parse import quote_plus, urljoin
 import requests
 from flask import Blueprint, jsonify, request
 
+from .cache import cached_load
 from .config import BOOKLORE_PASS, BOOKLORE_URL, BOOKLORE_USER, SHELFMARK_URL
-from .discovery import OPENLIBRARY_BASE_URL, OPENLIBRARY_ORIGINS, get_cached_json, openlibrary_headers
+from .discovery import OPENLIBRARY_BASE_URL, OPENLIBRARY_ORIGINS, get_cached_json, openlibrary_headers, openlibrary_work_description
 from .matching import normalize_title, title_words
 from .metadata import resolve_metadata
 from .providers import clean_html
@@ -84,17 +85,41 @@ def parse_opds_feed(xml_content, base_url):
 
 
 def get_cached_booklore_entries(query):
-    query, now = (query or '').strip(), time.time()
-    cached = LIBRARY_SEARCH_CACHE.get(query)
-    if cached and cached['expires_at'] > now:
-        return cached['entries']
-    search_url = f'{BOOKLORE_URL}/catalog?q={quote_plus(query)}'
-    resp = get_with_allowed_redirects(search_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120)
-    if resp.status_code != 200:
-        return []
-    entries = parse_opds_feed(resp.content, search_url)['entries']
-    LIBRARY_SEARCH_CACHE[query] = {'entries': entries, 'expires_at': now + LIBRARY_SEARCH_CACHE_SECONDS}
-    return entries
+    query = (query or '').strip()
+
+    def load():
+        search_url = f'{BOOKLORE_URL}/catalog?q={quote_plus(query)}'
+        resp = get_with_allowed_redirects(
+            search_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
+        )
+        resp.raise_for_status()
+        return parse_opds_feed(resp.content, search_url)['entries']
+
+    return cached_load(
+        f'booklore:search:{normalize_title(query)}', 'booklore',
+        LIBRARY_SEARCH_CACHE_SECONDS, load, stale_ttl=24 * 60 * 60, lock_seconds=25
+    )
+
+
+def get_library_catalogue():
+    def load():
+        entries = []
+        for page in range(1, 101):
+            url = f'{BOOKLORE_URL}/catalog?page={page}&size=100'
+            resp = get_with_allowed_redirects(
+                url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
+            )
+            resp.raise_for_status()
+            page_entries = parse_opds_feed(resp.content, url)['entries']
+            entries.extend(page_entries)
+            if len(page_entries) < 100:
+                break
+        return entries
+
+    return cached_load(
+        'booklore:catalogue:v1', 'booklore', LIBRARY_SEARCH_CACHE_SECONDS, load,
+        stale_ttl=24 * 60 * 60, lock_seconds=60
+    )
 
 
 def title_match_score(book_title, entry_title):
@@ -117,23 +142,26 @@ def title_match_score(book_title, entry_title):
     return int((len(common_words) / max(len(book_words), len(entry_words))) * 100)
 
 
-def find_library_match(book):
+def find_library_match(book, catalogue=None):
+    catalogue = catalogue if catalogue is not None else get_library_catalogue()
     book_title = book.get('title', '')
-    isbn = re.sub(r'[^0-9Xx]', '', book.get('isbn', ''))
-    queries = [(isbn, True)] if isbn else []
-    queries.append((book.get('author') or book_title, False))
+    wanted_isbn = re.sub(r'[^0-9Xx]', '', book.get('isbn', ''))
+    wanted_author = normalize_title(book.get('author', ''))
     best, best_score = None, 0
-    for query, is_isbn in queries:
-        for entry in get_cached_booklore_entries(query):
-            score = title_match_score(book_title, entry.get('title', ''))
-            if is_isbn and score < 70:
+    for entry in catalogue:
+        entry_isbn = re.sub(r'[^0-9Xx]', '', entry.get('isbn', ''))
+        if wanted_isbn and entry_isbn and wanted_isbn == entry_isbn:
+            score = 100
+        else:
+            if wanted_author and normalize_title(entry.get('author', '')) != wanted_author:
                 continue
-            if score >= 70 and score > best_score:
-                acquisition = next((link.get('href') for link in entry.get('links', []) if 'acquisition' in (link.get('rel') or '')), None)
-                best = {'in_library': True, 'match_score': score, 'opds_title': entry.get('title', ''), 'download_url': acquisition}
-                best_score = score
-        if best:
-            break
+            score = title_match_score(book_title, entry.get('title', ''))
+        if score >= 70 and score > best_score:
+            acquisition = next((link.get('href') for link in entry.get('links', []) if 'acquisition' in (link.get('rel') or '')), None)
+            best = {'in_library': True, 'match_score': score, 'opds_title': entry.get('title', ''), 'download_url': acquisition}
+            best_score = score
+            if score == 100:
+                break
     return best or {'in_library': False}
 
 
@@ -150,11 +178,11 @@ def image_proxy():
         headers = {'User-Agent': 'Mozilla/5.0'}
         if get_origin(url) in BOOKLORE_ORIGINS:
             headers.update(booklore_headers())
-        resp = get_with_allowed_redirects(url, allowed_origins={get_origin(url)}, headers=headers, timeout=120)
+        resp = get_with_allowed_redirects(url, allowed_origins={get_origin(url)}, headers=headers, timeout=15)
         resp.raise_for_status()
-        return resp.content, resp.status_code, {'Content-Type': resp.headers.get('Content-Type', 'image/jpeg')}
+        return resp.content, resp.status_code, {'Content-Type': resp.headers.get('Content-Type', 'image/jpeg'), 'Cache-Control': 'public, max-age=604800, immutable'}
     except Exception as e:
-        print(f'[Cover] Error: {e}', flush=True)
+        print(f'[Cover] Error: {type(e).__name__}', flush=True)
         return '', 404
 
 
@@ -164,16 +192,18 @@ def browse():
     if not target_url.startswith('http'):
         target_url = BOOKLORE_URL.rstrip('/') + target_url
     try:
-        resp = get_with_allowed_redirects(target_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120)
-        resp.raise_for_status()
-        parsed = parse_opds_feed(resp.content, target_url)
+        def load():
+            resp = get_with_allowed_redirects(target_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20)
+            resp.raise_for_status()
+            return parse_opds_feed(resp.content, target_url)
+        parsed = cached_load(f'booklore:browse:{target_url}', 'booklore', 60, load, stale_ttl=300, lock_seconds=25)
         entries = parsed['entries']
         is_acquisition = any(any('acquisition' in (link['rel'] or '') for link in entry['links']) for entry in entries)
         return jsonify({'entries': entries, 'type': 'acquisition' if is_acquisition else 'navigation'})
     except requests.exceptions.HTTPError as e:
-        return jsonify({'error': f'HTTP Error: {e}'}), e.response.status_code
+        return jsonify({'error': f'HTTP Error: {type(e).__name__}'}), e.response.status_code
     except Exception as e:
-        return jsonify({'error': f'Connection Error: {e}'}), 500
+        return jsonify({'error': f'Connection Error: {type(e).__name__}'}), 500
 
 
 @bp.route('/check-library', methods=['POST'])
@@ -182,18 +212,19 @@ def check_library():
     author = data.get('author', '')
     books = data.get('books') or [{'title': title, 'author': author} for title in data.get('titles', [])]
     try:
-        return jsonify({'results': {book['title']: find_library_match(book) for book in books if book.get('title')}})
+        catalogue = get_library_catalogue()
+        return jsonify({'results': {book['title']: find_library_match(book, catalogue) for book in books if book.get('title')}})
     except Exception as e:
-        print(f'[ERROR] Library check failed: {e}', flush=True)
+        print(f'[ERROR] Library check failed: {type(e).__name__}', flush=True)
         return jsonify({'results': {}})
 
 
 @bp.route('/authors')
 def authors():
-    try:
+    def load():
         root_url = BOOKLORE_URL.rstrip('/') + '/authors'
         root_response = get_with_allowed_redirects(
-            root_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120
+            root_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
         )
         root_response.raise_for_status()
         root_entries = parse_opds_feed(root_response.content, root_url)['entries']
@@ -218,7 +249,7 @@ def authors():
 
         def fetch_section(url):
             response = get_with_allowed_redirects(
-                url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=120
+                url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
             )
             response.raise_for_status()
             return parse_opds_feed(response.content, url)['entries']
@@ -233,16 +264,18 @@ def authors():
                         if any('subsection' in (link.get('rel') or '') for link in entry.get('links', []))
                     )
                 except Exception as e:
-                    print(f'[Authors] Catalogue section failed: {e}', flush=True)
+                    print(f'[Authors] Catalogue section failed: {type(e).__name__}', flush=True)
 
         unique = {}
         for entry in author_entries:
             name = (entry.get('title') or '').strip()
             if name:
                 unique[name.casefold()] = entry
-        return jsonify({'entries': sorted(unique.values(), key=lambda entry: (entry.get('title') or '').casefold())})
-    except Exception as e:
-        print(f'[Authors] Catalogue lookup failed: {e}', flush=True)
+        return {'entries': sorted(unique.values(), key=lambda entry: (entry.get('title') or '').casefold())}
+    try:
+        return jsonify(cached_load('booklore:authors:v1', 'booklore', 24 * 60 * 60, load, stale_ttl=7 * 24 * 60 * 60, lock_seconds=60))
+    except Exception:
+        print('[Authors] Catalogue lookup failed', flush=True)
         return jsonify({'entries': []})
 
 
@@ -278,7 +311,7 @@ def author_profile():
             'image_url': f'https://covers.openlibrary.org/a/id/{photo_id}-M.jpg' if photo_id else ''
         })
     except Exception as e:
-        print(f'[Author] Profile lookup failed: {e}', flush=True)
+        print(f'[Author] Profile lookup failed: {type(e).__name__}', flush=True)
         return jsonify({})
 
 
@@ -291,5 +324,33 @@ def metadata():
     try:
         return jsonify(resolve_metadata(title, data.get('author', ''), data.get('isbn', '')))
     except Exception as e:
-        print(f'[ERROR] Metadata lookup failed: {e}', flush=True)
+        print(f'[ERROR] Metadata lookup failed: {type(e).__name__}', flush=True)
         return jsonify({})
+
+
+@bp.route('/metadata-batch', methods=['POST'])
+def metadata_batch():
+    data = request.get_json(silent=True) or {}
+    books = (data.get('books') or [])[:20]
+
+    def enrich(book):
+        metadata = {}
+        if book.get('source') == 'openlibrary' and book.get('source_id'):
+            try:
+                metadata['description'] = openlibrary_work_description(book['source_id'])
+            except Exception:
+                pass
+        if not metadata.get('description') or not book.get('cover_url') or not book.get('isbn'):
+            resolved = resolve_metadata(book.get('title', ''), book.get('author', ''), book.get('isbn', ''))
+            for key, value in resolved.items():
+                if value and not metadata.get(key):
+                    metadata[key] = value
+        return {'index': book.get('index'), 'metadata': metadata}
+
+    try:
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(enrich, books))
+        return jsonify({'results': results})
+    except Exception:
+        print('[ERROR] Batch metadata lookup failed', flush=True)
+        return jsonify({'results': []})
