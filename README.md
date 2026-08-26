@@ -7,7 +7,14 @@ Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-deli
 - **Downloads** tracks Shelfmark requests.
 - **Settings** stores the destination Kindle address in the current browser.
 
-![alt text](https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Book%20Detail%20View.png?raw=true "Library (OPDS Browser)")
+<table>
+  <tr>
+    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Library%20(OPDS)%20view.png?raw=true" width="22%" alt="Library (OPDS Browser)"></td>
+    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Book%20Detail%20View.png?raw=true" width="22%" alt="Book Description"></td>
+    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Store%20View.png?raw=true" width="22%" alt="Store (Trigger downloads)"></td>
+    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Settings%20View.png?raw=true" width="22%" alt="Settings"></td>
+  </tr>
+</table>
 
 ## Stack
 
