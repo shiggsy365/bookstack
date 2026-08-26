@@ -7,6 +7,8 @@ Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-deli
 - **Downloads** tracks Shelfmark requests.
 - **Settings** stores the destination Kindle address in the current browser.
 
+![alt text](https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Book%20Detail%20View.png?raw=true "Library (OPDS Browser)")
+
 ## Stack
 
 The default [compose.yaml](compose.yaml) is the canonical core stack:
