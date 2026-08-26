@@ -9,10 +9,10 @@ Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-deli
 
 <table>
   <tr>
-    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Library%20(OPDS)%20view.png?raw=true" width="22%" alt="Library (OPDS Browser)"></td>
-    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Book%20Detail%20View.png?raw=true" width="22%" alt="Book Description"></td>
-    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Store%20View.png?raw=true" width="22%" alt="Store (Trigger downloads)"></td>
-    <td><img src="https://github.com/shiggsy365/bookstack/blob/main/Screenshots/Settings%20View.png?raw=true" width="22%" alt="Settings"></td>
+    <td width="25%" align="center"><img src="Screenshots/Library%20(OPDS)%20view.png" width="100%" alt="Library OPDS browser"><br><strong>Library</strong></td>
+    <td width="25%" align="center"><img src="Screenshots/Book%20Detail%20View.png" width="100%" alt="Book detail view"><br><strong>Book Details</strong></td>
+    <td width="25%" align="center"><img src="Screenshots/Store%20View.png" width="100%" alt="Store view"><br><strong>Store</strong></td>
+    <td width="25%" align="center"><img src="Screenshots/Settings%20View.png" width="100%" alt="Settings view"><br><strong>Settings</strong></td>
   </tr>
 </table>
 
