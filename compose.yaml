@@ -1,7 +1,8 @@
 services:
   bookstack:
-    build: .
-    container_name: bookstack
+    image: ${BOOKSTACK_IMAGE:-ghcr.io/shiggsy365/bookstack:latest}
+    build:
+      context: .
     environment:
       - SHELFMARK_URL=${SHELFMARK_URL}
       - BOOKLORE_URL=${BOOKLORE_URL}
@@ -17,8 +18,10 @@ services:
       - HARDCOVER_API_KEY=${HARDCOVER_API_KEY}
       - MAX_KINDLE_ATTACHMENT_MB=${MAX_KINDLE_ATTACHMENT_MB}
     depends_on:
-      - shelfmark
-      - booklore
+      shelfmark:
+        condition: service_healthy
+      booklore:
+        condition: service_healthy
     volumes:
       - ${BOOKSTACK_INSTALL}/bookstack/cache:/data
     restart: unless-stopped
@@ -34,31 +37,9 @@ services:
       - "traefik.http.routers.bookstack.tls=true"
       - "traefik.http.services.bookstack.loadbalancer.server.port=5000"
       - "traefik.http.routers.bookstack.tls.certresolver=letsencrypt"
-    profiles:
-      - required
-      - all
-
-  prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
-    container_name: prowlarr
-    ports:
-      - "127.0.0.1:9696:9696"
-    environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - TZ=${TZ}
-    volumes:
-      - ${BOOKSTACK_INSTALL}/prowlarr/config:/config
-    restart: unless-stopped
-    labels:
-      - "traefik.enable=false"
-    profiles:
-      - required
-      - all
 
   booklore:
     image: grimmory/grimmory:latest
-    container_name: booklore
     environment:
       - USER_ID=${PUID}
       - GROUP_ID=${PGID}
@@ -73,22 +54,23 @@ services:
     volumes:
       - ${BOOKSTACK_INSTALL}/booklore/data:/app/data
       - ${BOOK_LIBRARY}:/books
-      - ${INGEST_FOLDER}:/bookdrop
+      - ${BOOK_INBOX}:/bookdrop
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "nc", "-z", "127.0.0.1", "${BOOKLORE_PORT}" ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.booklore.rule=Host(`${BOOKLORE_HOSTNAME?}`)"
       - "traefik.http.routers.booklore.tls=true"
       - "traefik.http.services.booklore.loadbalancer.server.port=${BOOKLORE_PORT}"
       - "traefik.http.routers.booklore.tls.certresolver=letsencrypt"
-    profiles:
-      - required
-      - all
-
 
   mariadb:
     image: lscr.io/linuxserver/mariadb:11.4.5
-    container_name: mariadb
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -108,7 +90,6 @@ services:
   
   shelfmark:
     image: ghcr.io/calibrain/shelfmark:latest
-    container_name: shelfmark
     ports:
       - "127.0.0.1:8084:8084"
     environment:
@@ -125,32 +106,15 @@ services:
       - NET_ADMIN
       - NET_RAW
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', ${SHELFMARK_PORT}), 3).close()" ]
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     volumes:
       - ${BOOK_LIBRARY}:/books
-      - ${DOWNLOAD_FOLDER}:/downloads
+      - ${BOOK_LIBRARY}:/downloads
       - ${BOOKSTACK_INSTALL}/shelfmark/config:/config
     labels:
       - "traefik.enable=false"
-    profiles:
-      - required
-      - all
-
-  sabnzbd:
-    image: lscr.io/linuxserver/sabnzbd:latest
-    container_name: sabnzbd
-    ports:
-      - "127.0.0.1:8080:8080"
-    environment:
-      - TZ=${TZ}
-      - PUID=${PUID}
-      - PGID=${PGID}
-    volumes:
-      - ${BOOKSTACK_INSTALL}/sabnzbd:/config
-      - ${BOOKSTACK_INSTALL}/sabnzbd/Downloads/incomplete:/incomplete-downloads
-      - ${BOOKSTACK_INSTALL}/sabnzbd/Downloads/complete:/downloads
-    labels:
-      - "traefik.enable=false"
-    restart: unless-stopped
-    profiles:
-      - required
-      - all

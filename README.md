@@ -16,8 +16,8 @@ Bookstack checks search and discovery results against Booklore. A book with a co
 | Bookstack | Unified, Kindle-friendly web interface and SMTP delivery service | HTTPS through Traefik |
 | Booklore | Library, OPDS catalogue, metadata, and book ingestion | HTTPS through Traefik |
 | Shelfmark | Release-source search, release selection, and download orchestration | `http://127.0.0.1:8084` on the VPS |
-| Prowlarr | Indexer management used by the acquisition workflow | `http://127.0.0.1:9696` on the VPS |
-| SABnzbd | Usenet download client | `http://127.0.0.1:8080` on the VPS |
+| Prowlarr (optional) | Indexer management for Usenet acquisition | `http://127.0.0.1:9696` on the VPS |
+| SABnzbd (optional) | Usenet download client | `http://127.0.0.1:8080` on the VPS |
 | MariaDB | Booklore database | Internal Docker network only |
 
 Only Bookstack and Booklore are published through Traefik. Administrative services use loopback-bound HTTP ports and are not directly reachable from the internet.
@@ -82,7 +82,9 @@ You are responsible for using indexers and downloaded material in accordance wit
 ```text
 apps/bookstack/
 ├── .env example              Environment template
-├── compose.yaml              Complete six-service stack
+├── compose.yaml              Canonical four-service core stack
+├── compose.usenet.yaml       Optional Prowlarr and SABnzbd overlay
+├── .github/workflows/        Multi-architecture container publishing
 ├── Dockerfile                Bookstack web image
 ├── app.py                    Flask application entry point
 ├── bookstack_app/            API integrations and application logic
@@ -90,7 +92,7 @@ apps/bookstack/
 └── sabnzbd/                  Seed/configuration files for SABnzbd
 ```
 
-Persistent service data is placed below `BOOKSTACK_INSTALL`; the library, ingest, and completed-download locations are controlled separately.
+Persistent service data is placed below `BOOKSTACK_INSTALL`; the library, ingest, and completed-download locations are controlled separately. `compose.yaml` is the canonical definition: the VPS root Compose file should include it rather than copying its services.
 
 ## Installation
 
@@ -138,7 +140,7 @@ The repository-level Compose file places services on the shared network defined 
 From the repository root:
 
 ```bash
-docker compose --profile required config
+docker compose config
 ```
 
 For the Bookstack Compose file on its own:
@@ -147,7 +149,6 @@ For the Bookstack Compose file on its own:
 docker compose \
   --env-file apps/bookstack/.env \
   -f apps/bookstack/compose.yaml \
-  --profile required \
   config
 ```
 
@@ -158,7 +159,7 @@ Resolve all errors or unset-variable warnings before starting the stack.
 Using the repository-level Compose file:
 
 ```bash
-docker compose --profile required up -d --build bookstack booklore mariadb shelfmark prowlarr sabnzbd
+docker compose up -d
 ```
 
 Using the Bookstack Compose file directly:
@@ -167,18 +168,29 @@ Using the Bookstack Compose file directly:
 docker compose \
   --env-file apps/bookstack/.env \
   -f apps/bookstack/compose.yaml \
-  --profile required \
-  up -d --build
+  up -d
 ```
 
 Check container state and the Bookstack health endpoint:
 
 ```bash
-docker compose --profile required ps
+docker compose ps
 curl -fsS "https://${BOOKSTACK_HOSTNAME}/healthz"
 ```
 
 The health endpoint returns `{"status":"ok"}`.
+
+The core stack starts by default and contains Bookstack, Booklore, MariaDB, and Shelfmark. On the first run, before the GHCR package exists or is public, use `docker compose up -d --build` to build Bookstack locally. To add the optional Usenet services:
+
+```bash
+docker compose \
+  --env-file apps/bookstack/.env \
+  -f apps/bookstack/compose.yaml \
+  -f apps/bookstack/compose.usenet.yaml \
+  up -d
+```
+
+Use the same two `-f` arguments for later `pull`, `ps`, `logs`, and `down` commands that should include Prowlarr and SABnzbd. No Compose profiles are required.
 
 ## Environment variables
 
@@ -201,6 +213,7 @@ All Compose interpolation and Bookstack settings live in `apps/bookstack/.env`.
 | Variable | Required | Description |
 | --- | --- | --- |
 | `BOOKSTACK_HOSTNAME` | Yes | Public hostname used by the Bookstack Traefik router. |
+| `BOOKSTACK_IMAGE` | No | Published Bookstack image; defaults to `ghcr.io/shiggsy365/bookstack:latest`. |
 | `BOOKLORE_HOSTNAME` | Yes | Public hostname used by the Booklore Traefik router. |
 | `BOOKLORE_PORT` | Yes | Internal Booklore HTTP port; normally `6060`. |
 | `BOOKLORE_URL` | Yes | Internal OPDS base URL; normally `http://booklore:6060/api/v1/opds`. |
@@ -364,25 +377,29 @@ To force metadata to be fetched again, stop Bookstack and remove only the metada
 
 ## Updating and routine operation
 
-Rebuild Bookstack after changing its code:
+Update Bookstack from the published image:
+
+The `main` branch publishes `ghcr.io/shiggsy365/bookstack:latest` for AMD64 and ARM64. The Compose definition retains a local `build` fallback for bootstrapping and development. Tagged releases also publish their semantic version. Make the GHCR package public after its first build, or authenticate the VPS with `docker login ghcr.io` before pulling a private package. Override `BOOKSTACK_IMAGE` if you publish under a different account.
+
 
 ```bash
-docker compose --profile required up -d --build bookstack
+docker compose pull bookstack
+docker compose up -d bookstack
 ```
 
-Pull third-party images and recreate the stack:
+Pull all core images and recreate the stack:
 
 ```bash
-docker compose --profile required pull
-docker compose --profile required up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 Useful commands:
 
 ```bash
-docker compose --profile required ps
-docker compose --profile required logs -f --tail=200 bookstack
-docker compose --profile required restart bookstack
+docker compose ps
+docker compose logs -f --tail=200 bookstack
+docker compose restart bookstack
 ```
 
 If running the standalone file, add `--env-file apps/bookstack/.env -f apps/bookstack/compose.yaml` to these commands.
@@ -408,7 +425,7 @@ The metadata cache is disposable. Stop or quiesce database-writing services befo
 Confirm the container is running and listening on the VPS:
 
 ```bash
-docker compose --profile required ps
+docker compose ps
 curl -v http://127.0.0.1:9696/
 ```
 
@@ -424,7 +441,6 @@ Run Compose from the repository root, where the Bookstack include declares its e
 docker compose \
   --env-file apps/bookstack/.env \
   -f apps/bookstack/compose.yaml \
-  --profile required \
   config
 ```
 
@@ -433,8 +449,8 @@ Ensure every value uses `NAME=value` syntax and contains no placeholder text.
 ### Bookstack is unhealthy
 
 ```bash
-docker compose --profile required logs --tail=200 bookstack
-docker compose --profile required exec bookstack python -c \
+docker compose logs --tail=200 bookstack
+docker compose exec bookstack python -c \
   "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/healthz').read().decode())"
 ```
 
@@ -480,7 +496,6 @@ python3 -m compileall -q apps/bookstack/bookstack_app apps/bookstack/app.py
 docker compose \
   --env-file apps/bookstack/.env \
   -f apps/bookstack/compose.yaml \
-  --profile required \
   config
 ```
 

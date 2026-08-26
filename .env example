@@ -7,12 +7,14 @@ TZ = Europe/London
 
 ##### - Install, Library and Ingest Folders - #####
 BOOKSTACK_INSTALL = /opt/docker/apps/bookstack
-INGEST_FOLDER = /mnt/booklore/ingest
-BOOK_LIBRARY = /mnt/booklore/library
-DOWNLOAD_FOLDER = /mnt/booklore/complete
+BOOK_DATA=/mnt/books
+BOOK_LIBRARY=/mnt/books/library
+BOOK_INBOX=/mnt/books/inbox
+BOOK_INCOMPLETE=/mnt/books/incomplete
 
 ##### - Bookstack Settings - #####
 BOOKSTACK_HOSTNAME = bookstack.example.com
+BOOKSTACK_IMAGE=ghcr.io/shiggsy365/bookstack:latest
 
 ##### - Booklore Settings - #####
 BOOKLORE_PORT = 6060
