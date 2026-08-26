@@ -1,6 +1,6 @@
 # Bookstack
 
-Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-delivery interface. It presents Grimmory and Shelfmark as a marketplace-style web application while retaining compatibility with older Kindle and Kobo browsers.
+Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-delivery interface. It presents Grimmory and Shelfmark as a marketplace-style web application while retaining compatibility with older Kindle and Kobo browsers. This allows users to browse their books, request new books, and send books to device, all from within the device's built in browser. Kobo devices can perform a full sync with Grimmory, where Kindle users can request book delivery via email.
 
 - **Library** browses books already held in Grimmory and can send them to Kindle.
 - **Store** discovers books, checks local availability, and requests missing titles through Shelfmark.
