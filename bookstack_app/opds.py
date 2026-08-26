@@ -9,7 +9,7 @@ import requests
 from flask import Blueprint, jsonify, request
 
 from .cache import cached_load
-from .config import BOOKLORE_PASS, BOOKLORE_URL, BOOKLORE_USER, SHELFMARK_URL
+from .config import GRIMMORY_PASS, GRIMMORY_URL, GRIMMORY_USER, SHELFMARK_URL
 from .discovery import OPENLIBRARY_BASE_URL, OPENLIBRARY_ORIGINS, get_cached_json, openlibrary_headers, openlibrary_work_description
 from .matching import normalize_title, title_words
 from .metadata import resolve_metadata
@@ -25,14 +25,14 @@ NAMESPACES = {
     'dcterms': 'http://purl.org/dc/terms/',
     'schema': 'http://schema.org/'
 }
-BOOKLORE_ORIGINS = {get_origin(BOOKLORE_URL)}
-IMAGE_PROXY_ORIGINS = BOOKLORE_ORIGINS | {get_origin(SHELFMARK_URL)}
+GRIMMORY_ORIGINS = {get_origin(GRIMMORY_URL)}
+IMAGE_PROXY_ORIGINS = GRIMMORY_ORIGINS | {get_origin(SHELFMARK_URL)}
 LIBRARY_SEARCH_CACHE_SECONDS = 5 * 60
 LIBRARY_SEARCH_CACHE = {}
 
 
-def booklore_headers():
-    auth_str = f'{BOOKLORE_USER}:{BOOKLORE_PASS}'
+def grimmory_headers():
+    auth_str = f'{GRIMMORY_USER}:{GRIMMORY_PASS}'
     encoded_auth = base64.b64encode(auth_str.encode('ascii')).decode('ascii')
     return {
         'User-Agent': 'Mozilla/5.0 (Kobo) AppleWebkit/537.36',
@@ -84,19 +84,19 @@ def parse_opds_feed(xml_content, base_url):
     return {'entries': entries}
 
 
-def get_cached_booklore_entries(query):
+def get_cached_grimmory_entries(query):
     query = (query or '').strip()
 
     def load():
-        search_url = f'{BOOKLORE_URL}/catalog?q={quote_plus(query)}'
+        search_url = f'{GRIMMORY_URL}/catalog?q={quote_plus(query)}'
         resp = get_with_allowed_redirects(
-            search_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
+            search_url, allowed_origins=GRIMMORY_ORIGINS, headers=grimmory_headers(), timeout=20
         )
         resp.raise_for_status()
         return parse_opds_feed(resp.content, search_url)['entries']
 
     return cached_load(
-        f'booklore:search:{normalize_title(query)}', 'booklore',
+        f'grimmory:search:{normalize_title(query)}', 'grimmory',
         LIBRARY_SEARCH_CACHE_SECONDS, load, stale_ttl=24 * 60 * 60, lock_seconds=25
     )
 
@@ -105,9 +105,9 @@ def get_library_catalogue():
     def load():
         entries = []
         for page in range(1, 101):
-            url = f'{BOOKLORE_URL}/catalog?page={page}&size=100'
+            url = f'{GRIMMORY_URL}/catalog?page={page}&size=100'
             resp = get_with_allowed_redirects(
-                url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
+                url, allowed_origins=GRIMMORY_ORIGINS, headers=grimmory_headers(), timeout=20
             )
             resp.raise_for_status()
             page_entries = parse_opds_feed(resp.content, url)['entries']
@@ -117,7 +117,7 @@ def get_library_catalogue():
         return entries
 
     return cached_load(
-        'booklore:catalogue:v1', 'booklore', LIBRARY_SEARCH_CACHE_SECONDS, load,
+        'grimmory:catalogue:v1', 'grimmory', LIBRARY_SEARCH_CACHE_SECONDS, load,
         stale_ttl=24 * 60 * 60, lock_seconds=60
     )
 
@@ -171,13 +171,13 @@ def image_proxy():
     if not url:
         return '', 404
     if url.startswith('/'):
-        base = BOOKLORE_URL.split('/api/v1/opds')[0] if '/api/v1/opds' in BOOKLORE_URL else BOOKLORE_URL.rsplit('/', 1)[0]
+        base = GRIMMORY_URL.split('/api/v1/opds')[0] if '/api/v1/opds' in GRIMMORY_URL else GRIMMORY_URL.rsplit('/', 1)[0]
         url = base + url
     try:
         validate_url(url, allowed_origins=IMAGE_PROXY_ORIGINS)
         headers = {'User-Agent': 'Mozilla/5.0'}
-        if get_origin(url) in BOOKLORE_ORIGINS:
-            headers.update(booklore_headers())
+        if get_origin(url) in GRIMMORY_ORIGINS:
+            headers.update(grimmory_headers())
         resp = get_with_allowed_redirects(url, allowed_origins={get_origin(url)}, headers=headers, timeout=15)
         resp.raise_for_status()
         return resp.content, resp.status_code, {'Content-Type': resp.headers.get('Content-Type', 'image/jpeg'), 'Cache-Control': 'public, max-age=604800, immutable'}
@@ -188,15 +188,15 @@ def image_proxy():
 
 @bp.route('/browse')
 def browse():
-    target_url = request.args.get('url') or BOOKLORE_URL
+    target_url = request.args.get('url') or GRIMMORY_URL
     if not target_url.startswith('http'):
-        target_url = BOOKLORE_URL.rstrip('/') + target_url
+        target_url = GRIMMORY_URL.rstrip('/') + target_url
     try:
         def load():
-            resp = get_with_allowed_redirects(target_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20)
+            resp = get_with_allowed_redirects(target_url, allowed_origins=GRIMMORY_ORIGINS, headers=grimmory_headers(), timeout=20)
             resp.raise_for_status()
             return parse_opds_feed(resp.content, target_url)
-        parsed = cached_load(f'booklore:browse:{target_url}', 'booklore', 60, load, stale_ttl=300, lock_seconds=25)
+        parsed = cached_load(f'grimmory:browse:{target_url}', 'grimmory', 60, load, stale_ttl=300, lock_seconds=25)
         entries = parsed['entries']
         is_acquisition = any(any('acquisition' in (link['rel'] or '') for link in entry['links']) for entry in entries)
         return jsonify({'entries': entries, 'type': 'acquisition' if is_acquisition else 'navigation'})
@@ -222,9 +222,9 @@ def check_library():
 @bp.route('/authors')
 def authors():
     def load():
-        root_url = BOOKLORE_URL.rstrip('/') + '/authors'
+        root_url = GRIMMORY_URL.rstrip('/') + '/authors'
         root_response = get_with_allowed_redirects(
-            root_url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
+            root_url, allowed_origins=GRIMMORY_ORIGINS, headers=grimmory_headers(), timeout=20
         )
         root_response.raise_for_status()
         root_entries = parse_opds_feed(root_response.content, root_url)['entries']
@@ -249,7 +249,7 @@ def authors():
 
         def fetch_section(url):
             response = get_with_allowed_redirects(
-                url, allowed_origins=BOOKLORE_ORIGINS, headers=booklore_headers(), timeout=20
+                url, allowed_origins=GRIMMORY_ORIGINS, headers=grimmory_headers(), timeout=20
             )
             response.raise_for_status()
             return parse_opds_feed(response.content, url)['entries']
@@ -273,7 +273,7 @@ def authors():
                 unique[name.casefold()] = entry
         return {'entries': sorted(unique.values(), key=lambda entry: (entry.get('title') or '').casefold())}
     try:
-        return jsonify(cached_load('booklore:authors:v1', 'booklore', 24 * 60 * 60, load, stale_ttl=7 * 24 * 60 * 60, lock_seconds=60))
+        return jsonify(cached_load('grimmory:authors:v1', 'grimmory', 24 * 60 * 60, load, stale_ttl=7 * 24 * 60 * 60, lock_seconds=60))
     except Exception:
         print('[Authors] Catalogue lookup failed', flush=True)
         return jsonify({'entries': []})

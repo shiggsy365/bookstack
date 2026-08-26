@@ -1,450 +1,285 @@
 # Bookstack
 
-Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-delivery stack. It presents the whole workflow through a marketplace-style web application designed for modern browsers and older Kindle and Kobo browsers.
+Bookstack is a self-hosted book discovery, acquisition, library, and Kindle-delivery interface. It presents Grimmory and Shelfmark as a marketplace-style web application while retaining compatibility with older Kindle and Kobo browsers.
 
-It solves two related but distinct tasks:
+- **Library** browses books already held in Grimmory and can send them to Kindle.
+- **Store** discovers books, checks local availability, and requests missing titles through Shelfmark.
+- **Downloads** tracks Shelfmark requests.
+- **Settings** stores the destination Kindle address in the current browser.
 
-- **Use a book you already own:** browse Booklore and send a library file to Kindle immediately.
-- **Acquire a missing book:** discover or search for it, select a Shelfmark release, monitor the download, and use it from Booklore after ingestion.
+## Stack
 
-Bookstack checks search and discovery results against Booklore. A book with a confirmed Booklore download URL is labelled **Available** and defaults to **Send to Kindle**. A missing book is labelled **Request needed** and defaults to the Shelfmark request flow.
+The default [compose.yaml](compose.yaml) is the canonical core stack:
 
-## Stack components
-
-| Service | Purpose | Access by default |
+| Service | Purpose | Default access |
 | --- | --- | --- |
-| Bookstack | Unified, Kindle-friendly web interface and SMTP delivery service | HTTPS through Traefik |
-| Booklore | Library, OPDS catalogue, metadata, and book ingestion | HTTPS through Traefik |
-| Shelfmark | Release-source search, release selection, and download orchestration | `http://127.0.0.1:8084` on the VPS |
-| Prowlarr (optional) | Indexer management for Usenet acquisition | `http://127.0.0.1:9696` on the VPS |
-| SABnzbd (optional) | Usenet download client | `http://127.0.0.1:8080` on the VPS |
-| MariaDB | Booklore database | Internal Docker network only |
+| Bookstack | Unified web interface and Kindle delivery | HTTPS through Traefik |
+| Grimmory | Library, OPDS catalogue, metadata, and ingestion | HTTPS through Traefik |
+| Shelfmark | Release search and acquisition | `127.0.0.1:8084` |
+| MariaDB | Grimmory database | Docker network only |
 
-Only Bookstack and Booklore are published through Traefik. Administrative services use loopback-bound HTTP ports and are not directly reachable from the internet.
+The optional [compose.usenet.yaml](compose.usenet.yaml) overlay adds:
 
-## Features
+| Service | Purpose | Default access |
+| --- | --- | --- |
+| Prowlarr | Usenet indexer management | `127.0.0.1:9696` |
+| SABnzbd | Usenet download client | `127.0.0.1:8080` |
 
-- Marketplace-style **Library** and **Store** modes with persistent bottom navigation.
-- Library views for **Recent**, tiled **Authors**, stacked-cover **Series**, **All Books**, and **Search**.
-- Store views for **Trending**, **Popular**, **Bestsellers**, **Author Search**, and **Book Search**, with genre and publication-period filters.
-- Hardcover-backed recommendations, author tiles, author bibliographies, covers, and title search.
-- Optional New York Times bestseller lists and Open Library fallback metadata.
-- Availability-aware book details: **Available**, **Request needed**, and **Downloading**.
-- Staged Shelfmark requests which search by ISBN first, then author and title, then title only through explicit **No results found?** prompts, followed by release selection and queue monitoring.
-- Booklore OPDS browsing and one-click Send to Kindle delivery.
+Only Bookstack and Grimmory are exposed through Traefik. Administrative ports bind to VPS loopback and should be reached through an SSH tunnel.
+
+## Main features
+
+- Marketplace-style Library and Store modes.
+- Recent, Authors, Series, All Books, and Search library views.
+- Trending, Popular, Bestsellers, Author Search, and Book Search store views.
+- Grimmory availability detection and one-click Send to Kindle.
+- Shelfmark searches staged by ISBN, author and title, then title.
+- EPUB, MOBI, and AZW3 release selection and download monitoring.
+- Persistent metadata caching, stale-provider fallback, and request coalescing.
 - Four-line listing descriptions and ten-line detail descriptions.
-- Hierarchical back navigation plus first/previous/next/last page controls.
-- Persistent metadata caching across container rebuilds and restarts.
-- A 120-second browser/provider search timeout for slower external services.
-- A 150% initial viewport scale and conservative HTML/JavaScript/CSS for older Kindle and Kobo browsers.
-
-## How it works
-
-```text
-Search or discover a book
-          |
-          v
-Check Booklore for a usable library file
-       /     \
-      yes     no
-      |        |
-Send to       Search Shelfmark
-Kindle         |
-               v
-          Choose a release
-               |
-               v
-      Shelfmark/download client
-               |
-               v
-        Booklore ingestion
-               |
-               v
-          Send to Kindle
-```
-
-Bookstack does not replace Booklore, Shelfmark, Prowlarr, or SABnzbd. It provides a common user interface over them.
+- E-reader navigation, 150% initial viewport scale, and conservative browser code.
 
 ## Requirements
 
-- A Linux host or VPS with Docker Engine and Docker Compose v2.
-- DNS records for the Bookstack and Booklore hostnames pointing to the VPS.
-- A working Traefik deployment on the same Docker network for HTTPS access.
-- Storage paths for the Booklore library, ingestion folder, and completed downloads.
-- Credentials for Booklore OPDS access.
-- An SMTP account if Send to Kindle will be used.
-- At least one legal download source/indexer configured in the acquisition services.
+- Linux with Docker Engine and Docker Compose v2.
+- Traefik on the same Docker network.
+- DNS records for the Bookstack and Grimmory hostnames.
+- Grimmory OPDS credentials.
+- SMTP credentials for Send to Kindle.
+- Storage for the library, inbox, incomplete downloads, and service configuration.
+- Legal access to any configured acquisition sources.
 
-You are responsible for using indexers and downloaded material in accordance with the law and the terms of the services involved.
+## Quick start
 
-## Directory layout
+Commands below assume the current directory is `apps/bookstack`.
 
-```text
-apps/bookstack/
-├── .env example              Environment template
-├── compose.yaml              Canonical four-service core stack
-├── compose.usenet.yaml       Optional Prowlarr and SABnzbd overlay
-├── .github/workflows/        Multi-architecture container publishing
-├── Dockerfile                Bookstack web image
-├── app.py                    Flask application entry point
-├── bookstack_app/            API integrations and application logic
-├── templates/index.html      Kindle-compatible single-page interface
-└── sabnzbd/                  Seed/configuration files for SABnzbd
-```
-
-Persistent service data is placed below `BOOKSTACK_INSTALL`; the library, ingest, and completed-download locations are controlled separately. `compose.yaml` is the canonical definition: the VPS root Compose file should include it rather than copying its services.
-
-## Installation
-
-### 1. Create the environment file
-
-From the repository root:
+### 1. Configure the environment
 
 ```bash
-cd apps/bookstack
 cp ".env example" .env
 chmod 600 .env
 ```
 
-Edit `.env` and replace every placeholder. Do not commit this file; it contains database, Booklore, and SMTP secrets and is ignored by Git.
+Replace every placeholder in `.env`. Use `NAME=value` syntax without spaces around `=`. The file contains secrets and is ignored by Git.
 
-Avoid spaces around `=` when editing values:
+### 2. Create storage directories
 
-```dotenv
-PUID=1001
-BOOKSTACK_HOSTNAME=books.example.com
-```
-
-### 2. Prepare host directories
-
-Create the locations selected in `.env`. With the example paths:
+Using the example paths:
 
 ```bash
 sudo mkdir -p /opt/docker/apps/bookstack
-sudo mkdir -p /mnt/booklore/ingest /mnt/booklore/library /mnt/booklore/complete
-sudo chown -R 1001:1001 /opt/docker/apps/bookstack /mnt/booklore
+sudo mkdir -p /mnt/books/library /mnt/books/inbox /mnt/books/incomplete
+sudo chown -R 1001:1001 /opt/docker/apps/bookstack /mnt/books
 ```
 
-Replace `1001:1001` with the configured `PUID:PGID`. Do not change ownership blindly if these paths already contain data used by another deployment.
+Use the configured `PUID:PGID`. Do not change ownership blindly when directories already contain data.
 
-Bookstack stores shared provider responses, availability data, failure backoff, and provider metrics in a shared SQLite database under `/bookstack/cache`.
+### 3. Validate and start
 
-### 3. Configure DNS and Traefik
-
-Create DNS records for `BOOKSTACK_HOSTNAME` and `BOOKLORE_HOSTNAME`. The Compose labels expect a Traefik certificate resolver named `letsencrypt` and route both applications over HTTPS.
-
-The repository-level Compose file places services on the shared network defined by `DOCKER_NETWORK`, defaulting to `aio_default`. If this app is deployed independently, ensure Traefik joins the same Docker network or adapt the networking and labels to your environment.
-
-### 4. Validate the configuration
-
-From the repository root:
+Core stack:
 
 ```bash
 docker compose config
-```
-
-For the Bookstack Compose file on its own:
-
-```bash
-docker compose \
-  --env-file apps/bookstack/.env \
-  -f apps/bookstack/compose.yaml \
-  config
-```
-
-Resolve all errors or unset-variable warnings before starting the stack.
-
-### 5. Start the stack
-
-Using the repository-level Compose file:
-
-```bash
+docker compose pull
 docker compose up -d
 ```
 
-Using the Bookstack Compose file directly:
+Core stack plus optional Usenet services:
 
 ```bash
-docker compose \
-  --env-file apps/bookstack/.env \
-  -f apps/bookstack/compose.yaml \
-  up -d
+docker compose -f compose.yaml -f compose.usenet.yaml config
+docker compose -f compose.yaml -f compose.usenet.yaml pull
+docker compose -f compose.yaml -f compose.usenet.yaml up -d
 ```
 
-Check container state and the Bookstack health endpoint:
+No Compose profiles are required. Use the same two `-f` arguments for future Usenet-stack commands.
+
+Bookstack uses the public multi-architecture image `ghcr.io/shiggsy365/bookstack:latest`. The Compose build context remains available for local development:
+
+```bash
+docker compose up -d --build bookstack
+```
+
+### 4. Check health
 
 ```bash
 docker compose ps
 curl -fsS "https://${BOOKSTACK_HOSTNAME}/healthz"
 ```
 
-The health endpoint returns `{"status":"ok"}`.
-
-The core stack starts by default and contains Bookstack, Booklore, MariaDB, and Shelfmark. On the first run, before the GHCR package exists or is public, use `docker compose up -d --build` to build Bookstack locally. To add the optional Usenet services:
-
-```bash
-docker compose \
-  --env-file apps/bookstack/.env \
-  -f apps/bookstack/compose.yaml \
-  -f apps/bookstack/compose.usenet.yaml \
-  up -d
-```
-
-Use the same two `-f` arguments for later `pull`, `ps`, `logs`, and `down` commands that should include Prowlarr and SABnzbd. No Compose profiles are required.
+A healthy Bookstack response is `{"status":"ok"}`. Bookstack waits for healthy Grimmory and Shelfmark services before starting.
 
 ## Environment variables
 
-All Compose interpolation and Bookstack settings live in `apps/bookstack/.env`.
+### Host and storage
 
-### Host identity and storage
-
-| Variable | Required | Description |
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `PUID` | Yes | Host user ID used by LinuxServer containers and Booklore. |
-| `PGID` | Yes | Host group ID used by LinuxServer containers and Booklore. |
-| `TZ` | Yes | IANA time zone, such as `Europe/London`. |
-| `BOOKSTACK_INSTALL` | Yes | Root directory for persistent configuration and the metadata cache. |
-| `INGEST_FOLDER` | Yes | Host folder mounted into Booklore as `/bookdrop`. |
-| `BOOK_LIBRARY` | Yes | Host folder mounted into Booklore as `/books` and Shelfmark as `/books`. |
-| `DOWNLOAD_FOLDER` | Yes | Host completed-download folder mounted into Shelfmark as `/downloads`. |
+| `PUID`, `PGID` | Yes | Host ownership used by Grimmory and LinuxServer containers. |
+| `TZ` | Yes | IANA timezone, for example `Europe/London`. |
+| `BOOKSTACK_INSTALL` | Yes | Persistent service configuration and Bookstack cache root. |
+| `BOOK_LIBRARY` | Yes | Final library. Mounted into Grimmory as `/books`, and into Shelfmark and SABnzbd as `/downloads`. |
+| `BOOK_INBOX` | Yes | Grimmory ingestion/watch folder mounted as `/bookdrop`. |
+| `BOOK_INCOMPLETE` | With Usenet | SABnzbd incomplete-download directory. |
+| `BOOK_DATA` | No | Optional parent path for organising the three book directories; Compose does not consume it directly. |
 
-### Bookstack and Booklore
+The former `INGEST_FOLDER` and `DOWNLOAD_FOLDER` variables are no longer used.
 
-| Variable | Required | Description |
+### Bookstack and Grimmory
+
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `BOOKSTACK_HOSTNAME` | Yes | Public hostname used by the Bookstack Traefik router. |
-| `BOOKSTACK_IMAGE` | No | Published Bookstack image; defaults to `ghcr.io/shiggsy365/bookstack:latest`. |
-| `BOOKLORE_HOSTNAME` | Yes | Public hostname used by the Booklore Traefik router. |
-| `BOOKLORE_PORT` | Yes | Internal Booklore HTTP port; normally `6060`. |
-| `BOOKLORE_URL` | Yes | Internal OPDS base URL; normally `http://booklore:6060/api/v1/opds`. |
-| `BOOKLORE_USER` | Yes | Username used by Bookstack to authenticate to Booklore OPDS. |
-| `BOOKLORE_PASS` | Yes | Password used by Bookstack to authenticate to Booklore OPDS. |
+| `BOOKSTACK_HOSTNAME` | Yes | Public Bookstack hostname used by Traefik. |
+| `GRIMMORY_HOSTNAME` | Yes | Public Grimmory hostname used by Traefik. |
+| `GRIMMORY_PORT` | Yes | Internal Grimmory port, normally `6060`. |
+| `GRIMMORY_URL` | Yes | OPDS base URL, normally `http://grimmory:6060/api/v1/opds`. |
+| `GRIMMORY_USER`, `GRIMMORY_PASS` | Yes | Grimmory OPDS credentials used by Bookstack. |
 
-Bookstack refuses to start if `BOOKLORE_USER` or `BOOKLORE_PASS` is empty.
+Bookstack refuses to start without both Grimmory credentials.
 
-### Shelfmark and sources
+### Shelfmark
 
-| Variable | Required | Description |
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `SHELFMARK_PORT` | Yes | Shelfmark HTTP port; normally `8084`. |
-| `SHELFMARK_URL` | Yes | Internal Shelfmark URL; normally `http://shelfmark:8084`. |
-| `AA_BASE_URL` | Service-dependent | Primary source URL passed to Shelfmark. |
-| `AA_MIRROR_URLS` | Service-dependent | Shelfmark mirror URL list. |
-| `LIBGEN_MIRROR_URLS` | Service-dependent | Shelfmark Libgen mirror URL list. |
-| `ZLIB_MIRROR_URLS` | Service-dependent | Shelfmark Z-Library mirror URL list. |
-| `USING_TOR` | Yes | Enables Shelfmark's Tor mode when `true`; otherwise `false`. |
+| `SHELFMARK_PORT` | Yes | Internal and loopback-bound Shelfmark port, normally `8084`. |
+| `SHELFMARK_URL` | Yes | Internal URL, normally `http://shelfmark:8084`. |
+| `AA_BASE_URL` | Source-dependent | Primary source URL passed to Shelfmark. |
+| `AA_MIRROR_URLS` | Source-dependent | Anna's Archive mirror list. |
+| `LIBGEN_MIRROR_URLS` | Source-dependent | Libgen mirror list. |
+| `ZLIB_MIRROR_URLS` | Source-dependent | Z-Library mirror list. |
+| `USING_TOR` | Yes | Enables Shelfmark Tor mode when `true`. |
 
-Mirror domains can change. Maintain these values according to Shelfmark's current guidance and your permitted sources.
+Maintain source URLs according to Shelfmark guidance and applicable law.
 
 ### Database
 
-| Variable | Required | Description |
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | Booklore JDBC URL; normally `jdbc:mariadb://mariadb:3306/booklore`. |
-| `DB_USER` | Yes | MariaDB application user used by Booklore. |
-| `DB_PASSWORD` | Yes | Strong password shared by MariaDB and Booklore. |
-| `MYSQL_DATABASE` | Yes | MariaDB database name; normally `booklore`. |
-| `MYSQL_ROOT_PASSWORD` | Yes | Strong MariaDB root password. |
+| `DATABASE_URL` | Yes | Grimmory JDBC URL, normally `jdbc:mariadb://mariadb:3306/grimmory`. |
+| `DB_USER` | Yes | MariaDB application user. |
+| `DB_PASSWORD` | Yes | Password shared by MariaDB and Grimmory. |
+| `MYSQL_DATABASE` | Yes | Database name, normally `grimmory`. |
+| `MYSQL_ROOT_PASSWORD` | Yes | MariaDB root password. |
 
 ### Send to Kindle
 
-| Variable | Required | Description |
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `SMTP_SERVER` | For delivery | SMTP server, such as `smtp.gmail.com`. |
-| `SMTP_PORT` | For delivery | STARTTLS SMTP port, normally `587`. |
-| `SMTP_USER` | For delivery | SMTP login and message sender address. |
-| `SMTP_PASS` | For delivery | SMTP password or provider-specific app password. |
-| `MAX_KINDLE_ATTACHMENT_MB` | No | Maximum attachment size; defaults to `25`. |
+| `SMTP_SERVER` | For delivery | SMTP host. |
+| `SMTP_PORT` | For delivery | STARTTLS port, normally `587`. |
+| `SMTP_USER`, `SMTP_PASS` | For delivery | SMTP login credentials. |
+| `MAX_KINDLE_ATTACHMENT_MB` | No | Attachment limit, default `25`. |
 
-The recipient Kindle address is not stored in `.env`. Each browser saves its chosen address in a one-year `kindle_email` cookie through **Settings**.
+The Kindle recipient is saved in a one-year browser cookie under **Settings**, not in `.env`. Add `SMTP_USER` to Amazon's approved personal-document senders.
 
-### Optional discovery integrations
+### Discovery providers
 
-| Variable | Required | Description |
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `OPENLIBRARY_CONTACT` | Recommended | Contact email included in the Open Library user agent. |
-| `GOOGLE_BOOKS_API_KEY` | No | Google Books key used only for the explicit on-demand Book Search fallback. |
-| `NYT_BOOKS_API_KEY` | No | New York Times Books API key used for bestseller pages. |
-| `HARDCOVER_API_KEY` | No | Hardcover token used for trending, genres, and new releases. |
+| `OPENLIBRARY_CONTACT` | Recommended | Contact address included in the Open Library user agent. |
+| `HARDCOVER_API_KEY` | No | Trending, popular, authors, genres, and primary title search. |
+| `NYT_BOOKS_API_KEY` | No | New York Times bestseller lists. |
+| `GOOGLE_BOOKS_API_KEY` | No | Explicit **Book not found?** fallback only. |
 
-Features backed by an unconfigured optional provider may be unavailable or fall back to another metadata source.
+Unavailable optional providers are omitted or replaced by supported fallbacks.
 
-## Initial service configuration
+## Initial service setup
 
-### Booklore
+### Grimmory
 
-1. Open `https://BOOKLORE_HOSTNAME` and complete Booklore's setup.
-2. Confirm that the library uses `/books` and that its ingestion workflow watches `/bookdrop` as appropriate for your Booklore version.
-3. Create or choose the credentials used for OPDS access.
-4. Put the same credentials in `BOOKLORE_USER` and `BOOKLORE_PASS`.
-5. Confirm that the OPDS endpoint is reachable from the Bookstack container.
+1. Open `https://GRIMMORY_HOSTNAME` and complete setup.
+2. Configure the library at `/books` and, if used, the watched ingestion folder at `/bookdrop`.
+3. Put its OPDS credentials in `GRIMMORY_USER` and `GRIMMORY_PASS`.
+4. Confirm Bookstack can reach `GRIMMORY_URL`.
 
-The important requirement is that completed acquisitions ultimately enter the library exposed through Booklore OPDS.
+### Shelfmark and optional Usenet services
 
-### Prowlarr, Shelfmark, and SABnzbd
-
-These interfaces are intentionally local-only. From your computer, create an SSH tunnel and leave it running:
+Create a local SSH tunnel when administrative access is needed:
 
 ```bash
 ssh -NT \
-  -L 9696:127.0.0.1:9696 \
   -L 8084:127.0.0.1:8084 \
+  -L 9696:127.0.0.1:9696 \
   -L 8080:127.0.0.1:8080 \
   my-vps
 ```
 
-The command appearing to “hang” is normal: `-N` opens no remote shell because the terminal is carrying the tunnels. Keep it open, or add `-f` after confirming key-based authentication works.
+Then open Shelfmark on port 8084, Prowlarr on 9696, or SABnzbd on 8080. Configure only the services you use. Container-to-container addresses use service names such as `http://prowlarr:9696` and `http://sabnzbd:8080`, never `127.0.0.1`.
 
-Open the services locally:
-
-- Prowlarr: `http://127.0.0.1:9696`
-- Shelfmark: `http://127.0.0.1:8084`
-- SABnzbd: `http://127.0.0.1:8080`
-
-Then:
-
-1. Add and test your permitted indexers in Prowlarr.
-2. Complete SABnzbd's server and category configuration if Usenet is part of the workflow.
-3. Configure Shelfmark to use the required indexers/download clients and verify its completed-download path.
-4. Submit a test acquisition and confirm that the file reaches Booklore's ingestion workflow.
-
-Container-to-container addresses use service names, not `127.0.0.1`. For example, another container reaches Prowlarr as `http://prowlarr:9696` and SABnzbd as `http://sabnzbd:8080`.
+Shelfmark and SABnzbd both write completed files to the host `BOOK_LIBRARY` path. Grimmory exposes that path as `/books`. SABnzbd uses `BOOK_INCOMPLETE` while a download is unfinished; `BOOK_INBOX` remains available for Grimmory's separate watch-folder workflow.
 
 ### Send to Kindle
 
-1. Configure valid SMTP credentials in `.env`. Gmail normally requires an app password rather than the normal account password.
-2. In Amazon, open **Manage Your Content and Devices**, then the personal document settings.
-3. Add `SMTP_USER` to the approved personal document sender list.
-4. Rebuild/restart Bookstack after changing SMTP values.
-5. Open Bookstack, select **Settings**, enter the destination Kindle email, and save it.
-6. Send a small book from **Library** as an end-to-end test.
+1. Configure SMTP values and restart Bookstack.
+2. Approve `SMTP_USER` in Amazon's personal-document settings.
+3. Save the destination Kindle address under Bookstack **Settings**.
+4. Send a small library book as an end-to-end test.
 
-Bookstack downloads the selected file from Booklore into temporary storage, enforces `MAX_KINDLE_ATTACHMENT_MB`, sends it over STARTTLS SMTP, and removes the temporary data when the request ends.
+## Application behaviour
 
-## Using Bookstack
+Library opens by default. Its views are **Recent**, **Authors**, **Series**, **All Books**, and **Search**. Authors and series use tiles; book lists use compact marketplace rows.
 
-### Library
+Store provides **Trending**, **Popular**, **Bestsellers**, **Author Search**, and **Book Search**. Hardcover supplies primary discovery, NYT supplies configured bestseller charts, and Google Books is queried only after selecting **Book not found?**. Search results are checked against the cached Grimmory catalogue.
 
-Library is the opening mode. Its navigation bar contains **Recent**, **Authors**, **Series**, **All Books**, and **Search**.
+Availability actions are:
 
-- Recent and All Books use compact marketplace listings with covers, metadata, availability, and four description lines.
-- Authors are displayed as image tiles; selecting one opens that author's books.
-- Series are displayed as tiles with the series name, three stacked covers, and author name; selecting one opens its books.
-- Selecting a book opens a detail view with up to ten description lines and **Send to Kindle** when the file is available.
+- **Available** — open details and Send to Kindle.
+- **Request needed** — search Shelfmark by ISBN, then author/title, then title.
+- **Downloading** — open the download queue.
 
-### Store
+The bottom section button opens Library, Store, Downloads, and Settings. Hierarchical views provide a back button, and listings provide first/previous/next/last controls and page numbering.
 
-Store provides **Trending**, **Popular**, **Bestsellers**, **Author Search**, and **Book Search**. Recommendation and search views support genre and publication-period filters where applicable.
+## Caching and performance
 
-Hardcover supplies trending, popular, author, and primary book-search data. Book Search displays a **Book not found?** action which queries Google Books only when selected; identical Google searches are cached for 24 hours. The New York Times API supplies bestseller charts when configured. Search results are checked against Booklore before actions are displayed.
+- Resolved metadata: 30 days.
+- Empty metadata results: 6 hours.
+- Grimmory catalogue snapshot: 5 minutes.
+- Author catalogue: 24 hours.
+- Proxied covers: 7 days.
+- Identical Google searches: 24 hours.
 
-- **Available** opens a detail page with **Send to Kindle**.
-- **Request needed** searches Shelfmark's direct-download channel by ISBN first. If no compatible release is found, **No results found?** prompts search all enabled Shelfmark release sources by author plus title and finally title only. These request searches bypass metadata providers such as Google Books.
-- **Downloading** links to the download queue.
+The SQLite cache is shared by Gunicorn workers and persists at `${BOOKSTACK_INSTALL}/bookstack/cache`. Provider failures use brief backoff and stale-cache fallback. Provider metrics are available at `/health/providers`.
 
-Shelfmark release lookups accept EPUB, MOBI, and AZW3 results. Browser and upstream search requests allow up to 120 seconds for e-reader connections and slower providers.
+Searches may run for up to 120 seconds. Responses support gzip and ETag revalidation.
 
-### Navigation
-
-The bottom bar provides the main menu, first/previous/next/last page controls, and page numbering. The menu links to **Library**, **Store**, **Downloads**, and **Settings**. Hierarchical views expose a back action through the context bar. The bottom-left button displays the current main section and opens the menu for Library, Store, Downloads, and Settings. The redundant bottom-right tile shortcut has been removed.
-
-The page requests an initial viewport scale of 150%. Browser zoom controls remain available where supported.
-
-### Downloads
-
-Choose **Downloads** to view Shelfmark's active, completed, or failed requests. A completed download may take additional time to appear in **Library** while Booklore ingests and scans it.
-
-### Settings
-
-Choose **Settings** to save the Kindle delivery address for the current browser. Clearing cookies or switching devices requires entering it again.
-
-## Metadata and caching
-
-Bookstack batches visible-page enrichment through Open Library. Google Books is used only when explicitly selected from Store Book Search.
-
-- Successful resolved metadata is cached for 30 days.
-- Empty results are cached for 6 hours before retrying.
-- The persistent SQLite cache is shared by all Gunicorn workers and coalesces identical in-flight provider requests.
-- The cache survives restarts and image rebuilds through the `/data` volume.
-
-Discovery responses use stale-cache fallback during transient provider failures, and failures are briefly cached to prevent repeated taps from hammering an unavailable service. Booklore availability checks use a five-minute local catalogue snapshot instead of one OPDS search per book. The Authors catalogue is cached for 24 hours.
-
-Text responses are compressed when the browser advertises gzip support. The main HTML uses ETag revalidation, discovery responses have short HTTP cache lifetimes, and proxied covers are cached for seven days. Gunicorn uses two threaded workers with four threads each so slow Shelfmark searches do not block ordinary navigation.
-
-Provider cache and call metrics are available without credentials at `/health/providers`.
-
-To force metadata to be fetched again, stop Bookstack and remove only the metadata cache database from `${BOOKSTACK_INSTALL}/bookstack/cache`. This is normally unnecessary.
-
-## Updating and routine operation
-
-Update Bookstack from the published image:
-
-The `main` branch publishes `ghcr.io/shiggsy365/bookstack:latest` for AMD64 and ARM64. The Compose definition retains a local `build` fallback for bootstrapping and development. Tagged releases also publish their semantic version. Make the GHCR package public after its first build, or authenticate the VPS with `docker login ghcr.io` before pulling a private package. Override `BOOKSTACK_IMAGE` if you publish under a different account.
-
+## Operations
 
 ```bash
-docker compose pull bookstack
-docker compose up -d bookstack
-```
-
-Pull all core images and recreate the stack:
-
-```bash
+# Update the core stack
 docker compose pull
 docker compose up -d
-```
 
-Useful commands:
-
-```bash
+# Inspect Bookstack
 docker compose ps
 docker compose logs -f --tail=200 bookstack
 docker compose restart bookstack
+
+# Validate configuration
+docker compose config
 ```
 
-If running the standalone file, add `--env-file apps/bookstack/.env -f apps/bookstack/compose.yaml` to these commands.
+For the optional Usenet stack, add `-f compose.yaml -f compose.usenet.yaml` to each command.
+
+The `main` branch publishes `latest` for AMD64 and ARM64. Version tags publish matching semantic-version image tags.
 
 ## Backups
 
-Back up at least:
+Back up:
 
-- `apps/bookstack/.env`, stored securely and separately from source control.
-- `${BOOKSTACK_INSTALL}/mariadb/config`, including the Booklore database.
-- `${BOOKSTACK_INSTALL}/booklore/data`.
-- `${BOOKSTACK_INSTALL}/prowlarr/config`.
+- `.env`, securely and separately from source control.
+- `${BOOKSTACK_INSTALL}/mariadb/config` with a database-aware method or while services are quiesced.
+- `${BOOKSTACK_INSTALL}/grimmory/data`.
 - `${BOOKSTACK_INSTALL}/shelfmark/config`.
-- `${BOOKSTACK_INSTALL}/sabnzbd`.
-- `BOOK_LIBRARY` and unprocessed files in `INGEST_FOLDER` or `DOWNLOAD_FOLDER`.
+- Optional `${BOOKSTACK_INSTALL}/prowlarr/config` and `${BOOKSTACK_INSTALL}/sabnzbd`.
+- `BOOK_LIBRARY`, `BOOK_INBOX`, and any important files in `BOOK_INCOMPLETE`.
 
-The metadata cache is disposable. Stop or quiesce database-writing services before a filesystem-level database backup, or use a database-aware backup method.
+The Bookstack metadata cache is disposable.
 
 ## Troubleshooting
 
-### A local admin page refuses to connect
-
-Confirm the container is running and listening on the VPS:
-
-```bash
-docker compose ps
-curl -v http://127.0.0.1:9696/
-```
-
-A `302` response from Prowlarr is healthy and redirects to its login page. If the VPS responds but your computer does not, recreate the SSH tunnel and test `curl -v http://127.0.0.1:9696/` in a second local terminal.
-
-If SSH to the raw IP times out but `ssh my-vps` works, use the alias; it may contain the correct port, user, key, or proxy settings.
-
 ### Compose reports unset variables
 
-Run Compose from the repository root, where the Bookstack include declares its environment file, or explicitly pass it:
-
-```bash
-docker compose \
-  --env-file apps/bookstack/.env \
-  -f apps/bookstack/compose.yaml \
-  config
-```
-
-Ensure every value uses `NAME=value` syntax and contains no placeholder text.
+Run commands from `apps/bookstack`, confirm `.env` exists, and use `NAME=value` syntax. Validate with `docker compose config`.
 
 ### Bookstack is unhealthy
 
@@ -454,56 +289,40 @@ docker compose exec bookstack python -c \
   "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/healthz').read().decode())"
 ```
 
-Check that Booklore and Shelfmark are running and that their internal URLs use Docker service names.
+Check Grimmory and Shelfmark health and ensure internal URLs use Docker service names.
 
-### A download is not in My Library
+### A completed download is missing from Library
 
-Check Shelfmark's completed path, Booklore's book-drop configuration, volume mappings, file ownership, and Booklore ingestion logs. Shelfmark completion means acquisition finished; it does not necessarily mean Booklore has ingested the file.
+Check `BOOK_LIBRARY` volume mappings, ownership, Grimmory scanning, and Shelfmark/SABnzbd logs. A completed acquisition may still require a Grimmory scan before it appears in OPDS.
 
 ### Send to Kindle fails
 
-Check that:
+Confirm the browser has a Kindle address saved, Amazon approves `SMTP_USER`, SMTP credentials are correct, and the file is under `MAX_KINDLE_ATTACHMENT_MB`.
 
-- A Kindle email is saved under **Settings** in the same browser.
-- `SMTP_USER` is approved by Amazon as a personal document sender.
-- SMTP credentials and the STARTTLS port are correct.
-- The file is below `MAX_KINDLE_ATTACHMENT_MB`.
-- Bookstack can download the selected file from Booklore.
+### Metadata is blank or slow
 
-Inspect Bookstack logs for the returned SMTP or delivery error.
+The first lookup may require external requests. Check `/health/providers`, container logs, API credentials, and outbound network access. Later requests should use the persistent cache.
 
-### Metadata remains blank or slow
+## Security
 
-The first lookup requires external provider requests; later requests use the persistent cache. Check Bookstack logs for Hardcover, Google Books, or Open Library errors and verify outbound network access. Shelfmark searches can remain active for up to 120 seconds; ordinary metadata and catalogue providers use shorter timeouts and bounded transient retries.
-
-## Security notes
-
-- Keep `.env` private and use restrictive file permissions.
-- Do not expose MariaDB, Prowlarr, Shelfmark, or SABnzbd directly to the internet.
-- Protect public Bookstack and Booklore routes with your Traefik authentication middleware where appropriate.
-- Rotate database, Booklore, and SMTP credentials if `.env` is disclosed.
-- Keep Docker images and the host operating system updated.
-- The Kindle destination is stored client-side in a cookie; avoid a shared browser profile if that is undesirable.
+- Keep `.env` private and mode `600`.
+- Do not expose MariaDB, Shelfmark, Prowlarr, or SABnzbd publicly.
+- Protect public routes with appropriate Traefik authentication.
+- Rotate credentials if `.env` is disclosed.
+- Keep images and the host updated.
 
 ## Development
 
-The web application uses Flask and Gunicorn. The interface intentionally avoids modern browser-only features for older e-ink devices. The default viewport scale is 150%. Preserve this compatibility when changing `templates/index.html`: prefer traditional JavaScript and broadly supported HTML/CSS, then test on a current browser and the target Kindle.
-
-Basic validation:
+The application uses Flask and Gunicorn. Preserve older e-reader compatibility when modifying `templates/index.html`: prefer traditional JavaScript and broadly supported HTML/CSS.
 
 ```bash
-python3 -m compileall -q apps/bookstack/bookstack_app apps/bookstack/app.py
-docker compose \
-  --env-file apps/bookstack/.env \
-  -f apps/bookstack/compose.yaml \
-  config
+python3 -m compileall -q app.py bookstack_app
+docker compose config
+docker compose up -d --build bookstack
 ```
 
-## License and support
+## Support
 
-No standalone licence file is currently included in this application directory. Add an explicit licence before distributing the project. Issues and feature requests can be submitted through the project repository.
-
-## Contribute
+Issues and feature requests can be submitted through this repository. Add an explicit licence before redistributing the project.
 
 [<img src="https://github.com/shiggsy365/AIOStreamsKODI/blob/main/.github/support_me_on_kofi_red.png?raw=true">](https://ko-fi.com/shiggsy365)
-

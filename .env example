@@ -14,14 +14,15 @@ BOOK_INCOMPLETE=/mnt/books/incomplete
 
 ##### - Bookstack Settings - #####
 BOOKSTACK_HOSTNAME = bookstack.example.com
-BOOKSTACK_IMAGE=ghcr.io/shiggsy365/bookstack:latest
 
-##### - Booklore Settings - #####
-BOOKLORE_PORT = 6060
-BOOKLORE_URL=http://booklore:6060/api/v1/opds
-BOOKLORE_USER=[Change this]
-BOOKLORE_PASS=[Change this]
-BOOKLORE_HOSTNAME = booklore.example.com
+##### - Grimmory Settings - #####
+GRIMMORY_PORT = 6060
+GRIMMORY_URL=http://grimmory:6060/api/v1/opds
+GRIMMORY_HOSTNAME = grimmory.example.com
+
+##Populate the below after initial setup. Go to grimmory settings, enable OPDS Server, and add the OPDS User details below.##
+GRIMMORY_USER=[Change this]
+GRIMMORY_PASS=[Change this]
 
 ##### - Shelfmark Settings - #####
 SHELFMARK_PORT = 8084
@@ -33,9 +34,9 @@ ZLIB_MIRROR_URLS=https://z-lib.sk
 USING_TOR=false
 
 ##### - MariaDB Settings (Leave Static) - #####
-DATABASE_URL=jdbc:mariadb://mariadb:3306/booklore
-DB_USER=booklore
-MYSQL_DATABASE=booklore
+DATABASE_URL=jdbc:mariadb://mariadb:3306/grimmory
+DB_USER=grimmory
+MYSQL_DATABASE=grimmory
 
 ##### - MariaDB Settings (Change These) - #####
 DB_PASSWORD=[Change this]

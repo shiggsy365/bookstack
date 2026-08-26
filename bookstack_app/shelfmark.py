@@ -3,7 +3,7 @@ import requests
 from flask import Blueprint, jsonify, request
 
 from .config import SHELFMARK_URL
-from .opds import get_cached_booklore_entries
+from .opds import get_cached_grimmory_entries
 
 bp = Blueprint('shelfmark', __name__, url_prefix='/api/shelfmark')
 
@@ -40,7 +40,7 @@ def search():
     books, seen_titles = [], set()
 
     try:
-        for entry in get_cached_booklore_entries(title or query):
+        for entry in get_cached_grimmory_entries(title or query):
             acquisition = next((link.get('href') for link in entry.get('links', []) if 'acquisition' in (link.get('rel') or '')), '')
             cover_url = next((link.get('href') for link in entry.get('links', []) if 'thumbnail' in (link.get('rel') or '') or 'image' in (link.get('rel') or '')), '')
             if not acquisition:

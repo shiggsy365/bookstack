@@ -10,10 +10,10 @@ from urllib.parse import unquote, urljoin, urlparse
 from flask import Blueprint, jsonify, request
 
 from .config import (
-    BOOKLORE_URL, MAX_KINDLE_ATTACHMENT_BYTES, MAX_KINDLE_ATTACHMENT_MB,
+    GRIMMORY_URL, MAX_KINDLE_ATTACHMENT_BYTES, MAX_KINDLE_ATTACHMENT_MB,
     SMTP_PASS, SMTP_PORT, SMTP_SERVER, SMTP_USER
 )
-from .opds import BOOKLORE_ORIGINS, booklore_headers
+from .opds import GRIMMORY_ORIGINS, grimmory_headers
 from .security import get_with_allowed_redirects
 
 bp = Blueprint('delivery', __name__, url_prefix='/api/opds')
@@ -40,12 +40,12 @@ def send_to_kindle():
     if not SMTP_USER or not SMTP_PASS:
         return jsonify({'error': 'SMTP credentials not configured in server'}), 500
     if download_url.startswith('/'):
-        download_url = urljoin(BOOKLORE_URL.rstrip('/') + '/', download_url)
+        download_url = urljoin(GRIMMORY_URL.rstrip('/') + '/', download_url)
 
     try:
         with closing(get_with_allowed_redirects(
-                download_url, allowed_origins=BOOKLORE_ORIGINS,
-                headers=booklore_headers(), timeout=30, stream=True
+                download_url, allowed_origins=GRIMMORY_ORIGINS,
+                headers=grimmory_headers(), timeout=30, stream=True
         )) as resp:
             resp.raise_for_status()
             try:

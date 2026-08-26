@@ -1,13 +1,13 @@
 services:
   bookstack:
-    image: ${BOOKSTACK_IMAGE:-ghcr.io/shiggsy365/bookstack:latest}
+    image: ghcr.io/shiggsy365/bookstack:latest
     build:
       context: .
     environment:
       - SHELFMARK_URL=${SHELFMARK_URL}
-      - BOOKLORE_URL=${BOOKLORE_URL}
-      - BOOKLORE_USER=${BOOKLORE_USER}
-      - BOOKLORE_PASS=${BOOKLORE_PASS}
+      - GRIMMORY_URL=${GRIMMORY_URL}
+      - GRIMMORY_USER=${GRIMMORY_USER}
+      - GRIMMORY_PASS=${GRIMMORY_PASS}
       - SMTP_SERVER=${SMTP_SERVER}
       - SMTP_PORT=${SMTP_PORT}
       - SMTP_USER=${SMTP_USER}
@@ -20,7 +20,7 @@ services:
     depends_on:
       shelfmark:
         condition: service_healthy
-      booklore:
+      grimmory:
         condition: service_healthy
     volumes:
       - ${BOOKSTACK_INSTALL}/bookstack/cache:/data
@@ -38,7 +38,7 @@ services:
       - "traefik.http.services.bookstack.loadbalancer.server.port=5000"
       - "traefik.http.routers.bookstack.tls.certresolver=letsencrypt"
 
-  booklore:
+  grimmory:
     image: grimmory/grimmory:latest
     environment:
       - USER_ID=${PUID}
@@ -47,27 +47,27 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - DATABASE_USERNAME=${DB_USER}
       - DATABASE_PASSWORD=${DB_PASSWORD}
-      - BOOKLORE_PORT=${BOOKLORE_PORT}
+      - SERVER_PORT=${GRIMMORY_PORT}
     depends_on:
       mariadb:
         condition: service_healthy
     volumes:
-      - ${BOOKSTACK_INSTALL}/booklore/data:/app/data
+      - ${BOOKSTACK_INSTALL}/grimmory/data:/app/data
       - ${BOOK_LIBRARY}:/books
       - ${BOOK_INBOX}:/bookdrop
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "nc", "-z", "127.0.0.1", "${BOOKLORE_PORT}" ]
+      test: [ "CMD", "nc", "-z", "127.0.0.1", "${GRIMMORY_PORT}" ]
       interval: 15s
       timeout: 5s
       retries: 20
       start_period: 60s
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.booklore.rule=Host(`${BOOKLORE_HOSTNAME?}`)"
-      - "traefik.http.routers.booklore.tls=true"
-      - "traefik.http.services.booklore.loadbalancer.server.port=${BOOKLORE_PORT}"
-      - "traefik.http.routers.booklore.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.grimmory.rule=Host(`${GRIMMORY_HOSTNAME?}`)"
+      - "traefik.http.routers.grimmory.tls=true"
+      - "traefik.http.services.grimmory.loadbalancer.server.port=${GRIMMORY_PORT}"
+      - "traefik.http.routers.grimmory.tls.certresolver=letsencrypt"
 
   mariadb:
     image: lscr.io/linuxserver/mariadb:11.4.5
